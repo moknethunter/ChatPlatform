@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ChatPlatform.csproj
+
+      - name: Build
+        run: dotnet build ChatPlatform.csproj -c Release --no-restore
+
+      - name: Run Server
+        run: |
+          ASPNETCORE_URLS=http://0.0.0.0:5000 \
+          ASPNETCORE_ENVIRONMENT=Development \
+          nohup dotnet run --project ChatPlatform.csproj -c Release --no-build > server.log 2>&1 &
+          
+      - name: Test Server
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:5000/health > /dev/null; then
+              echo "Server is healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat server.log
+          exit 1
