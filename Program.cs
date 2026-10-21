@@ -11,10 +11,13 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
+
+// تسجيل المحرك العام فقط (بدلاً من العشرات من الملفات)
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
+builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, WebhookAdapter>();
-builder.Services.AddSingleton<IIntegrationAdapter, MetaAdapter>();
+
 builder.Services.AddHttpClient();
 builder.Services.AddSignalR();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
@@ -25,51 +28,30 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ==========================================
-// 1. إدارة الإعدادات (Settings API)
+// 1. إدارة التكاملات (Connectors API)
 // ==========================================
-app.MapGet("/api/settings", () => Results.Ok(new {
-    DynamicSettings.ServerUrl,
-    DynamicSettings.WhatsappPhoneId,
-    DynamicSettings.WhatsappToken
-}));
+app.MapGet("/api/connectors", () => Results.Ok(DynamicSettings.Connectors));
 
-app.MapPost("/api/settings", (SettingsRequest req) =>
+app.MapPost("/api/connectors", (ConnectorConfig req) =>
 {
-    DynamicSettings.ServerUrl = req.ServerUrl ?? DynamicSettings.ServerUrl;
-    DynamicSettings.WhatsappPhoneId = req.WhatsappPhoneId ?? DynamicSettings.WhatsappPhoneId;
-    DynamicSettings.WhatsappToken = req.WhatsappToken ?? DynamicSettings.WhatsappToken;
-    return Results.Ok(new { message = "تم حفظ الإعدادات بنجاح" });
+    if (string.IsNullOrEmpty(req.Name) || string.IsNullOrEmpty(req.TargetUrl))
+        return Results.BadRequest("الاسم والرابط مطلوبان");
+
+    req.Id = Guid.NewGuid().ToString();
+    DynamicSettings.Connectors.Add(req);
+    return Results.Ok(new { message = "تم إضافة التكامل بنجاح", id = req.Id });
+});
+
+app.MapDelete("/api/connectors/{id}", (string id) =>
+{
+    var item = DynamicSettings.Connectors.FirstOrDefault(c => c.Id == id);
+    if (item != null) DynamicSettings.Connectors.Remove(item);
+    return Results.Ok(new { message = "تم الحذف" });
 });
 
 // ==========================================
-// 2. تسجيل الأرقام ديناميكياً (Phone Registration)
+// 2. استقبال الأحداث
 // ==========================================
-app.MapPost("/api/register-phone", (RegisterPhoneRequest req) =>
-{
-    if (string.IsNullOrEmpty(req.Name) || string.IsNullOrEmpty(req.Phone))
-        return Results.BadRequest("الاسم ورقم الهاتف مطلوبان");
-
-    DynamicSettings.RegisteredNumbers[req.Name] = req.Phone;
-    return Results.Ok(new { message = "تم تسجيل الرقم", name = req.Name });
-});
-
-app.MapGet("/api/registered-phones", () => Results.Ok(DynamicSettings.RegisteredNumbers));
-
-// ==========================================
-// 3. استقبال الأحداث (Inbound & Internal)
-// ==========================================
-app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest request, IEventBus bus) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-    if (string.IsNullOrWhiteSpace(body)) return Results.BadRequest();
-    var json = JsonDocument.Parse(body).RootElement;
-    
-    var evt = new PlatformEvent { Type = "message.created", Source = platform, Payload = json };
-    await bus.PublishAsync(evt);
-    return Results.Ok(new { status = "received", platform });
-});
-
 app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -83,17 +65,7 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
     return Results.Accepted(value: new { status = "queued", eventId = evt.Id });
 });
 
-// إدارة الويب هوك
-app.MapPost("/api/webhooks", (string name, string url) => {
-    WebhookAdapter.RegisteredWebhooks[name] = url;
-    return Results.Ok(new { message = "Webhook registered", name, url });
-});
-
 app.MapGet("/health", () => Results.Ok(new { status = "Core is running" }));
 app.MapHub<ChatHub>("/hub/chat");
 
 app.Run();
-
-// Records
-public record SettingsRequest(string? ServerUrl, string? WhatsappPhoneId, string? WhatsappToken);
-public record RegisterPhoneRequest(string Name, string Phone);
