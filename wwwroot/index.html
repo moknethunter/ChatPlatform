@@ -3,75 +3,63 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة تحكم المنصة</title>
+    <title>Chat App</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; padding: 20px; }
-        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
-        input { width: 100%; padding: 10px; margin: 5px 0; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 5px; box-sizing: border-box; }
-        button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 5px;}
-        .success { color: #4caf50; }
-        .error { color: #f44336; }
-        h3 { margin-top: 0; font-size: 16px; }
+        body { font-family: sans-serif; background: #121212; color: white; padding: 15px; }
+        #chat { height: 400px; overflow-y: auto; border: 1px solid #333; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+        .msg { padding: 8px; margin: 5px 0; background: #2d2d2d; border-radius: 6px; }
+        .input-area { display: flex; gap: 5px; flex-direction: column; }
+        input, select { padding: 10px; border-radius: 5px; border: none; width: 100%; box-sizing: border-box; margin-bottom: 5px;}
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; }
+        .nav { margin-bottom: 15px; }
     </style>
 </head>
 <body>
-    <h2>⚙️ إعدادات المنصة</h2>
-    <a href="/" style="color: #007bff; display: block; margin-bottom: 20px;">← العودة لتطبيق الشات</a>
-
-    <div class="card">
-        <h3>إعدادات واتساب (Meta)</h3>
-        <input type="text" id="phoneId" placeholder="WhatsApp Phone Number ID">
-        <input type="text" id="token" placeholder="Access Token">
-        <input type="text" id="serverUrl" placeholder="Server URL (مثال: https://myapp.com)">
-        <button onclick="saveSettings()">حفظ الإعدادات</button>
-        <p id="saveStatus"></p>
+    <div class="nav">
+        <a href="/admin.html" style="color: #007bff; text-decoration: none;">⚙️ لوحة التحكم</a>
+    </div>
+    
+    <div id="chat"></div>
+    
+    <div class="input-area">
+        <input type="text" id="recipient" placeholder="اسم المستلم (المسجل في لوحة التحكم)">
+        <input type="text" id="msgInput" placeholder="اكتب رسالة واتساب...">
+        <button onclick="sendMsg()">إرسال إلى واتساب</button>
     </div>
 
-    <div class="card">
-        <h3>تسجيل رقم جديد</h3>
-        <input type="text" id="regName" placeholder="الاسم (مثال: أحمد)">
-        <input type="text" id="regPhone" placeholder="رقم الهاتف مع كود الدولة (مثال: 966500000000)">
-        <button onclick="registerPhone()">تسجيل الرقم</button>
-        <p id="regStatus"></p>
-    </div>
-
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
     <script>
-        // تحميل الإعدادات الحالية
-        fetch('/api/settings').then(r => r.json()).then(data => {
-            document.getElementById('phoneId').value = data.whatsappPhoneId || '';
-            document.getElementById('token').value = data.whatsappToken || '';
-            document.getElementById('serverUrl').value = data.serverUrl || '';
+        const chat = document.getElementById('chat');
+        const conn = new signalR.HubConnectionBuilder().withUrl("/hub/chat").withAutomaticReconnect().build();
+
+        conn.on("message.created", (evt) => {
+            const div = document.createElement('div');
+            div.className = 'msg';
+            div.textContent = evt.payload.Text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
         });
 
-        function saveSettings() {
-            const data = {
-                whatsappPhoneId: document.getElementById('phoneId').value,
-                whatsappToken: document.getElementById('token').value,
-                serverUrl: document.getElementById('serverUrl').value
-            };
-            fetch('/api/settings', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(() => {
-                document.getElementById('saveStatus').textContent = '✅ تم الحفظ!';
-                document.getElementById('saveStatus').className = 'success';
-            });
-        }
+        conn.start().then(() => conn.invoke("Join", "general"));
 
-        function registerPhone() {
-            const data = {
-                name: document.getElementById('regName').value,
-                phone: document.getElementById('regPhone').value
-            };
-            fetch('/api/register-phone', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(r => r.json()).then(res => {
-                document.getElementById('regStatus').textContent = '✅ ' + res.message;
-                document.getElementById('regStatus').className = 'success';
-                document.getElementById('regName').value = '';
-                document.getElementById('regPhone').value = '';
-            });
+        function sendMsg() {
+            const recipient = document.getElementById('recipient').value;
+            const text = document.getElementById('msgInput').value;
+            if (text && recipient) {
+                // إرسال الحدث مع اسم المستلم
+                fetch('/api/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        type: "message.created",
+                        source: "chat-app",
+                        data: { Text: text, Recipient: recipient }
+                    })
+                });
+                document.getElementById('msgInput').value = '';
+            } else {
+                alert("الرجاء كتابة الرسالة واسم المستلم");
+            }
         }
     </script>
 </body>
