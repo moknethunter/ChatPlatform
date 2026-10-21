@@ -23,12 +23,11 @@ public sealed class CoreEngine : BackgroundService
 
         await foreach (var evt in _bus.SubscribeAsync(ct))
         {
-            // توزيع الحدث على كل التكاملات المتاحة
             foreach (var adapter in _adapters)
             {
                 try
                 {
-                    _ = Task.Run(() => adapter.HandleEventAsync(evt, ct), ct); // عدم حظر المحرك
+                    _ = Task.Run(() => adapter.HandleEventAsync(evt, ct), ct);
                 }
                 catch (Exception ex)
                 {
