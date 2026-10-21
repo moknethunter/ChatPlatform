@@ -3,53 +3,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat App</title>
+    <title>لوحة تحكم المنصة</title>
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; padding: 15px; }
-        #chat { height: 400px; overflow-y: auto; border: 1px solid #333; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
-        .msg { padding: 8px; margin: 5px 0; background: #2d2d2d; border-radius: 6px; }
-        .event { font-size: 12px; color: #888; text-align: center; }
-        .input-area { display: flex; gap: 5px; }
-        input { flex: 1; padding: 10px; border-radius: 5px; border: none; }
-        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; }
+        body { font-family: sans-serif; background: #121212; color: white; padding: 20px; }
+        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
+        input { width: 100%; padding: 10px; margin: 5px 0; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 5px; box-sizing: border-box; }
+        button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 5px;}
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+        h3 { margin-top: 0; font-size: 16px; }
     </style>
 </head>
 <body>
-    <h3>تطبيق الشات (يعمل عبر النواة)</h3>
-    <div id="chat"></div>
-    <div class="input-area">
-        <input type="text" id="msgInput" placeholder="اكتب رسالة...">
-        <button onclick="sendMsg()">إرسال</button>
+    <h2>⚙️ إعدادات المنصة</h2>
+    <a href="/" style="color: #007bff; display: block; margin-bottom: 20px;">← العودة لتطبيق الشات</a>
+
+    <div class="card">
+        <h3>إعدادات واتساب (Meta)</h3>
+        <input type="text" id="phoneId" placeholder="WhatsApp Phone Number ID">
+        <input type="text" id="token" placeholder="Access Token">
+        <input type="text" id="serverUrl" placeholder="Server URL (مثال: https://myapp.com)">
+        <button onclick="saveSettings()">حفظ الإعدادات</button>
+        <p id="saveStatus"></p>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+    <div class="card">
+        <h3>تسجيل رقم جديد</h3>
+        <input type="text" id="regName" placeholder="الاسم (مثال: أحمد)">
+        <input type="text" id="regPhone" placeholder="رقم الهاتف مع كود الدولة (مثال: 966500000000)">
+        <button onclick="registerPhone()">تسجيل الرقم</button>
+        <p id="regStatus"></p>
+    </div>
+
     <script>
-        const chat = document.getElementById('chat');
-        const conn = new signalR.HubConnectionBuilder().withUrl("/hub/chat").withAutomaticReconnect().build();
-
-        conn.on("message.created", (evt) => {
-            const div = document.createElement('div');
-            div.className = 'msg';
-            div.textContent = evt.payload.Text;
-            chat.appendChild(div);
-            chat.scrollTop = chat.scrollHeight;
+        // تحميل الإعدادات الحالية
+        fetch('/api/settings').then(r => r.json()).then(data => {
+            document.getElementById('phoneId').value = data.whatsappPhoneId || '';
+            document.getElementById('token').value = data.whatsappToken || '';
+            document.getElementById('serverUrl').value = data.serverUrl || '';
         });
 
-        conn.on("platform.event", (evt) => {
-            const div = document.createElement('div');
-            div.className = 'event';
-            div.textContent = `⚡ حدث خارجي: ${evt.type}`;
-            chat.appendChild(div);
-        });
+        function saveSettings() {
+            const data = {
+                whatsappPhoneId: document.getElementById('phoneId').value,
+                whatsappToken: document.getElementById('token').value,
+                serverUrl: document.getElementById('serverUrl').value
+            };
+            fetch('/api/settings', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            }).then(() => {
+                document.getElementById('saveStatus').textContent = '✅ تم الحفظ!';
+                document.getElementById('saveStatus').className = 'success';
+            });
+        }
 
-        conn.start().then(() => conn.invoke("Join", "general"));
-
-        function sendMsg() {
-            const input = document.getElementById('msgInput');
-            if (input.value) {
-                conn.invoke("Send", "general", input.value);
-                input.value = '';
-            }
+        function registerPhone() {
+            const data = {
+                name: document.getElementById('regName').value,
+                phone: document.getElementById('regPhone').value
+            };
+            fetch('/api/register-phone', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            }).then(r => r.json()).then(res => {
+                document.getElementById('regStatus').textContent = '✅ ' + res.message;
+                document.getElementById('regStatus').className = 'success';
+                document.getElementById('regName').value = '';
+                document.getElementById('regPhone').value = '';
+            });
         }
     </script>
 </body>
