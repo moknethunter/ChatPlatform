@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat App</title>
+    <style>
+        body { font-family: sans-serif; background: #121212; color: white; padding: 15px; }
+        #chat { height: 400px; overflow-y: auto; border: 1px solid #333; padding: 10px; border-radius: 8px; margin-bottom: 10px; }
+        .msg { padding: 8px; margin: 5px 0; background: #2d2d2d; border-radius: 6px; }
+        .event { font-size: 12px; color: #888; text-align: center; }
+        .input-area { display: flex; gap: 5px; }
+        input { flex: 1; padding: 10px; border-radius: 5px; border: none; }
+        button { padding: 10px 15px; background: #007bff; color: white; border: none; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h3>تطبيق الشات (يعمل عبر النواة)</h3>
+    <div id="chat"></div>
+    <div class="input-area">
+        <input type="text" id="msgInput" placeholder="اكتب رسالة...">
+        <button onclick="sendMsg()">إرسال</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+    <script>
+        const chat = document.getElementById('chat');
+        const conn = new signalR.HubConnectionBuilder().withUrl("/hub/chat").withAutomaticReconnect().build();
+
+        conn.on("message.created", (evt) => {
+            const div = document.createElement('div');
+            div.className = 'msg';
+            div.textContent = evt.payload.Text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        });
+
+        conn.on("platform.event", (evt) => {
+            const div = document.createElement('div');
+            div.className = 'event';
+            div.textContent = `⚡ حدث خارجي: ${evt.type}`;
+            chat.appendChild(div);
+        });
+
+        conn.start().then(() => conn.invoke("Join", "general"));
+
+        function sendMsg() {
+            const input = document.getElementById('msgInput');
+            if (input.value) {
+                conn.invoke("Send", "general", input.value);
+                input.value = '';
+            }
+        }
+    </script>
+</body>
+</html>
