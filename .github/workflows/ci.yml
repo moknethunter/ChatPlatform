@@ -31,4 +31,5 @@ jobs:
             fi
             sleep 2
           done
+          cat server.log
           exit 1
