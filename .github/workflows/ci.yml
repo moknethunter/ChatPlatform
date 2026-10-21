@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore ChatPlatform.csproj
+
+      - name: Build
+        run: dotnet build ChatPlatform.csproj -c Release --no-restore
+
+      - name: Run server in background
+        run: |
+          ASPNETCORE_URLS=http://0.0.0.0:5000 \
+          ASPNETCORE_ENVIRONMENT=Development \
+          nohup dotnet run --project ChatPlatform.csproj --no-build -c Release > server.log 2>&1 &
+          echo $! > server.pid
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:5000/health > /dev/null; then
+              echo "healthy"; exit 0
+            fi
+            echo "waiting ($i/30)"; sleep 2
+          done
+          cat server.log; exit 1
+
+      - name: Smoke test
+        run: |
+          curl -sf http://localhost:5000/health
+          curl -sf http://localhost:5000/api/subscriptions
+          curl -sf -X POST http://localhost:5000/api/events \
+            -H "Content-Type: application/json" \
+            -d '{"type":"custom.event","source":"ci","data":{"hello":"world"}}'
+
+      - name: Show server log
+        if: always()
+        run: tail -n 100 server.log || true
