@@ -1,38 +1,15 @@
-using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
-using System.Threading.Channels;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 
-namespace ChatPlatform.Infrastructure.Messaging;
+namespace ChatPlatform.Infrastructure.Adapters;
 
-public sealed class InMemoryEventBus : IEventBus
+public sealed class ConsoleAdapter : IIntegrationAdapter
 {
-    private readonly ConcurrentDictionary<Guid, Channel<PlatformEvent>> _subscribers = new();
+    public string Name => "ConsoleLogger";
 
-    public async ValueTask PublishAsync(PlatformEvent evt, CancellationToken ct = default)
+    public Task HandleEventAsync(PlatformEvent evt, CancellationToken ct)
     {
-        foreach (var ch in _subscribers.Values)
-        {
-            try { await ch.Writer.WriteAsync(evt, ct); }
-            catch (ChannelClosedException) { }
-        }
-    }
-
-    public async IAsyncEnumerable<PlatformEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken ct)
-    {
-        var id = Guid.NewGuid();
-        var ch = Channel.CreateUnbounded<PlatformEvent>(new UnboundedChannelOptions { SingleReader = true });
-        _subscribers[id] = ch;
-        try
-        {
-            await foreach (var evt in ch.Reader.ReadAllAsync(ct))
-                yield return evt;
-        }
-        finally
-        {
-            _subscribers.TryRemove(id, out _);
-            ch.Writer.TryComplete();
-        }
+        Console.WriteLine($"[ADAPTER] Event: {evt.Type} from {evt.Source} | Payload: {evt.Payload}");
+        return Task.CompletedTask;
     }
 }
