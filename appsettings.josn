@@ -2,12 +2,8 @@
   "Logging": {
     "LogLevel": {
       "Default": "Information",
-      "Microsoft.AspNetCore": "Warning",
-      "Microsoft.EntityFrameworkCore": "Warning"
+      "Microsoft.AspNetCore": "Warning"
     }
   },
-  "AllowedHosts": "*",
-  "ConnectionStrings": {
-    "Default": "Data Source=chatplatform.db"
-  }
+  "AllowedHosts": "*"
 }
