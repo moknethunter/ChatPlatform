@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChatPlatform App</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #121212; color: white; margin: 0; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .status { padding: 8px; border-radius: 6px; background: #333; text-align: center; margin-bottom: 15px; font-size: 14px; }
+        .online { background: #1b5e20; }
+        .offline { background: #b71c1c; }
+        #chat { height: 400px; overflow-y: auto; border: 1px solid #333; padding: 10px; border-radius: 8px; margin-bottom: 10px; background: #1e1e1e; }
+        .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; background: #2d2d2d; }
+        .event { font-size: 12px; color: #888; text-align: center; margin: 5px 0; }
+        .input-area { display: flex; gap: 8px; }
+        input { flex: 1; padding: 12px; border-radius: 6px; border: 1px solid #444; background: #2d2d2d; color: white; }
+        button { padding: 12px 20px; background: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>تطبيق الشات</h2>
+        <div id="status" class="status">جاري الاتصال بالسيرفر...</div>
+        <div id="chat"></div>
+        <div class="input-area">
+            <input type="text" id="msgInput" placeholder="اكتب رسالة هنا..." onkeypress="if(event.key==='Enter') sendMessage()">
+            <button onclick="sendMessage()">إرسال</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@microsoft/signalr@8.0.7/dist/browser/signalr.min.js"></script>
+    <script>
+        const statusDiv = document.getElementById('status');
+        const chatDiv = document.getElementById('chat');
+        const input = document.getElementById('msgInput');
+
+        // الاتصال بالسيرفر (SignalR)
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/hub/chat")
+            .withAutomaticReconnect()
+            .build();
+
+        // استقبال الرسائل
+        connection.on("message.created", (evt) => {
+            addMessage(`💬 رسالة: ${evt.payload.Text}`, "msg");
+        });
+
+        // استقبال أي أحداث أخرى من المنصة
+        connection.on("platform.event", (evt) => {
+            addMessage(`⚡ حدث خارجي: ${evt.type}`, "event");
+        });
+
+        // تحديث الحالة عند الاتصال
+        connection.onreconnecting(() => {
+            statusDiv.textContent = "جاري إعادة الاتصال...";
+            statusDiv.className = "status offline";
+        });
+
+        connection.onreconnected(() => {
+            statusDiv.textContent = "متصل بالسيرفر ✅";
+            statusDiv.className = "status online";
+            connection.invoke("Join", "general"); // الانضمام للقناة العامة
+        });
+
+        // بدء الاتصال
+        connection.start().then(() => {
+            statusDiv.textContent = "متصل بالسيرفر ✅";
+            statusDiv.className = "status online";
+            connection.invoke("Join", "general");
+        }).catch(err => {
+            statusDiv.textContent = "فشل الاتصال ❌";
+            statusDiv.className = "status offline";
+            console.error(err);
+        });
+
+        function sendMessage() {
+            const text = input.value.trim();
+            if (text && connection.state === signalR.HubConnectionState.Connected) {
+                connection.invoke("Send", "general", text).catch(console.error);
+                input.value = '';
+            }
+        }
+
+        function addMessage(text, className) {
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = text;
+            chatDiv.appendChild(div);
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+        }
+    </script>
+</body>
+</html>
