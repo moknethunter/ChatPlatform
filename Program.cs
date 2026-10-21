@@ -7,16 +7,12 @@ using ChatPlatform.Infrastructure.Messaging;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// تسجيل النواة
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
-
-// تسجيل التكاملات (لإضافة تكامل جديد، أضف سطراً هنا فقط)
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 
 var app = builder.Build();
 
-// نقطة نهاية لاستقبال الأحداث من أي مصدر خارجي (سيرفر آخر، منصة أخرى، إلخ)
 app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -25,8 +21,6 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
     if (string.IsNullOrWhiteSpace(body)) return Results.BadRequest("Empty payload");
 
     var json = JsonDocument.Parse(body).RootElement;
-    
-    // افترض أن المصدر يرسل JSON يحتوي على type و data
     var eventType = json.TryGetProperty("type", out var t) ? t.GetString() : "unknown.event";
     
     var evt = new PlatformEvent
@@ -37,7 +31,6 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
     };
 
     await bus.PublishAsync(evt);
-    
     return Results.Accepted(value: new { status = "queued", eventId = evt.Id });
 });
 
