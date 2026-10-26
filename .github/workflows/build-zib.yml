@@ -1,0 +1,38 @@
+name: Build and Package .NET ZIP
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: # يسمح لك بتشغيله يدوياً بضغطة زر من تبويب Actions
+
+jobs:
+  build-and-package:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore ChatPlatform.csproj
+
+      - name: Publish (Release)
+        run: dotnet publish ChatPlatform.csproj -c Release -o ./publish
+
+      - name: Create ZIP Archive
+        run: |
+          cd ./publish
+          # ضغط كل الملفات داخل مجلد publish (وليس المجلد نفسه)
+          zip -r ../ChatPlatform-Deploy.zip .
+
+      - name: Upload ZIP Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChatPlatform-Build
+          path: ChatPlatform-Deploy.zip
+          retention-days: 7
