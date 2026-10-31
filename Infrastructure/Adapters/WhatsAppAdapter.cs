@@ -1,55 +1,75 @@
-using System.Net.Http.Json;
 using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace ChatPlatform.Infrastructure.Adapters;
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  WhatsAppAdapter — يخدم الإرسال والاستقبال عبر Cloud API
+// ═══════════════════════════════════════════════════════════════════════════
 public class WhatsAppAdapter : IIntegrationAdapter
 {
-    public const string InboundType  = "whatsapp.inbound";
+    public const string InboundType = "whatsapp.inbound";
     public const string OutboundType = "whatsapp.send";
 
     public string Name => "whatsapp";
 
-    private readonly IHttpClientFactory      _http;
-    private readonly IConfiguration          _cfg;
+    private readonly IHttpClientFactory _http;
+    private readonly IConfiguration _cfg;
     private readonly ILogger<WhatsAppAdapter> _log;
 
     public WhatsAppAdapter(IHttpClientFactory http, IConfiguration cfg, ILogger<WhatsAppAdapter> log)
     {
         _http = http;
-        _cfg  = cfg;
-        _log  = log;
+        _cfg = cfg;
+        _log = log;
     }
 
     public async Task HandleEventAsync(PlatformEvent evt, CancellationToken ct)
     {
-        // (1) وارد → رد تلقائي عبر نفس القناة (يثبت أن المنصة كاملة تعمل)
+        // 1) تجاهل إعلانات المنصة
+        if (evt.Source?.StartsWith("platform.adapters", StringComparison.OrdinalIgnoreCase) == true)
+            return;
+
+        // 2) استقبال رسالة واردة ← وإرسال رد تلقائي
         if (string.Equals(evt.Type, InboundType, StringComparison.OrdinalIgnoreCase))
         {
-            if (evt.Payload.TryGetProperty("from", out var f) &&
-                evt.Payload.TryGetProperty("text", out var t))
-                await SendAsync(f.GetString()!, $"👋 وصلني: «{t.GetString()}»", ct);
+            var from = Get(evt, "from");
+            var text = Get(evt, "text");
+            if (from is null || text is null) return;
+
+            await SendMetaMessageAsync(from, $"أهلاً بك! وصلتني رسالتك: «{text}»", ct);
             return;
         }
 
-        // (2) صادر → يُرسَل إلى واتساب (يُطلَق عبر POST /api/events)
+        // 3) إرسال رسالة صادرة (عبر /api/events)
         if (string.Equals(evt.Type, OutboundType, StringComparison.OrdinalIgnoreCase))
         {
-            if (evt.Payload.TryGetProperty("to", out var to) &&
-                evt.Payload.TryGetProperty("text", out var txt))
-                await SendAsync(to.GetString()!, txt.GetString()!, ct);
+            var to = Get(evt, "to");
+            var text = Get(evt, "text");
+            if (to is null || text is null) return;
+
+            await SendMetaMessageAsync(to, text, ct);
         }
     }
 
-    private async Task SendAsync(string to, string text, CancellationToken ct)
+    private static string? Get(PlatformEvent evt, string key)
+        => evt.Payload.TryGetProperty(key, out var v) ? v.GetString() : null;
+
+    private async Task SendMetaMessageAsync(string to, string text, CancellationToken ct)
     {
-        var phoneId = _cfg["WhatsApp:PhoneNumberId"];
-        var token   = _cfg["WhatsApp:AccessToken"];
+        var phoneId = _cfg["WhatsApp:PhoneId"];
+        var token = _cfg["WhatsApp:Token"];
+
         if (string.IsNullOrEmpty(phoneId) || string.IsNullOrEmpty(token))
         {
-            _log.LogWarning("WhatsApp:PhoneNumberId/AccessToken غير مضبوطة");
+            _log.LogWarning("WhatsApp configuration missing (PhoneId or Token).");
             return;
         }
 
@@ -59,61 +79,68 @@ public class WhatsAppAdapter : IIntegrationAdapter
             Content = JsonContent.Create(new
             {
                 messaging_product = "whatsapp",
-                to,
+                to = to,
                 type = "text",
                 text = new { body = text }
             })
         };
         req.Headers.Authorization = new("Bearer", token);
 
-        var res = await client.SendAsync(req, ct);
-        if (!res.IsSuccessStatusCode)
-            _log.LogError("WhatsApp send failed {Status}: {Body}",
-                res.StatusCode, await res.Content.ReadAsStringAsync(ct));
-        else
-            _log.LogInformation("WhatsApp → {To}: {Text}", to, text);
+        try
+        {
+            var res = await client.SendAsync(req, ct);
+            var body = await res.Content.ReadAsStringAsync(ct);
+            if (res.IsSuccessStatusCode)
+                _log.LogInformation("WhatsApp sent to {To}", to);
+            else
+                _log.LogWarning("WhatsApp send failed: {Body}", body);
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "WhatsApp send exception");
+        }
     }
 }
 
-// ---- سطران في Program.cs، لكن هنا مجمّعة للراحة ----
-public static class WhatsAppAdapterExtensions
+// ═══════════════════════════════════════════════════════════════════════════
+//  ربط الـ Adapter بالمنصة + الـ Webhook
+// ═══════════════════════════════════════════════════════════════════════════
+public static class WhatsAppExtensions
 {
     public static IServiceCollection AddWhatsAppAdapter(this IServiceCollection s)
     {
-        s.AddHttpClient("whatsapp", c =>
-            c.BaseAddress = new Uri("https://graph.facebook.com/v20.0/"));
+        s.AddHttpClient("whatsapp", c => c.BaseAddress = new Uri("https://graph.facebook.com/v21.0/"));
         s.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
         return s;
     }
 
-    public static IEndpointRouteBuilder MapWhatsAppWebhook(
-        this IEndpointRouteBuilder app, IConfiguration cfg)
+    public static IEndpointRouteBuilder MapWhatsAppWebhook(this IEndpointRouteBuilder app, IConfiguration cfg)
     {
-        var verify = cfg["WhatsApp:VerifyToken"] ?? "";
+        var verifyToken = cfg["WhatsApp:VerifyToken"];
 
-        // مصادقة Meta
-        app.MapGet("/api/inbound/whatsapp", (HttpContext ctx) =>
+        // 1) التحقق (Meta GET)
+        app.MapGet("/webhook", (HttpContext ctx) =>
         {
-            if (ctx.Request.Query["hub.mode"] == "subscribe" &&
-                ctx.Request.Query["hub.verify_token"] == verify)
-                return Results.Text(ctx.Request.Query["hub.challenge"].ToString(), "text/plain");
+            var mode = ctx.Request.Query["hub.mode"];
+            var token = ctx.Request.Query["hub.verify_token"];
+            var challenge = ctx.Request.Query["hub.challenge"];
+
+            if (mode == "subscribe" && token == verifyToken)
+                return Results.Text(challenge.ToString(), "text/plain");
+
             return Results.Unauthorized();
         });
 
-        // استقبال الرسائل
-        app.MapPost("/api/inbound/whatsapp", async (
-            HttpContext ctx, IEventBus bus, IConfiguration cfg,
-            ILoggerFactory lf, CancellationToken ct) =>
+        // 2) الاستقبال (Meta POST)
+        app.MapPost("/webhook", async (HttpContext ctx, IEventBus bus, ILoggerFactory lf, CancellationToken ct) =>
         {
             var log = lf.CreateLogger("WhatsApp.Webhook");
-            var phoneId = cfg["WhatsApp:PhoneNumberId"];
-            if (string.IsNullOrEmpty(phoneId)) return Results.Ok();
-
             try
             {
                 using var doc = await JsonDocument.ParseAsync(ctx.Request.Body, cancellationToken: ct);
-                if (!doc.RootElement.TryGetProperty("entry", out var entries))
-                    return Results.Ok();
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("entry", out var entries)) return Results.Ok();
 
                 foreach (var entry in entries.EnumerateArray())
                 {
@@ -121,27 +148,21 @@ public static class WhatsAppAdapterExtensions
                     foreach (var change in changes.EnumerateArray())
                     {
                         if (!change.TryGetProperty("value", out var value)) continue;
-                        if (!value.TryGetProperty("metadata", out var meta)) continue;
-                        if (meta.GetProperty("phone_number_id").GetString() != phoneId) continue;
                         if (!value.TryGetProperty("messages", out var msgs)) continue;
 
                         foreach (var m in msgs.EnumerateArray())
                         {
-                            if (!m.TryGetProperty("text", out var t) ||
-                                !t.TryGetProperty("body", out var body)) continue;
+                            if (!m.TryGetProperty("text", out var t) || !t.TryGetProperty("body", out var body)) continue;
 
                             var from = m.GetProperty("from").GetString();
                             var text = body.GetString();
 
-                            // 🎯 هنا يدخل الحدث إلى CoreEngine ويُوزَّع على كل الـ adapters
+                            // 🎯 النشر على ناقل الأحداث (CoreEngine سيوزعها على كل الـ Adapters)
                             await bus.PublishAsync(new PlatformEvent
                             {
-                                Type   = WhatsAppAdapter.InboundType,
+                                Type = WhatsAppAdapter.InboundType,
                                 Source = "whatsapp",
-                                Payload = JsonSerializer.SerializeToElement(new
-                                {
-                                    from, text, phoneNumberId = phoneId
-                                })
+                                Payload = JsonSerializer.SerializeToElement(new { from, text })
                             }, ct);
 
                             log.LogInformation("WhatsApp inbound from {From}: {Text}", from, text);
@@ -152,8 +173,8 @@ public static class WhatsAppAdapterExtensions
             }
             catch (Exception ex)
             {
-                log.LogError(ex, "WhatsApp webhook parse failed");
-                return Results.Ok(); // Meta تعيد المحاولة عند 5xx
+                log.LogError(ex, "Webhook parse failed");
+                return Results.Ok(); // نرجع Ok دائماً لـ Meta حتى لا تعيد المحاولة
             }
         });
 
