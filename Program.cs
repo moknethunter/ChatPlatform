@@ -33,7 +33,7 @@ builder.Services.AddHostedService<CoreEngine>();
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-
+builder.Services.AddWhatsAppAdapter();
 // ==========================================
 // 4. شبكة الإنترنت والمرونة (Polly)
 // ==========================================
