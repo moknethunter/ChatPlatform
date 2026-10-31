@@ -21,9 +21,6 @@ builder.Services.AddDbContext<PlatformDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=chatplatform.db"));
 builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection("EngineSettings"));
 
-// >>> الإضافة 1: نقرأ إعدادات البنوك من appsettings.json <<<
-builder.Services.Configure<List<BankConfig>>(builder.Configuration.GetSection("BankingSystem:Banks"));
-
 // ==========================================
 // 2. النواة والمحرك
 // ==========================================
@@ -31,15 +28,11 @@ builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
 
 // ==========================================
-// 3. التكاملات (المحولات) - حقك + حقي
+// 3. التكاملات (المحولات)
 // ==========================================
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-
-// >>> الإضافة 2: الادابتر العام للبنوك + ادابتر التحقق من الواتساب <<<
-builder.Services.AddSingleton<IIntegrationAdapter, UniversalBankAdapter>();
-builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppVerificationAdapter>();
 
 // ==========================================
 // 4. شبكة الإنترنت والمرونة (Polly)
@@ -47,9 +40,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppVerificationAdapter>(
 builder.Services.AddHttpClient("ResilientClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
-        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
-builder.Services.AddHttpClient("WhatsAppClient"); // للتحقق من الواتساب
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))); // Retry 3 مرات
 
 // ==========================================
 // 5. الويب و SignalR
@@ -59,17 +50,6 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.SetIsOriginAllowed(_ => 
 
 var app = builder.Build();
 
-// >>> الإضافة 3: تحميل البنوك من JSON وتسجيلها <<<
-var bankConfigs = app.Configuration.GetSection("BankingSystem:Banks").Get<List<BankConfig>>();
-if (bankConfigs != null)
-{
-    foreach (var b in bankConfigs.Where(x => x.Enabled))
-    {
-        BankRegistry.RegisterBank(b);
-        Console.WriteLine($"[Bank Loaded] {b.BankName} - {b.DisplayName}");
-    }
-}
-
 // إنشاء قاعدة البيانات تلقائياً
 using (var scope = app.Services.CreateScope())
 {
@@ -78,10 +58,10 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ==========================================
-// 6. Middlewares - حقك كما هو
+// 6. Middlewares
 // ==========================================
-app.UseMiddleware<GlobalExceptionMiddleware>();
-app.UseMiddleware<ApiKeyMiddleware>();
+app.UseMiddleware<GlobalExceptionMiddleware>(); // لالتقاط الأخطاء
+app.UseMiddleware<ApiKeyMiddleware>();          // للحماية
 app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
@@ -93,13 +73,12 @@ app.MapGet("/api/platform-info", (HttpRequest request) => {
     var baseUrl = $"{request.Scheme}://{request.Host}";
     return Results.Ok(new { 
         status = "Online",
-        banksLoaded = BankRegistry.Banks.Count,
         whatsappWebhook = $"{baseUrl}/api/inbound/whatsapp",
-        telegramWebhook = $"{baseUrl}/api/inbound/telegram",
-        kuraimiWebhook = $"{baseUrl}/api/inbound/kuraimi"
+        telegramWebhook = $"{baseUrl}/api/inbound/telegram"
     });
 });
 
+// إدارة التكاملات (محمية بـ API Key)
 var connectorsGroup = app.MapGroup("/api/connectors");
 connectorsGroup.MapGet("/", async (PlatformDbContext db) => 
     Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
@@ -112,7 +91,7 @@ connectorsGroup.MapPost("/", async (ChatPlatform.Infrastructure.Data.Entities.Co
     return Results.Ok(new { message = "تم الحفظ بنجاح" });
 });
 
-// استقبال الويب هوك
+// استقبال الويب هوك من المنصات الخارجية
 app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -120,9 +99,10 @@ app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest reque
     var json = JsonDocument.Parse(body).RootElement;
     var evt = new PlatformEvent { Type = "message.created", Source = platform, Payload = json };
     await bus.PublishAsync(evt);
-    return Results.Ok(new { status = "received", platform });
+    return Results.Ok(new { status = "received" });
 });
 
+// استقبال الأحداث من الواجهة
 app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -134,7 +114,7 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
     return Results.Accepted();
 });
 
-app.MapGet("/health", () => Results.Ok(new { status = "Core is running", banks = BankRegistry.Banks.Keys }));
+app.MapGet("/health", () => Results.Ok(new { status = "Core is running" }));
 app.MapHub<ChatHub>("/hub/chat");
 
 app.Run();
