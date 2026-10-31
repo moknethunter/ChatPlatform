@@ -1,0 +1,19 @@
+name: Build ChatPlatform Docker
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Docker Image
+        run: |
+          docker build -t chatplatform:latest .
+      
+      - name: Test Run
+        run: |
+          docker run -d -p 8080:8080 chatplatform:latest
