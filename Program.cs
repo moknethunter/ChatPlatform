@@ -33,20 +33,18 @@ builder.Services.AddHostedService<CoreEngine>();
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-// احذف هذا السطر إن وجد
-app.MapWhatsAppWebhook(builder.Configuration); 
-builder.Services.AddWhatsAppAdapter();
-// احذف هذا السطر إن وجد
-app.MapWhatsAppWebhook(builder.Configuration); 
+builder.Services.AddWhatsAppAdapter(); // تم إضافة الواتساب هنا
+
+// تفعيل الكنترولرات (مهم جداً ليعمل WebhookController)
 builder.Services.AddControllers();
-app.MapControllers();
+
 // ==========================================
 // 4. شبكة الإنترنت والمرونة (Polly)
 // ==========================================
 builder.Services.AddHttpClient("ResilientClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
-        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))); // Retry 3 مرات
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 // ==========================================
 // 5. الويب و SignalR
@@ -54,6 +52,9 @@ builder.Services.AddHttpClient("ResilientClient")
 builder.Services.AddSignalR();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
+// ═══════════════════════════════════════════════════════════════
+// 6. بناء التطبيق (يجب أن يكون هذا السطر قبل أي أمر يبدأ بـ app.)
+// ═══════════════════════════════════════════════════════════════
 var app = builder.Build();
 
 // إنشاء قاعدة البيانات تلقائياً
@@ -64,27 +65,26 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ==========================================
-// 6. Middlewares
+// 7. Middlewares
 // ==========================================
-app.UseMiddleware<GlobalExceptionMiddleware>(); // لالتقاط الأخطاء
-app.UseMiddleware<ApiKeyMiddleware>();          // للحماية
+app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware<ApiKeyMiddleware>();
 app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ==========================================
-// 7. المسارات (Endpoints)
+// 8. المسارات (Endpoints)
 // ==========================================
 app.MapGet("/api/platform-info", (HttpRequest request) => {
     var baseUrl = $"{request.Scheme}://{request.Host}";
     return Results.Ok(new { 
         status = "Online",
-        whatsappWebhook = $"{baseUrl}/api/inbound/whatsapp",
+        whatsappWebhook = $"{baseUrl}/webhook", // تم التعديل ليطابق الكنترولر
         telegramWebhook = $"{baseUrl}/api/inbound/telegram"
     });
 });
 
-// إدارة التكاملات (محمية بـ API Key)
 var connectorsGroup = app.MapGroup("/api/connectors");
 connectorsGroup.MapGet("/", async (PlatformDbContext db) => 
     Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
@@ -97,7 +97,6 @@ connectorsGroup.MapPost("/", async (ChatPlatform.Infrastructure.Data.Entities.Co
     return Results.Ok(new { message = "تم الحفظ بنجاح" });
 });
 
-// استقبال الويب هوك من المنصات الخارجية
 app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -108,7 +107,6 @@ app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest reque
     return Results.Ok(new { status = "received" });
 });
 
-// استقبال الأحداث من الواجهة
 app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 {
     using var reader = new StreamReader(request.Body);
@@ -122,5 +120,10 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 
 app.MapGet("/health", () => Results.Ok(new { status = "Core is running" }));
 app.MapHub<ChatHub>("/hub/chat");
+
+// ═══════════════════════════════════════════════════════════════
+// 9. تفعيل الكنترولرات (WebhookController)
+// ═══════════════════════════════════════════════════════════════
+app.MapControllers();
 
 app.Run();
