@@ -36,6 +36,8 @@ builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 // احذف هذا السطر إن وجد
 app.MapWhatsAppWebhook(builder.Configuration); 
 builder.Services.AddWhatsAppAdapter();
+// احذف هذا السطر إن وجد
+app.MapWhatsAppWebhook(builder.Configuration); 
 builder.Services.AddControllers();
 app.MapControllers();
 // ==========================================
