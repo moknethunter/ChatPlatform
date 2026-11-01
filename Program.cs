@@ -2,7 +2,7 @@ using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Hubs;
-using ChatPlatform.Infrastructure.Adapters;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using ChatPlatform.Infrastructure.Configuration;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Engine;
@@ -14,79 +14,54 @@ using Polly.Extensions.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ==========================================
-// 1. قاعدة البيانات والإعدادات
-// ==========================================
 builder.Services.AddDbContext<PlatformDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=chatplatform.db"));
 builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection("EngineSettings"));
 
-// ==========================================
-// 2. النواة والمحرك
-// ==========================================
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
 
-// ==========================================
-// 3. التكاملات (المحولات)
-// ==========================================
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-builder.Services.AddWhatsAppAdapter(); // تم إضافة الواتساب هنا
+builder.Services.AddWhatsAppAdapter(builder.Configuration);
 
-// تفعيل الكنترولرات (مهم جداً ليعمل WebhookController)
 builder.Services.AddControllers();
 
-// ==========================================
-// 4. شبكة الإنترنت والمرونة (Polly)
-// ==========================================
 builder.Services.AddHttpClient("ResilientClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-// ==========================================
-// 5. الويب و SignalR
-// ==========================================
 builder.Services.AddSignalR();
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
-// ═══════════════════════════════════════════════════════════════
-// 6. بناء التطبيق (يجب أن يكون هذا السطر قبل أي أمر يبدأ بـ app.)
-// ═══════════════════════════════════════════════════════════════
 var app = builder.Build();
 
-// إنشاء قاعدة البيانات تلقائياً
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
     db.Database.EnsureCreated();
 }
 
-// ==========================================
-// 7. Middlewares
-// ==========================================
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<ApiKeyMiddleware>();
 app.UseCors();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-// ==========================================
-// 8. المسارات (Endpoints)
-// ==========================================
 app.MapGet("/api/platform-info", (HttpRequest request) => {
     var baseUrl = $"{request.Scheme}://{request.Host}";
-    return Results.Ok(new { 
+    return Results.Ok(new
+    {
         status = "Online",
-        whatsappWebhook = $"{baseUrl}/webhook", // تم التعديل ليطابق الكنترولر
+        whatsappWebhook = $"{baseUrl}/webhook",
         telegramWebhook = $"{baseUrl}/api/inbound/telegram"
     });
 });
 
 var connectorsGroup = app.MapGroup("/api/connectors");
-connectorsGroup.MapGet("/", async (PlatformDbContext db) => 
+connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
     Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
 
 connectorsGroup.MapPost("/", async (ChatPlatform.Infrastructure.Data.Entities.ConnectorEntity req, PlatformDbContext db) =>
@@ -120,10 +95,6 @@ app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
 
 app.MapGet("/health", () => Results.Ok(new { status = "Core is running" }));
 app.MapHub<ChatHub>("/hub/chat");
-
-// ═══════════════════════════════════════════════════════════════
-// 9. تفعيل الكنترولرات (WebhookController)
-// ═══════════════════════════════════════════════════════════════
-app.MapControllers();
+app.MapWhatsAppWebhook(app.Configuration);
 
 app.Run();
