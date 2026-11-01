@@ -3,6 +3,7 @@ using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Hubs;
 using ChatPlatform.Infrastructure.Adapters;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using ChatPlatform.Infrastructure.Configuration;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Engine;
