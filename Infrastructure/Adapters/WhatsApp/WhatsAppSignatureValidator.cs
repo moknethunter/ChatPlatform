@@ -3,7 +3,6 @@ using System.Text;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
-/// <summary>Validates Meta's X-Hub-Signature-256 against the exact HTTP request bytes.</summary>
 public static class WhatsAppSignatureValidator
 {
     public static bool Validate(ReadOnlySpan<byte> payload, string? signature, string? appSecret)
@@ -28,12 +27,10 @@ public static class WhatsAppSignatureValidator
         if (supplied.Length != SHA256.HashSizeInBytes)
             return false;
 
-        var key = Encoding.UTF8.GetBytes(appSecret);
-        var expected = HMACSHA256.HashData(key, payload);
+        var expected = HMACSHA256.HashData(Encoding.UTF8.GetBytes(appSecret), payload);
         return CryptographicOperations.FixedTimeEquals(expected, supplied);
     }
 
-    // Kept for callers using the previous API; webhook code must use the byte overload.
     public static bool Validate(string payload, string signature, string appSecret)
         => Validate(Encoding.UTF8.GetBytes(payload), signature, appSecret);
 }
