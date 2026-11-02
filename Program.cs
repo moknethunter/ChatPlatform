@@ -1,101 +1,147 @@
 using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
-using ChatPlatform.Hubs;
-using ChatPlatform.Infrastructure.Adapters;
-using ChatPlatform.Infrastructure.Adapters.WhatsApp;
-using ChatPlatform.Infrastructure.Configuration;
 using ChatPlatform.Infrastructure.Data;
-using ChatPlatform.Infrastructure.Engine;
-using ChatPlatform.Infrastructure.Messaging;
-using ChatPlatform.Middleware;
+using ChatPlatform.Infrastructure.Data.Entities;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Polly;
-using Polly.Extensions.Http;
 
-var builder = WebApplication.CreateBuilder(args);
+namespace ChatPlatform.Controllers;
 
-builder.Services.AddDbContext<PlatformDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=chatplatform.db"));
-builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection("EngineSettings"));
-
-builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-builder.Services.AddHostedService<CoreEngine>();
-
-builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
-builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
-builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-builder.Services.AddWhatsAppAdapter(builder.Configuration);
-
-builder.Services.AddControllers();
-
-builder.Services.AddHttpClient("ResilientClient")
-    .AddPolicyHandler(HttpPolicyExtensions
-        .HandleTransientHttpError()
-        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
-builder.Services.AddSignalR();
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
-
-var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
+[ApiController]
+[Route("api/whatsapp")]
+public class WhatsAppOnboardingController : ControllerBase
 {
-    var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-    db.Database.EnsureCreated();
-}
+    private readonly PlatformDbContext _db;
+    private readonly IEventBus _bus;
+    private readonly IHttpClientFactory _http;
+    private readonly IConfiguration _cfg;
+    private readonly IDataProtector _protector;
+    private readonly ILogger<WhatsAppOnboardingController> _log;
 
-app.UseMiddleware<GlobalExceptionMiddleware>();
-app.UseMiddleware<ApiKeyMiddleware>();
-app.UseCors();
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
-app.MapGet("/api/platform-info", (HttpRequest request) => {
-    var baseUrl = $"{request.Scheme}://{request.Host}";
-    return Results.Ok(new
+    public WhatsAppOnboardingController(
+        PlatformDbContext db,
+        IEventBus bus,
+        IHttpClientFactory http,
+        IConfiguration cfg,
+        IDataProtectionProvider protectionProvider,
+        ILogger<WhatsAppOnboardingController> log)
     {
-        status = "Online",
-        whatsappWebhook = $"{baseUrl}/webhook",
-        telegramWebhook = $"{baseUrl}/api/inbound/telegram"
-    });
-});
+        _db = db;
+        _bus = bus;
+        _http = http;
+        _cfg = cfg;
+        _protector = protectionProvider.CreateProtector("BusinessToken");
+        _log = log;
+    }
 
-var connectorsGroup = app.MapGroup("/api/connectors");
-connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
-    Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
+    [HttpPost("exchange-code")]
+    public async Task<IActionResult> ExchangeCode([FromBody] ExchangeReq req)
+    {
+        var appId = _cfg["Meta:AppId"];
+        // السر من متغير البيئة فقط — لا من appsettings
+        var appSecret = Environment.GetEnvironmentVariable("META_APP_SECRET") ?? _cfg["Meta:AppSecret"];
 
-connectorsGroup.MapPost("/", async (ChatPlatform.Infrastructure.Data.Entities.ConnectorEntity req, PlatformDbContext db) =>
-{
-    req.Id = Guid.NewGuid().ToString();
-    db.Connectors.Add(req);
-    await db.SaveChangesAsync();
-    return Results.Ok(new { message = "تم الحفظ بنجاح" });
-});
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(appSecret))
+        {
+            _log.LogError("Meta AppId أو AppSecret غير مضبوطين");
+            return BadRequest("Meta App credentials not configured.");
+        }
 
-app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest request, IEventBus bus) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-    var json = JsonDocument.Parse(body).RootElement;
-    var evt = new PlatformEvent { Type = "message.created", Source = platform, Payload = json };
-    await bus.PublishAsync(evt);
-    return Results.Ok(new { status = "received" });
-});
+        var client = _http.CreateClient();
+        var url = $"https://graph.facebook.com/v21.0/oauth/access_token" +
+                  $"?client_id={appId}&client_secret={appSecret}&code={req.Code}";
+        var tokenRes = await client.GetAsync(url);
 
-app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-    var json = JsonDocument.Parse(body).RootElement;
-    var eventType = json.TryGetProperty("type", out var t) ? t.GetString() : "unknown.event";
-    var evt = new PlatformEvent { Type = eventType ?? "unknown.event", Source = "http-api", Payload = json };
-    await bus.PublishAsync(evt);
-    return Results.Accepted();
-});
+        if (!tokenRes.IsSuccessStatusCode)
+        {
+            _log.LogWarning("Meta exchange failed: {Status}", tokenRes.StatusCode);
+            return BadRequest("فشل استبدال الكود مع Meta.");
+        }
 
-app.MapGet("/health", () => Results.Ok(new { status = "Core is running" }));
-app.MapHub<ChatHub>("/hub/chat");
-app.MapWhatsAppWebhook(app.Configuration);
+        var tokenJson = JsonDocument.Parse(await tokenRes.Content.ReadAsStringAsync());
+        var businessToken = tokenJson.RootElement.GetProperty("access_token").GetString();
 
-app.Run();
+        if (string.IsNullOrEmpty(businessToken))
+            return BadRequest("Meta لم تُرجع access token.");
+
+        // 🔐 تشفير التوكن قبل الحفظ في قاعدة البيانات
+        var encryptedToken = _protector.Protect(businessToken);
+
+        var existing = await _db.WhatsAppTenants.FirstOrDefaultAsync(t => t.WabaId == req.WabaId);
+        if (existing != null)
+        {
+            existing.BusinessTokenEncrypted = encryptedToken;
+            existing.PhoneNumberId = req.PhoneNumberId;
+            existing.AppId = appId;
+            existing.IsActive = true;
+            _db.WhatsAppTenants.Update(existing);
+        }
+        else
+        {
+            _db.WhatsAppTenants.Add(new WhatsAppTenantEntity
+            {
+                WabaId = req.WabaId,
+                PhoneNumberId = req.PhoneNumberId,
+                BusinessTokenEncrypted = encryptedToken,
+                AppId = appId,
+                IsActive = true
+            });
+        }
+        await _db.SaveChangesAsync();
+
+        await SubscribeToWebhooks(req.WabaId, businessToken);
+
+        await _bus.PublishAsync(new PlatformEvent
+        {
+            Type = "whatsapp.tenant.onboarded",
+            Source = "whatsapp",
+            Payload = JsonSerializer.SerializeToElement(new { req.WabaId, req.PhoneNumberId })
+        }, CancellationToken.None);
+
+        _log.LogInformation("تم ربط عميل جديد: WABA {WabaId}", req.WabaId);
+        return Ok(new { success = true, message = "تم الربط بنجاح" });
+    }
+
+    [HttpPost("register-phone")]
+    public async Task<IActionResult> RegisterPhone([FromBody] RegisterReq req)
+    {
+        var tenant = await _db.WhatsAppTenants
+            .FirstOrDefaultAsync(t => t.PhoneNumberId == req.PhoneNumberId && t.IsActive);
+        if (tenant == null) return NotFound("العميل غير موجود.");
+
+        string token;
+        try
+        {
+            token = _protector.Unprotect(tenant.BusinessTokenEncrypted);
+        }
+        catch
+        {
+            return BadRequest("فشل فك تشفير التوكن.");
+        }
+
+        var client = _http.CreateClient("whatsapp");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{req.PhoneNumberId}/register")
+        {
+            Content = JsonContent.Create(new { messaging_product = "whatsapp", pin = req.Pin })
+        };
+        request.Headers.Authorization = new("Bearer", token);
+
+        var res = await client.SendAsync(request);
+        return res.IsSuccessStatusCode ? Ok() : BadRequest(await res.Content.ReadAsStringAsync());
+    }
+
+    private async Task SubscribeToWebhooks(string wabaId, string token)
+    {
+        var client = _http.CreateClient("whatsapp");
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{wabaId}/subscribed_apps");
+        request.Headers.Authorization = new("Bearer", token);
+        var res = await client.SendAsync(request);
+        if (!res.IsSuccessStatusCode)
+            _log.LogWarning("فشل الاشتراك في Webhooks: {Body}", await res.Content.ReadAsStringAsync());
+    }
+
+    public record ExchangeReq(string Code, string WabaId, string PhoneNumberId);
+    public record RegisterReq(string PhoneNumberId, string Pin);
+}
