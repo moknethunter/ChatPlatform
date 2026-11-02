@@ -3,128 +3,111 @@ using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Hubs;
 using ChatPlatform.Infrastructure.Adapters;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using ChatPlatform.Infrastructure.Configuration;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Engine;
 using ChatPlatform.Infrastructure.Messaging;
 using ChatPlatform.Middleware;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Polly;
 using Polly.Extensions.Http;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 1. قاعدة البيانات (يجب أن تكون الأولى — كل شيء يعتمد عليها)
-// ═══════════════════════════════════════════════════════════════════════════
 builder.Services.AddDbContext<PlatformDbContext>(options =>
-    options.UseSqlite(
-        builder.Configuration.GetConnectionString("Default")
-        ?? "Data Source=chatplatform.db"));
+    options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=chatplatform.db"));
 
-builder.Services.Configure<EngineOptions>(
-    builder.Configuration.GetSection("EngineSettings"));
+builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection("EngineSettings"));
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 2. حماية البيانات (تشفير توكنات العملاء — مفاتيح في قاعدة البيانات)
-// ═══════════════════════════════════════════════════════════════════════════
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<PlatformDbContext>()   // ← لا تُفقد أبداً
+    .PersistKeysToDbContext<PlatformDbContext>()
     .SetApplicationName("ChatPlatform");
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. النواة والمحرك
-// ═══════════════════════════════════════════════════════════════════════════
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 4. التكاملات (المحولات)
-// ═══════════════════════════════════════════════════════════════════════════
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
+builder.Services.AddSingleton<WhatsAppIdempotencyStore>();
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 5. الكنترولرات (WebhookController + WhatsAppOnboardingController)
-// ═══════════════════════════════════════════════════════════════════════════
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
+builder.Services.AddHealthChecks();
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 6. شبكة الإنترنت والمرونة (Polly + HttpClients)
-// ═══════════════════════════════════════════════════════════════════════════
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(_ => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: ".global",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 200,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+});
+
 builder.Services.AddHttpClient("ResilientClient")
     .AddPolicyHandler(HttpPolicyExtensions
         .HandleTransientHttpError()
-        .WaitAndRetryAsync(
-            3,
-            retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+        .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-builder.Services.AddHttpClient("whatsapp", c =>
-    c.BaseAddress = new Uri("https://graph.facebook.com/v21.0/"));
+builder.Services.AddHttpClient("whatsapp", client =>
+{
+    client.BaseAddress = new Uri("https://graph.facebook.com/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 7. الويب و SignalR
-// ═══════════════════════════════════════════════════════════════════════════
-builder.Services.AddSignalR();
-builder.Services.AddCors(o => o.AddDefaultPolicy(p => p
-    .SetIsOriginAllowed(_ => true)
-    .AllowAnyHeader()
-    .AllowAnyMethod()
-    .AllowCredentials()));
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 8. بناء التطبيق
-// ═══════════════════════════════════════════════════════════════════════════
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        if (allowedOrigins.Length > 0)
+        {
+            policy.WithOrigins(allowedOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod();
+        }
+    });
+});
+
 var app = builder.Build();
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 9. تطبيق Migrations (بدلاً من EnsureCreated)
-// ═══════════════════════════════════════════════════════════════════════════
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-    try
-    {
-        db.Database.Migrate();
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "فشل تطبيق Migrations — تأكد من وجود مجلد Migrations في المشروع.");
-        throw;
-    }
+    db.Database.Migrate();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 10. Middlewares (الترتيب مهم)
-// ═══════════════════════════════════════════════════════════════════════════
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<ApiKeyMiddleware>();
+app.UseRateLimiter();
 app.UseCors();
 app.UseDefaultFiles();
-app.UseStaticFiles();   // ← يخدم privacy.html / terms.html / data-deletion.html تلقائياً
+app.UseStaticFiles();
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 11. المسارات (Endpoints)
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ─── معلومات المنصة ───
 app.MapGet("/api/platform-info", (HttpRequest request) =>
 {
     var baseUrl = $"{request.Scheme}://{request.Host}";
     return Results.Ok(new
     {
         status = "Online",
-        version = "1.0.0",
+        version = "1.1.0",
         endpoints = new
         {
             whatsappWebhook = $"{baseUrl}/webhook",
             events = $"{baseUrl}/api/events",
             connectors = $"{baseUrl}/api/connectors",
             whatsappOnboarding = $"{baseUrl}/api/whatsapp/exchange-code",
+            whatsappMessages = $"{baseUrl}/api/v1/whatsapp/messages",
             health = $"{baseUrl}/health"
         },
         legal = new
@@ -136,91 +119,111 @@ app.MapGet("/api/platform-info", (HttpRequest request) =>
     });
 });
 
-// ─── إدارة التكاملات (Connectors) ───
 var connectorsGroup = app.MapGroup("/api/connectors");
+connectorsGroup.MapGet("/", async (PlatformDbContext db, CancellationToken ct) =>
+    Results.Ok(await db.Connectors.AsNoTracking().ToListAsync(ct)));
 
-connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
-    Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
+connectorsGroup.MapPost("/", async (ConnectorRequest request, PlatformDbContext db, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.TargetUrl) ||
+        string.IsNullOrWhiteSpace(request.PayloadTemplate))
+        return Results.BadRequest(new { error = "Name, target URL, and payload template are required." });
 
-connectorsGroup.MapPost("/",
-    async (ChatPlatform.Infrastructure.Data.Entities.ConnectorEntity req, PlatformDbContext db) =>
+    if (!Uri.TryCreate(request.TargetUrl, UriKind.Absolute, out var target) ||
+        target.Scheme is not ("http" or "https"))
+        return Results.BadRequest(new { error = "Target URL must be an absolute HTTP(S) URL." });
+
+    var entity = new ChatPlatform.Infrastructure.Data.Entities.ConnectorEntity
     {
-        req.Id = Guid.NewGuid().ToString();
-        db.Connectors.Add(req);
-        await db.SaveChangesAsync();
-        return Results.Ok(new { message = "تم الحفظ بنجاح", id = req.Id });
-    });
+        Id = Guid.NewGuid().ToString("N"),
+        Name = request.Name.Trim(),
+        TargetUrl = request.TargetUrl,
+        HttpMethod = request.HttpMethod is "GET" or "POST" ? request.HttpMethod : "POST",
+        AuthHeaderKey = string.IsNullOrWhiteSpace(request.AuthHeaderKey) ? "Authorization" : request.AuthHeaderKey,
+        AuthToken = request.AuthToken ?? string.Empty,
+        PayloadTemplate = request.PayloadTemplate
+    };
 
-// ─── استقبال Webhook من منصات خارجية عامة ───
-app.MapPost("/api/inbound/{platform}",
-    async (string platform, HttpRequest request, IEventBus bus) =>
+    db.Connectors.Add(entity);
+    await db.SaveChangesAsync(ct);
+    return Results.Created($"/api/connectors/{entity.Id}", new { entity.Id, entity.Name });
+});
+
+app.MapPost("/api/inbound/{platform}", async (string platform, HttpRequest request, IEventBus bus, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(platform) || platform.Length > 64)
+        return Results.BadRequest(new { error = "Invalid platform identifier." });
+
+    try
     {
-        using var reader = new StreamReader(request.Body);
-        var body = await reader.ReadToEndAsync();
-
-        JsonElement json;
-        try
-        {
-            json = JsonDocument.Parse(body).RootElement;
-        }
-        catch (JsonException)
-        {
-            return Results.BadRequest(new { error = "Invalid JSON body" });
-        }
-
-        var evt = new PlatformEvent
+        using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+        await bus.PublishAsync(new PlatformEvent
         {
             Type = "message.created",
             Source = platform,
-            Payload = json
-        };
-        await bus.PublishAsync(evt);
-        return Results.Ok(new { status = "received" });
-    });
-
-// ─── نشر الأحداث يدوياً عبر API ───
-app.MapPost("/api/events", async (HttpRequest request, IEventBus bus) =>
-{
-    using var reader = new StreamReader(request.Body);
-    var body = await reader.ReadToEndAsync();
-
-    JsonElement json;
-    try
-    {
-        json = JsonDocument.Parse(body).RootElement;
+            Payload = doc.RootElement.Clone()
+        }, ct);
+        return Results.Accepted();
     }
     catch (JsonException)
     {
-        return Results.BadRequest(new { error = "Invalid JSON body" });
+        return Results.BadRequest(new { error = "Invalid JSON body." });
     }
-
-    var eventType = json.TryGetProperty("type", out var t)
-        ? t.GetString()
-        : "unknown.event";
-
-    var evt = new PlatformEvent
-    {
-        Type = eventType ?? "unknown.event",
-        Source = "http-api",
-        Payload = json
-    };
-    await bus.PublishAsync(evt);
-    return Results.Accepted();
 });
 
-// ─── Health Check ───
-app.MapGet("/health", () => Results.Ok(new
+app.MapPost("/api/events", async (HttpRequest request, IEventBus bus, CancellationToken ct) =>
 {
-    status = "Core is running",
-    timestamp = DateTimeOffset.UtcNow
-}));
+    try
+    {
+        using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+        var root = doc.RootElement;
+        var eventType = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("type", out var typeVal)
+            ? typeVal.GetString()
+            : "unknown.event";
 
-// ─── SignalR Hub ───
+        await bus.PublishAsync(new PlatformEvent
+        {
+            Type = string.IsNullOrWhiteSpace(eventType) ? "unknown.event" : eventType,
+            Source = "http-api",
+            Payload = root.Clone()
+        }, ct);
+        return Results.Accepted();
+    }
+    catch (JsonException)
+    {
+        return Results.BadRequest(new { error = "Invalid JSON body." });
+    }
+});
+
+app.MapPost("/api/v1/whatsapp/messages", async (SendWhatsAppTextRequest request, IEventBus bus, CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(request.PhoneNumberId) || string.IsNullOrWhiteSpace(request.To) ||
+        string.IsNullOrWhiteSpace(request.Text) || request.Text.Length > 4096)
+        return Results.BadRequest(new { error = "phoneNumberId, to, and text (up to 4096 chars) are required." });
+
+    await bus.PublishAsync(new PlatformEvent
+    {
+        Type = WhatsAppAdapter.OutboundType,
+        Source = "api.v1",
+        Payload = JsonSerializer.SerializeToElement(new
+        {
+            phoneNumberId = request.PhoneNumberId.Trim(),
+            to = request.To.Trim(),
+            text = request.Text
+        })
+    }, ct);
+
+    return Results.Accepted(new { status = "queued" });
+}).RequireRateLimiting("management");
+
+app.MapHealthChecks("/health");
 app.MapHub<ChatHub>("/hub/chat");
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 12. تفعيل الكنترولرات (يجب أن يكون قبل app.Run)
-// ═══════════════════════════════════════════════════════════════════════════
+app.MapWhatsAppWebhook(app.Configuration);
 app.MapControllers();
 
 app.Run();
+
+public record ConnectorRequest(string Name, string TargetUrl, string? HttpMethod, string? AuthHeaderKey, string? AuthToken, string PayloadTemplate);
+public record SendWhatsAppTextRequest(string PhoneNumberId, string To, string Text);
+
+public partial class Program { }
