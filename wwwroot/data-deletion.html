@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>حذف البيانات — ChatPlatform</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.8; color: #222; }
+        h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; }
+        h2 { color: #333; margin-top: 30px; }
+        ol { padding-right: 20px; }
+        code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; direction: ltr; display: inline-block; }
+        .box { background: #fff3cd; border-right: 4px solid #f0ad4e; padding: 15px; margin: 20px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>تعليمات حذف البيانات</h1>
+    <p>بموجب سياسات Meta وWhatsApp Business، يحق لك طلب حذف بياناتك في أي وقت.</p>
+
+    <h2>كيف تطلب حذف بياناتك؟</h2>
+    <ol>
+        <li>أرسل بريداً إلكترونياً بعنوان <strong>"Delete My Data"</strong> إلى:<br>
+            <a href="mailto:privacy@your-domain.com">privacy@your-domain.com</a></li>
+        <li>اذكر في البريد <strong>WABA ID</strong> الخاص بك (تجده في لوحة تحكم Meta → WhatsApp Business Account).</li>
+        <li>ستصلك رسالة تأكيد خلال 24 ساعة.</li>
+        <li>سيتم حذف البيانات خلال <strong>7 أيام عمل</strong> من تأكيد الطلب.</li>
+        <li>ستصلك رسالة نهائية تؤكد إتمام الحذف.</li>
+    </ol>
+
+    <h2>ما الذي سيُحذف؟</h2>
+    <ul>
+        <li>توكنات الوصول المخزنة (Business Tokens).</li>
+        <li>سجل الرسائل والمحادثات.</li>
+        <li>بيانات الحساب المرتبطة بـ WABA ID.</li>
+        <li>سجلات النظام (Audit Logs) — عدا ما يُلزمنا القانون بالاحتفاظ به.</li>
+    </ul>
+
+    <div class="box">
+        <strong>ملاحظة:</strong> بعد الحذف، لن تتمكن من استخدام الخدمة حتى تعيد ربط حساب واتساب من جديد.
+    </div>
+
+    <h2>Callback URL</h2>
+    <p>لتطبيقات Meta التي تتطلب تأكيد الحذف تلقائياً، يُستخدم المسار التالي للتحقق:</p>
+    <p><code>https://your-domain.com/data-deletion/callback</code></p>
+
+    <h2>التواصل</h2>
+    <p>لأي استفسار: <a href="mailto:privacy@your-domain.com">privacy@your-domain.com</a></p>
+</body>
+</html>
