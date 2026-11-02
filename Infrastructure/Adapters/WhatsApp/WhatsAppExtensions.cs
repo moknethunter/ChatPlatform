@@ -1,49 +1,37 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
+using ChatPlatform.Infrastructure.Adapters;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
 public static class WhatsAppExtensions
 {
-    public static IServiceCollection AddWhatsAppAdapter(
-        this IServiceCollection s, IConfiguration config)
-    {
-        s.Configure<WhatsAppOptions>(config.GetSection(WhatsAppOptions.SectionName));
-
-        s.AddHttpClient("whatsapp", c =>
-        {
-            c.BaseAddress = new Uri("https://graph.facebook.com/");
-            c.Timeout = TimeSpan.FromSeconds(30);
-        });
-
-        s.AddMemoryCache();
-        s.AddSingleton<WhatsAppIdempotencyStore>();
-        s.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
-        return s;
-    }
+    private const int MaxWebhookBytes = 1_048_576;
 
     public static IEndpointRouteBuilder MapWhatsAppWebhook(
         this IEndpointRouteBuilder app, IConfiguration cfg)
     {
-        var verifyToken = cfg["WhatsApp:VerifyToken"] ?? string.Empty;
-        var appSecret = cfg["WhatsApp:AppSecret"] ?? string.Empty;
+        var verifyToken = cfg["WhatsApp:VerifyToken"];
+        var appSecret = Environment.GetEnvironmentVariable("META_APP_SECRET") ?? cfg["WhatsApp:AppSecret"];
 
         app.MapGet("/webhook", (HttpContext ctx) =>
         {
-            var mode = ctx.Request.Query["hub.mode"];
-            var token = ctx.Request.Query["hub.verify_token"];
-            var challenge = ctx.Request.Query["hub.challenge"];
+            if (string.IsNullOrWhiteSpace(verifyToken))
+                return Results.Problem("Webhook verification is not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
 
-            if (mode == "subscribe" && token == verifyToken)
-                return Results.Text(challenge.ToString() ?? string.Empty, "text/plain");
+            var mode = ctx.Request.Query["hub.mode"].ToString();
+            var token = ctx.Request.Query["hub.verify_token"].ToString();
+            var challenge = ctx.Request.Query["hub.challenge"].ToString();
+            if (mode == "subscribe" && FixedTimeEquals(token, verifyToken) && !string.IsNullOrEmpty(challenge))
+                return Results.Text(challenge, "text/plain");
 
             return Results.Unauthorized();
         });
@@ -52,92 +40,139 @@ public static class WhatsAppExtensions
             HttpContext ctx,
             IEventBus bus,
             WhatsAppIdempotencyStore idem,
-            ILoggerFactory lf,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
-            var log = lf.CreateLogger("WhatsApp.Webhook");
+            var logger = loggerFactory.CreateLogger("WhatsApp.Webhook");
+            if (string.IsNullOrWhiteSpace(appSecret))
+                return Results.Problem("Webhook signature validation is not configured.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            if (ctx.Request.ContentLength is > MaxWebhookBytes)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
+            byte[] rawBody;
             try
             {
-                ctx.Request.EnableBuffering();
+                rawBody = await ReadBoundedBodyAsync(ctx.Request.Body, ct);
+            }
+            catch (InvalidDataException)
+            {
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            }
 
-                string payload;
-                using (var reader = new StreamReader(ctx.Request.Body, Encoding.UTF8, leaveOpen: true))
-                {
-                    payload = await reader.ReadToEndAsync(ct);
-                }
-                ctx.Request.Body.Position = 0;
+            var signature = ctx.Request.Headers["X-Hub-Signature-256"].ToString();
+            if (!WhatsAppSignatureValidator.Validate(rawBody, signature, appSecret))
+            {
+                logger.LogWarning("Rejected WhatsApp webhook with an invalid signature.");
+                return Results.Unauthorized();
+            }
 
-                if (!string.IsNullOrWhiteSpace(appSecret))
+            JsonDocument document;
+            try
+            {
+                document = JsonDocument.Parse(rawBody, new JsonDocumentOptions { MaxDepth = 32 });
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest(new { error = "Invalid webhook JSON." });
+            }
+
+            using (document)
+            {
+                var root = document.RootElement;
+                if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                    return Results.BadRequest(new { error = "Missing webhook entries." });
+
+                try
                 {
-                    var sig = ctx.Request.Headers["X-Hub-Signature-256"].ToString();
-                    if (!WhatsAppSignatureValidator.Validate(payload, sig, appSecret))
+                    foreach (var entry in entries.EnumerateArray())
                     {
-                        log.LogWarning("Invalid WhatsApp signature");
-                        return Results.Unauthorized();
-                    }
-                }
+                        if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
+                            continue;
 
-                using var doc = JsonDocument.Parse(payload);
-                if (!doc.RootElement.TryGetProperty("entry", out var entries))
-                    return Results.Ok();
-
-                foreach (var entry in entries.EnumerateArray())
-                {
-                    if (!entry.TryGetProperty("changes", out var changes)) continue;
-
-                    foreach (var change in changes.EnumerateArray())
-                    {
-                        if (!change.TryGetProperty("value", out var value)) continue;
-                        if (!value.TryGetProperty("messages", out var msgs)) continue;
-
-                        foreach (var m in msgs.EnumerateArray())
+                        foreach (var change in changes.EnumerateArray())
                         {
-                            if (!m.TryGetProperty("from", out var fromEl)) continue;
-                            var from = fromEl.GetString();
-                            if (string.IsNullOrWhiteSpace(from)) continue;
-
-                            string? text = null;
-                            if (m.TryGetProperty("text", out var t) &&
-                                t.TryGetProperty("body", out var b))
-                                text = b.GetString();
-
-                            var wamid = m.TryGetProperty("id", out var idEl)
-                                ? idEl.GetString()
+                            if (!change.TryGetProperty("value", out var value)) continue;
+                            var phoneNumberId = value.TryGetProperty("metadata", out var metadata) &&
+                                                metadata.TryGetProperty("phone_number_id", out var phone)
+                                ? phone.GetString()
                                 : null;
 
-                            if (!idem.TryRegister(wamid ?? string.Empty))
+                            if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
                             {
-                                log.LogInformation("Duplicate wamid skipped: {Id}", wamid);
-                                continue;
+                                foreach (var message in messages.EnumerateArray())
+                                {
+                                    var wamid = message.TryGetProperty("id", out var id) ? id.GetString() : null;
+                                    if (!string.IsNullOrWhiteSpace(wamid) && !idem.TryRegister(wamid))
+                                    {
+                                        logger.LogInformation("Duplicate WhatsApp message suppressed: {MessageId}", wamid);
+                                        continue;
+                                    }
+
+                                    await bus.PublishAsync(new PlatformEvent
+                                    {
+                                        Type = WhatsAppAdapter.InboundType,
+                                        Source = "whatsapp",
+                                        Payload = JsonSerializer.SerializeToElement(new
+                                        {
+                                            phoneNumberId,
+                                            wamid,
+                                            message = message.Clone(),
+                                            contact = value.TryGetProperty("contacts", out var contacts) ? contacts.Clone() : (JsonElement?)null,
+                                            receivedAt = DateTimeOffset.UtcNow
+                                        })
+                                    }, ct);
+                                }
                             }
 
-                            await bus.PublishAsync(new PlatformEvent
+                            // Delivery/read/failure notifications are forwarded without being treated as inbound messages.
+                            if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
                             {
-                                Type = WhatsAppAdapter.InboundType,
-                                Source = "whatsapp",
-                                Payload = JsonSerializer.SerializeToElement(new
+                                await bus.PublishAsync(new PlatformEvent
                                 {
-                                    from,
-                                    text,
-                                    wamid
-                                })
-                            }, ct);
-
-                            log.LogInformation("WhatsApp inbound from {From}", from);
+                                    Type = "whatsapp.status",
+                                    Source = "whatsapp",
+                                    Payload = JsonSerializer.SerializeToElement(new { phoneNumberId, statuses = statuses.Clone() })
+                                }, ct);
+                            }
                         }
                     }
                 }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Do not acknowledge if dispatch failed; Meta can retry the webhook.
+                    logger.LogError(ex, "WhatsApp webhook dispatch failed.");
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+            }
 
-                return Results.Ok();
-            }
-            catch (Exception ex)
-            {
-                log.LogError(ex, "Webhook parse failed");
-                return Results.Ok();
-            }
-        });
+            return Results.Ok();
+        }).WithMetadata(new Microsoft.AspNetCore.Mvc.IgnoreAntiforgeryTokenAttribute());
 
         return app;
+    }
+
+    private static bool FixedTimeEquals(string left, string right)
+    {
+        var leftBytes = Encoding.UTF8.GetBytes(left);
+        var rightBytes = Encoding.UTF8.GetBytes(right);
+        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+    }
+
+    private static async Task<byte[]> ReadBoundedBodyAsync(Stream body, CancellationToken ct)
+    {
+        await using var buffer = new MemoryStream();
+        var chunk = new byte[8192];
+        int read;
+        while ((read = await body.ReadAsync(chunk.AsMemory(), ct)) > 0)
+        {
+            if (buffer.Length + read > MaxWebhookBytes)
+                throw new InvalidDataException("Webhook body exceeds configured maximum size.");
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+        return buffer.ToArray();
     }
 }
