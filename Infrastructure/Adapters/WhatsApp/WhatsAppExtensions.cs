@@ -1,12 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using ChatPlatform.Core.Abstractions;
-using ChatPlatform.Core.Events;
-using ChatPlatform.Infrastructure.Adapters;
+using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -16,10 +16,9 @@ public static class WhatsAppExtensions
 {
     private const int MaxWebhookBytes = 1_048_576;
 
-    public static IEndpointRouteBuilder MapWhatsAppWebhook(
-        this IEndpointRouteBuilder app, IConfiguration cfg)
+    public static IEndpointRouteBuilder MapWhatsAppWebhook(this IEndpointRouteBuilder app, IConfiguration cfg)
     {
-        var verifyToken = cfg["WhatsApp:VerifyToken"];
+        var verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN") ?? cfg["WhatsApp:VerifyToken"];
         var appSecret = Environment.GetEnvironmentVariable("META_APP_SECRET") ?? cfg["WhatsApp:AppSecret"];
 
         app.MapGet("/webhook", (HttpContext ctx) =>
@@ -36,12 +35,7 @@ public static class WhatsAppExtensions
             return Results.Unauthorized();
         });
 
-        app.MapPost("/webhook", async (
-            HttpContext ctx,
-            IEventBus bus,
-            WhatsAppIdempotencyStore idem,
-            ILoggerFactory loggerFactory,
-            CancellationToken ct) =>
+        app.MapPost("/webhook", async (HttpContext ctx, PlatformDbContext db, ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
             var logger = loggerFactory.CreateLogger("WhatsApp.Webhook");
             if (string.IsNullOrWhiteSpace(appSecret))
@@ -66,93 +60,69 @@ public static class WhatsAppExtensions
                 return Results.Unauthorized();
             }
 
-            JsonDocument document;
+            string? messageId;
             try
             {
-                document = JsonDocument.Parse(rawBody, new JsonDocumentOptions { MaxDepth = 32 });
+                using var document = JsonDocument.Parse(rawBody, new JsonDocumentOptions { MaxDepth = 32 });
+                if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                    !document.RootElement.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                    return Results.BadRequest(new { error = "Missing webhook entries." });
+                messageId = TryGetFirstMessageId(entries);
             }
             catch (JsonException)
             {
                 return Results.BadRequest(new { error = "Invalid webhook JSON." });
             }
 
-            using (document)
+            var hash = Convert.ToHexString(SHA256.HashData(rawBody));
+            db.WhatsAppWebhookInbox.Add(new WhatsAppWebhookInboxEntity
             {
-                var root = document.RootElement;
-                if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
-                    return Results.BadRequest(new { error = "Missing webhook entries." });
+                PayloadHash = hash,
+                MessageId = messageId,
+                RawBody = Encoding.UTF8.GetString(rawBody),
+                Status = "Pending",
+                ReceivedAt = DateTimeOffset.UtcNow
+            });
 
-                try
-                {
-                    foreach (var entry in entries.EnumerateArray())
-                    {
-                        if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
-                            continue;
-
-                        foreach (var change in changes.EnumerateArray())
-                        {
-                            if (!change.TryGetProperty("value", out var value)) continue;
-                            var phoneNumberId = value.TryGetProperty("metadata", out var metadata) &&
-                                                metadata.TryGetProperty("phone_number_id", out var phone)
-                                ? phone.GetString()
-                                : null;
-
-                            if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var message in messages.EnumerateArray())
-                                {
-                                    var wamid = message.TryGetProperty("id", out var id) ? id.GetString() : null;
-                                    if (!string.IsNullOrWhiteSpace(wamid) && !idem.TryRegister(wamid))
-                                    {
-                                        logger.LogInformation("Duplicate WhatsApp message suppressed: {MessageId}", wamid);
-                                        continue;
-                                    }
-
-                                    await bus.PublishAsync(new PlatformEvent
-                                    {
-                                        Type = WhatsAppAdapter.InboundType,
-                                        Source = "whatsapp",
-                                        Payload = JsonSerializer.SerializeToElement(new
-                                        {
-                                            phoneNumberId,
-                                            wamid,
-                                            message = message.Clone(),
-                                            contact = value.TryGetProperty("contacts", out var contacts) ? contacts.Clone() : (JsonElement?)null,
-                                            receivedAt = DateTimeOffset.UtcNow
-                                        })
-                                    }, ct);
-                                }
-                            }
-
-                            // Delivery/read/failure notifications are forwarded without being treated as inbound messages.
-                            if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
-                            {
-                                await bus.PublishAsync(new PlatformEvent
-                                {
-                                    Type = "whatsapp.status",
-                                    Source = "whatsapp",
-                                    Payload = JsonSerializer.SerializeToElement(new { phoneNumberId, statuses = statuses.Clone() })
-                                }, ct);
-                            }
-                        }
-                    }
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    // Do not acknowledge if dispatch failed; Meta can retry the webhook.
-                    logger.LogError(ex, "WhatsApp webhook dispatch failed.");
-                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-                }
+            try
+            {
+                // Acknowledge Meta only after the signed delivery has been durably committed.
+                await db.SaveChangesAsync(ct);
+                return Results.Ok();
             }
+            catch (DbUpdateException ex)
+            {
+                db.ChangeTracker.Clear();
+                var duplicate = await db.WhatsAppWebhookInbox.AsNoTracking().AnyAsync(x => x.PayloadHash == hash, ct);
+                if (duplicate)
+                {
+                    logger.LogInformation("Duplicate WhatsApp webhook delivery ignored. Hash={PayloadHash}", hash);
+                    return Results.Ok();
+                }
 
-            return Results.Ok();
+                logger.LogError(ex, "Could not persist WhatsApp webhook delivery.");
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
         }).WithMetadata(new Microsoft.AspNetCore.Mvc.IgnoreAntiforgeryTokenAttribute());
 
         return app;
+    }
+
+    private static string? TryGetFirstMessageId(JsonElement entries)
+    {
+        foreach (var entry in entries.EnumerateArray())
+        {
+            if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array) continue;
+            foreach (var change in changes.EnumerateArray())
+            {
+                if (!change.TryGetProperty("value", out var value) ||
+                    !value.TryGetProperty("messages", out var messages) || messages.ValueKind != JsonValueKind.Array) continue;
+                foreach (var message in messages.EnumerateArray())
+                    if (message.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String)
+                        return id.GetString();
+            }
+        }
+        return null;
     }
 
     private static bool FixedTimeEquals(string left, string right)
