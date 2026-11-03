@@ -1,4 +1,6 @@
+using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
+using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Adapters;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using ChatPlatform.Infrastructure.Configuration;
