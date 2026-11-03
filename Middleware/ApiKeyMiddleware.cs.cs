@@ -3,27 +3,40 @@ namespace ChatPlatform.Middleware;
 public sealed class ApiKeyMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly string _validApiKey;
+    private readonly string? _validApiKey;
 
-    public ApiKeyMiddleware(RequestDelegate next, IConfiguration config)
+    public ApiKeyMiddleware(RequestDelegate next, IConfiguration configuration)
     {
         _next = next;
-        _validApiKey = config["Security:ApiKey"] ?? "MySuperSecretKey_12345";
+        _validApiKey = configuration["Security:ApiKey"] ?? Environment.GetEnvironmentVariable("CHATPLATFORM_API_KEY");
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // نحمي مسارات الإدارة والربط، ونترك الواجهة والـ Webhooks مفتوحة
-        if (context.Request.Path.StartsWithSegments("/api/admin") || 
-            context.Request.Path.StartsWithSegments("/api/connectors"))
+        var path = context.Request.Path;
+        var requiresApiKey = path.StartsWithSegments("/api/admin") ||
+                             path.StartsWithSegments("/api/connectors") ||
+                             path.StartsWithSegments("/api/events") ||
+                             path.StartsWithSegments("/api/inbound") ||
+                             path.StartsWithSegments("/api/whatsapp");
+        if (requiresApiKey)
         {
-            if (!context.Request.Headers.TryGetValue("X-Api-Key", out var extractedApiKey) || extractedApiKey != _validApiKey)
+            if (string.IsNullOrWhiteSpace(_validApiKey))
             {
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsJsonAsync(new { error = "Unauthorized. Invalid API Key." });
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                await context.Response.WriteAsJsonAsync(new { error = "API key is not configured." });
+                return;
+            }
+
+            if (!context.Request.Headers.TryGetValue("X-Api-Key", out var providedKey) ||
+                !string.Equals(providedKey.ToString(), _validApiKey, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsJsonAsync(new { error = "Unauthorized. Invalid API key." });
                 return;
             }
         }
+
         await _next(context);
     }
 }

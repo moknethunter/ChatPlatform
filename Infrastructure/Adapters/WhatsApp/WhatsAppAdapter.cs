@@ -1,10 +1,11 @@
-using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
-using Microsoft.Extensions.Options;
+using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
@@ -12,193 +13,154 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
 {
     public const string InboundType = "whatsapp.inbound";
     public const string OutboundType = "whatsapp.send";
-
     public string Name => "whatsapp";
 
-    private readonly IHttpClientFactory _http;
-    private readonly IEventBus _bus;
-    private readonly WhatsAppOptions _opts;
-    private readonly ILogger<WhatsAppAdapter> _log;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<WhatsAppAdapter> _logger;
 
-    public WhatsAppAdapter(
-        IHttpClientFactory http,
-        IEventBus bus,
-        IOptions<WhatsAppOptions> opts,
-        ILogger<WhatsAppAdapter> log)
+    public WhatsAppAdapter(IServiceScopeFactory scopeFactory, ILogger<WhatsAppAdapter> logger)
     {
-        _http = http;
-        _bus = bus;
-        _opts = opts.Value;
-        _log = log;
+        _scopeFactory = scopeFactory;
+        _logger = logger;
     }
 
-    public async Task HandleEventAsync(PlatformEvent evt, CancellationToken ct)
+    public async Task HandleEventAsync(PlatformEvent evt, CancellationToken cancellationToken)
     {
         if (evt.Source?.StartsWith("platform.adapters", StringComparison.OrdinalIgnoreCase) == true)
             return;
 
         if (string.Equals(evt.Type, InboundType, StringComparison.OrdinalIgnoreCase))
         {
-            await HandleInboundAsync(evt, ct);
+            _logger.LogInformation("WhatsApp inbound event received: {EventId}", evt.Id);
             return;
         }
 
-        if (string.Equals(evt.Type, OutboundType, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(evt.Type, OutboundType, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        var payload = evt.Payload;
+        if (payload.ValueKind == JsonValueKind.Object &&
+            payload.TryGetProperty("payload", out var nestedPayload) &&
+            nestedPayload.ValueKind == JsonValueKind.Object)
         {
-            await HandleOutboundAsync(evt, ct);
+            payload = nestedPayload;
         }
-    }
 
-    private async Task HandleInboundAsync(PlatformEvent evt, CancellationToken ct)
-    {
-        var from = GetString(evt, "from");
-        var text = GetString(evt, "text");
-        var wamid = GetString(evt, "wamid");
-
-        if (string.IsNullOrWhiteSpace(from)) return;
-
-        _log.LogInformation("WhatsApp inbound from {From}", from);
-
-        if (_opts.AutoReply && !string.IsNullOrWhiteSpace(text))
+        var phoneNumberId = ReadString(payload, "phoneNumberId");
+        var recipient = NormalizePhone(ReadString(payload, "to"));
+        var text = ReadString(payload, "text");
+        if (string.IsNullOrWhiteSpace(phoneNumberId) ||
+            string.IsNullOrWhiteSpace(recipient) ||
+            string.IsNullOrWhiteSpace(text))
         {
-            await SendTextAsync(from, "أهلاً بك، تم استلام رسالتك وسيتم الرد عليك قريبًا.", wamid, ct);
-        }
-    }
-
-    private async Task HandleOutboundAsync(PlatformEvent evt, CancellationToken ct)
-    {
-        var toRaw = GetString(evt, "to");
-        var text = GetString(evt, "text");
-
-        if (string.IsNullOrWhiteSpace(toRaw) || string.IsNullOrWhiteSpace(text))
-        {
-            _log.LogWarning("whatsapp.send missing 'to' or 'text'");
+            _logger.LogWarning("Invalid WhatsApp send event {EventId}", evt.Id);
             return;
         }
 
-        var to = CleanYemeniNumber(toRaw);
-        if (to is null)
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var tenant = await db.WhatsAppTenants.AsNoTracking()
+            .Where(x => x.PhoneNumberId == phoneNumberId && x.IsActive)
+            .Select(x => new { x.TenantId })
+            .SingleOrDefaultAsync(cancellationToken);
+        if (tenant is null)
         {
-            _log.LogWarning("Invalid Yemeni phone: {Phone}", toRaw);
-            await _bus.PublishAsync(new PlatformEvent
+            _logger.LogWarning("No active WhatsApp tenant for phone number ID {PhoneNumberId}", phoneNumberId);
+            return;
+        }
+
+        var idempotencyKey = $"event:{evt.Id:N}";
+        if (await db.WhatsAppOutbox.AnyAsync(
+                x => x.TenantId == tenant.TenantId && x.IdempotencyKey == idempotencyKey,
+                cancellationToken))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var conversation = await db.WhatsAppConversations.SingleOrDefaultAsync(x =>
+            x.TenantId == tenant.TenantId && x.PhoneNumberId == phoneNumberId && x.ContactPhone == recipient,
+            cancellationToken);
+        if (conversation is null)
+        {
+            conversation = new WhatsAppConversationEntity
             {
-                Type = "whatsapp.failed",
-                Source = "whatsapp",
-                Payload = JsonSerializer.SerializeToElement(new
-                {
-                    to = toRaw,
-                    text,
-                    error = "invalid_phone"
-                })
-            }, ct);
-            return;
+                TenantId = tenant.TenantId,
+                PhoneNumberId = phoneNumberId,
+                ContactPhone = recipient,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now
+            };
+            db.WhatsAppConversations.Add(conversation);
         }
 
-        await SendTextAsync(to, text, wamid: null, ct);
-    }
-
-    private async Task SendTextAsync(string to, string text, string? wamid, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(_opts.PhoneNumberId) || string.IsNullOrWhiteSpace(_opts.AccessToken))
+        var message = new WhatsAppMessageEntity
         {
-            _log.LogWarning("WhatsApp credentials missing");
-            return;
-        }
-
-        var client = _http.CreateClient("whatsapp");
-        using var req = new HttpRequestMessage(HttpMethod.Post,
-            $"{_opts.GraphApiVersion}/{_opts.PhoneNumberId}/messages")
-        {
-            Content = JsonContent.Create(new
-            {
-                messaging_product = "whatsapp",
-                recipient_type = "individual",
-                to,
-                type = "text",
-                text = new { preview_url = false, body = text }
-            })
+            TenantId = tenant.TenantId,
+            Conversation = conversation,
+            Direction = "Outbound",
+            MessageType = "text",
+            ContentJson = JsonSerializer.Serialize(new { text }),
+            TextPreview = text[..Math.Min(text.Length, 200)],
+            Status = "Queued",
+            TimestampUtc = now,
+            CreatedAtUtc = now
         };
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _opts.AccessToken);
+        conversation.LastOutboundAtUtc = now;
+        conversation.UpdatedAtUtc = now;
+        db.WhatsAppMessages.Add(message);
+
+        var payloadJson = JsonSerializer.Serialize(new
+        {
+            messaging_product = "whatsapp",
+            recipient_type = "individual",
+            to = recipient,
+            type = "text",
+            text = new { preview_url = false, body = text }
+        });
+        db.WhatsAppOutbox.Add(new WhatsAppOutboxEntity
+        {
+            TenantId = tenant.TenantId,
+            IdempotencyKey = idempotencyKey,
+            MessageId = message.Id,
+            PhoneNumberId = phoneNumberId,
+            RecipientPhone = recipient,
+            MessageType = "text",
+            PayloadJson = payloadJson,
+            Status = "Pending",
+            Attempts = 0,
+            CreatedAtUtc = now,
+            NextAttemptAtUtc = now,
+            UpdatedAtUtc = now
+        });
 
         try
         {
-            var res = await client.SendAsync(req, ct);
-            var body = await res.Content.ReadAsStringAsync(ct);
-
-            if (!res.IsSuccessStatusCode)
-            {
-                _log.LogWarning("WhatsApp failed ({Status}): {Body}", (int)res.StatusCode, body);
-                await _bus.PublishAsync(new PlatformEvent
-                {
-                    Type = "whatsapp.failed",
-                    Source = "whatsapp",
-                    Payload = JsonSerializer.SerializeToElement(new { to, text, error = body })
-                }, ct);
-                return;
-            }
-
-            string? messageId = null;
-            try
-            {
-                using var doc = JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("messages", out var msgs) &&
-                    msgs.GetArrayLength() > 0)
-                {
-                    messageId = msgs[0].GetProperty("id").GetString();
-                }
-            }
-            catch { }
-
-            _log.LogInformation("WhatsApp sent to {To}, id={Id}", to, messageId);
-
-            await _bus.PublishAsync(new PlatformEvent
-            {
-                Type = "whatsapp.sent",
-                Source = "whatsapp",
-                Payload = JsonSerializer.SerializeToElement(new
-                {
-                    to,
-                    text,
-                    messageId,
-                    inReplyTo = wamid
-                })
-            }, ct);
+            await db.SaveChangesAsync(cancellationToken);
         }
-        catch (HttpRequestException ex)
+        catch (DbUpdateException)
         {
-            _log.LogError(ex, "WhatsApp send exception");
-            await _bus.PublishAsync(new PlatformEvent
-            {
-                Type = "whatsapp.failed",
-                Source = "whatsapp",
-                Payload = JsonSerializer.SerializeToElement(new
-                {
-                    to,
-                    text,
-                    error = ex.Message
-                })
-            }, ct);
-        }
-        catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
-        {
-            _log.LogError(ex, "WhatsApp send timeout");
+            db.ChangeTracker.Clear();
+            var duplicate = await db.WhatsAppOutbox.AnyAsync(
+                x => x.TenantId == tenant.TenantId && x.IdempotencyKey == idempotencyKey,
+                cancellationToken);
+            if (!duplicate)
+                throw;
         }
     }
 
-    private static string? GetString(PlatformEvent evt, string key)
-        => evt.Payload.ValueKind == JsonValueKind.Object &&
-           evt.Payload.TryGetProperty(key, out var v) &&
-           v.ValueKind == JsonValueKind.String
-            ? v.GetString()
+    private static string? ReadString(JsonElement element, string propertyName)
+        => element.ValueKind == JsonValueKind.Object &&
+           element.TryGetProperty(propertyName, out var value) &&
+           value.ValueKind == JsonValueKind.String
+            ? value.GetString()
             : null;
 
-    private static string? CleanYemeniNumber(string input)
+    private static string? NormalizePhone(string? value)
     {
-        if (string.IsNullOrWhiteSpace(input)) return null;
-        var p = input.Replace("+", "").Replace(" ", "").Replace("-", "").Trim();
-        if (p.StartsWith("00")) p = p[2..];
-        if (p.StartsWith("0")) p = "967" + p[1..];
-        if (!p.StartsWith("967")) p = "967" + p;
-        return Regex.IsMatch(p, @"^9677[0-8]\d{7}$") ? p : null;
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+        var phone = Regex.Replace(value, @"[^\d]", "");
+        return Regex.IsMatch(phone, @"^\d{8,15}$") ? phone : null;
     }
 }

@@ -25,7 +25,9 @@ public static class WhatsAppExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
         services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
+        services.AddSingleton<IWhatsAppCloudClient, WhatsAppCloudClient>();
         services.AddHostedService<WhatsAppInboxWorker>();
+        services.AddHostedService<WhatsAppOutboxWorker>();
         return services;
     }
 
@@ -45,8 +47,7 @@ public static class WhatsAppExtensions
             var mode = context.Request.Query["hub.mode"];
             var token = context.Request.Query["hub.verify_token"];
             var challenge = context.Request.Query["hub.challenge"];
-            return mode == "subscribe" &&
-                   string.Equals(token.ToString(), verifyToken, StringComparison.Ordinal)
+            return mode == "subscribe" && string.Equals(token.ToString(), verifyToken, StringComparison.Ordinal)
                 ? Results.Text(challenge.ToString(), "text/plain")
                 : Results.Unauthorized();
         });
@@ -75,26 +76,20 @@ public static class WhatsAppExtensions
                 }
 
                 using var document = JsonDocument.Parse(payload);
-                if (!document.RootElement.TryGetProperty("entry", out var entries) ||
-                    entries.ValueKind != JsonValueKind.Array)
+                if (!document.RootElement.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
                     return Results.BadRequest();
 
                 foreach (var entry in entries.EnumerateArray())
                 {
-                    if (!entry.TryGetProperty("changes", out var changes) ||
-                        changes.ValueKind != JsonValueKind.Array)
+                    if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
                         continue;
-
                     foreach (var change in changes.EnumerateArray())
                     {
-                        if (!change.TryGetProperty("value", out var value) ||
-                            value.ValueKind != JsonValueKind.Object)
+                        if (!change.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Object)
                             continue;
-
                         var phoneNumberId = GetNestedString(value, "metadata", "phone_number_id");
                         if (string.IsNullOrWhiteSpace(phoneNumberId))
                             continue;
-
                         var tenant = await db.WhatsAppTenants.AsNoTracking()
                             .Where(item => item.PhoneNumberId == phoneNumberId && item.IsActive)
                             .Select(item => new { item.TenantId })
@@ -105,8 +100,7 @@ public static class WhatsAppExtensions
                             return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
                         }
 
-                        if (value.TryGetProperty("messages", out var messages) &&
-                            messages.ValueKind == JsonValueKind.Array)
+                        if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
                         {
                             foreach (var message in messages.EnumerateArray())
                             {
@@ -116,11 +110,9 @@ public static class WhatsAppExtensions
                                     logger.LogWarning("Ignoring WhatsApp message without an id");
                                     continue;
                                 }
-
                                 var eventKey = WhatsAppEventKeys.ForMessage(wamid);
                                 if (await db.WhatsAppWebhookInbox.AnyAsync(x => x.EventKey == eventKey, cancellationToken))
                                     continue;
-
                                 db.WhatsAppWebhookInbox.Add(new WhatsAppWebhookInboxEntity
                                 {
                                     TenantId = tenant.TenantId,
@@ -134,8 +126,7 @@ public static class WhatsAppExtensions
                             }
                         }
 
-                        if (value.TryGetProperty("statuses", out var statuses) &&
-                            statuses.ValueKind == JsonValueKind.Array)
+                        if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
                         {
                             foreach (var status in statuses.EnumerateArray())
                             {
@@ -145,11 +136,9 @@ public static class WhatsAppExtensions
                                 if (string.IsNullOrWhiteSpace(wamid) || string.IsNullOrWhiteSpace(statusName) ||
                                     !long.TryParse(timestampText, out var timestamp))
                                     continue;
-
                                 var eventKey = WhatsAppEventKeys.ForStatus(wamid, statusName, timestamp);
                                 if (await db.WhatsAppStatusInbox.AnyAsync(x => x.EventKey == eventKey, cancellationToken))
                                     continue;
-
                                 db.WhatsAppStatusInbox.Add(new WhatsAppStatusInboxEntity
                                 {
                                     TenantId = tenant.TenantId,
@@ -167,26 +156,23 @@ public static class WhatsAppExtensions
                         }
                     }
                 }
-
                 return Results.Ok();
             }
-            catch (JsonException ex)
+            catch (JsonException exception)
             {
-                logger.LogWarning(ex, "Invalid JSON in WhatsApp webhook");
+                logger.LogWarning(exception, "Invalid JSON in WhatsApp webhook");
                 return Results.BadRequest();
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                logger.LogError(ex, "Failed to persist WhatsApp webhook; Meta should retry");
+                logger.LogError(exception, "Failed to persist WhatsApp webhook; Meta should retry");
                 return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             }
         });
-
         return app;
     }
 
-    private static async Task SaveInboxRowAsync(
-        PlatformDbContext db, string eventKey, CancellationToken cancellationToken)
+    private static async Task SaveInboxRowAsync(PlatformDbContext db, string eventKey, CancellationToken cancellationToken)
     {
         try
         {
@@ -194,7 +180,6 @@ public static class WhatsAppExtensions
         }
         catch (DbUpdateException)
         {
-            // A concurrent webhook request may have inserted the same unique EventKey.
             db.ChangeTracker.Clear();
             if (!await db.WhatsAppWebhookInbox.AnyAsync(x => x.EventKey == eventKey, cancellationToken))
                 throw;
