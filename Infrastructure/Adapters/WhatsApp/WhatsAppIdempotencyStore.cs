@@ -1,22 +1,27 @@
-using Microsoft.Extensions.Caching.Memory;
+using System.Collections.Concurrent;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
+/// <summary>Process-local duplicate suppression. Durable deduplication belongs in the persistent inbox.</summary>
 public sealed class WhatsAppIdempotencyStore
 {
-    private readonly IMemoryCache _cache;
     private static readonly TimeSpan Ttl = TimeSpan.FromHours(24);
-
-    public WhatsAppIdempotencyStore(IMemoryCache cache) => _cache = cache;
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _seen = new(StringComparer.Ordinal);
 
     public bool TryRegister(string wamid)
     {
         if (string.IsNullOrWhiteSpace(wamid)) return true;
 
-        var key = $"wamid:{wamid}";
-        if (_cache.TryGetValue(key, out _)) return false;
+        var now = DateTimeOffset.UtcNow;
+        if (_seen.TryGetValue(wamid, out var expiresAt) && expiresAt > now)
+            return false;
 
-        _cache.Set(key, true, Ttl);
+        _seen[wamid] = now.Add(Ttl);
+        if (_seen.Count > 10_000)
+        {
+            foreach (var item in _seen)
+                if (item.Value <= now) _seen.TryRemove(item.Key, out _);
+        }
         return true;
     }
 }
