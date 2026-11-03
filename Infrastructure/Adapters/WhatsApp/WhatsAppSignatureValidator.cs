@@ -5,24 +5,51 @@ namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
 public static class WhatsAppSignatureValidator
 {
-    public static bool Validate(string payload, string signature, string appSecret)
-    {
-        if (string.IsNullOrWhiteSpace(appSecret) || string.IsNullOrWhiteSpace(signature))
-            return false;
+    private const string SignaturePrefix = "sha256=";
+    private const int Sha256HashLength = 32;
+    private const int SignatureLength = SignaturePrefix.Length + (Sha256HashLength * 2);
 
+    public static bool Validate(
+        ReadOnlySpan<byte> payload,
+        string? signature,
+        string? appSecret)
+    {
+        if (string.IsNullOrWhiteSpace(appSecret) ||
+            string.IsNullOrWhiteSpace(signature) ||
+            signature.Length != SignatureLength ||
+            !signature.StartsWith(SignaturePrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        byte[] suppliedHash;
         try
         {
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(appSecret));
-            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-            var expected = "sha256=" + Convert.ToHexString(hash).ToLowerInvariant();
-
-            return CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(expected),
-                Encoding.UTF8.GetBytes(signature));
+            suppliedHash = Convert.FromHexString(signature[SignaturePrefix.Length..]);
         }
-        catch
+        catch (FormatException)
         {
             return false;
         }
+
+        if (suppliedHash.Length != Sha256HashLength)
+            return false;
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(appSecret));
+        var expectedHash = hmac.ComputeHash(payload.ToArray());
+
+        return CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash);
+    }
+
+    // Compatibility overload for existing callers that still provide a string.
+    public static bool Validate(
+        string? payload,
+        string? signature,
+        string? appSecret)
+    {
+        if (payload is null)
+            return false;
+
+        return Validate(Encoding.UTF8.GetBytes(payload), signature, appSecret);
     }
 }
