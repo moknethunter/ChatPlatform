@@ -34,6 +34,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
 builder.Services.AddSingleton<WhatsAppIdempotencyStore>();
+builder.Services.AddHostedService<WhatsAppWebhookInboxWorker>();
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
