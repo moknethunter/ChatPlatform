@@ -190,7 +190,7 @@ public sealed class WhatsAppOnboardingController : ControllerBase
         _log = log;
     }
 
-    // ═══════════════════════════════════════════════════════
+    // ═════════════════════════════════���═════════════════════
     // 1) Embedded Signup — OAuth exchange + Subscribe + Save
     // ═══════════════════════════════════════════════════════
     [HttpPost("exchange-code")]
@@ -346,5 +346,4 @@ public sealed class WhatsAppOnboardingController : ControllerBase
 
     public record ExchangeReq(string Code, string WabaId, string PhoneNumberId, string? RedirectUri);
     public record RegisterReq(string PhoneNumberId, string Pin);
-}
 }
