@@ -4,222 +4,214 @@ using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
-/// <summary>Processes persisted WhatsApp webhook and delivery-status events with at-least-once semantics.</summary>
+/// <summary>
+/// يقرأ الرسائل الواردة من WhatsAppWebhookInbox ويعالجها:
+/// 1) يستخرج بيانات الرسالة من PayloadJson
+/// 2) يبحث/ينشئ محادثة
+/// 3) يحفظ الرسالة الواردة في WhatsAppMessages
+/// 4) يحدّث نافذة 24 ساعة (LastInboundAtUtc + WindowExpiresAtUtc)
+/// 5) ينشر whatsapp.inbound على IEventBus ← يبثه SignalRAdapter عبر SignalR
+/// 6) يعلّم الصف كـ Done
+/// </summary>
 public sealed class WhatsAppInboxWorker : BackgroundService
 {
-    private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(2);
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<WhatsAppInboxWorker> _logger;
-    private readonly string _leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
+    private readonly IEventBus _bus;
+    private readonly ILogger<WhatsAppInboxWorker> _log;
 
-    public WhatsAppInboxWorker(IServiceScopeFactory scopeFactory, ILogger<WhatsAppInboxWorker> logger)
+    public WhatsAppInboxWorker(
+        IServiceScopeFactory scopeFactory,
+        IEventBus bus,
+        ILogger<WhatsAppInboxWorker> log)
     {
         _scopeFactory = scopeFactory;
-        _logger = logger;
+        _bus = bus;
+        _log = log;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _log.LogInformation("WhatsAppInboxWorker started");
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                var didWork = await ProcessOneWebhookAsync(stoppingToken);
-                didWork |= await ProcessOneStatusAsync(stoppingToken);
-                if (!didWork)
-                    await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                var processed = await ProcessBatchAsync(stoppingToken);
+                var delay = processed == 0 ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(200);
+                await Task.Delay(delay, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (Exception ex)
             {
-                break;
+                _log.LogError(ex, "Unexpected error in inbox loop");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+        }
+
+        _log.LogInformation("WhatsAppInboxWorker stopped");
+    }
+
+    private async Task<int> ProcessBatchAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var now = DateTime.UtcNow;
+
+        // ⚠️ ملاحظة: Status قد يكون null افتراضياً (لأن webhook لا يضبطه)
+        var batch = await db.WhatsAppWebhookInbox
+            .Where(x => (x.Status == null || x.Status == "Pending")
+                     && x.NextAttemptAtUtc <= now)
+            .OrderBy(x => x.ReceivedAtUtc)
+            .Take(20)
+            .ToListAsync(ct);
+
+        if (batch.Count == 0) return 0;
+
+        foreach (var row in batch)
+        {
+            try
+            {
+                await ProcessOneAsync(db, row, ct);
+                row.Status = "Done";
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "WhatsApp inbox worker iteration failed");
-                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
+                _log.LogError(ex, "Failed to process inbox row {Id}", row.Id);
+                row.Status = "Pending";
+                row.NextAttemptAtUtc = DateTime.UtcNow.AddMinutes(1);
             }
+            await db.SaveChangesAsync(ct);
         }
+
+        return batch.Count;
     }
 
-    private async Task<bool> ProcessOneWebhookAsync(CancellationToken cancellationToken)
+    private async Task ProcessOneAsync(PlatformDbContext db, WhatsAppWebhookInboxEntity row, CancellationToken ct)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var bus = scope.ServiceProvider.GetRequiredService<IEventBus>();
+        using var doc = JsonDocument.Parse(row.PayloadJson);
+        var msg = doc.RootElement;
+
+        var wamid = GetStr(msg, "id");
+        var from = GetStr(msg, "from");
+        var type = GetStr(msg, "type") ?? "unknown";
+
+        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(wamid))
+        {
+            _log.LogWarning("Inbox {Id}: missing from/wamid, skipping", row.Id);
+            return;
+        }
+
+        // استخراج النص (إن وُجد)
+        string? text = null;
+        if (type == "text" && msg.TryGetProperty("text", out var textObj))
+            text = GetStr(textObj, "body");
+
+        var preview = text ?? $"[{type}]";
+        if (preview.Length > 200) preview = preview[..200];
+
         var now = DateTime.UtcNow;
-        var item = await db.WhatsAppWebhookInbox
-            .Where(x => x.Attempts < x.MaxAttempts &&
-                        ((x.Status == "Pending" && x.NextAttemptAtUtc <= now) ||
-                         (x.Status == "Processing" && x.LeaseUntilUtc <= now)))
-            .OrderBy(x => x.ReceivedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (item is null)
-            return false;
 
-        var claimed = await db.WhatsAppWebhookInbox
-            .Where(x => x.Id == item.Id && x.Attempts < x.MaxAttempts &&
-                        ((x.Status == "Pending" && x.NextAttemptAtUtc <= now) ||
-                         (x.Status == "Processing" && x.LeaseUntilUtc <= now)))
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(x => x.Status, "Processing")
-                .SetProperty(x => x.LeaseOwner, _leaseOwner)
-                .SetProperty(x => x.LeaseUntilUtc, now.Add(LeaseDuration))
-                .SetProperty(x => x.Attempts, x => x.Attempts + 1), cancellationToken);
-        if (claimed == 0)
-            return true;
+        // 1) ابحث/أنشئ المحادثة
+        var conv = await db.WhatsAppConversations
+            .FirstOrDefaultAsync(c => c.TenantId == row.TenantId
+                                   && c.PhoneNumberId == row.PhoneNumberId
+                                   && c.ContactPhone == from, ct);
 
-        item = await db.WhatsAppWebhookInbox.SingleAsync(x => x.Id == item.Id, cancellationToken);
-        try
+        if (conv is null)
         {
-            using var payload = JsonDocument.Parse(item.PayloadJson);
-            var message = payload.RootElement;
-            var from = GetString(message, "from");
-            var wamid = GetString(message, "id");
-            if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(wamid))
-                throw new InvalidDataException("Persisted WhatsApp message is missing sender or message id.");
-
-            var conversation = await db.WhatsAppConversations.SingleOrDefaultAsync(x =>
-                x.TenantId == item.TenantId && x.PhoneNumberId == item.PhoneNumberId && x.ContactPhone == from,
-                cancellationToken);
-            var receivedAt = ReadUnixTime(GetString(message, "timestamp")) ?? DateTime.UtcNow;
-            if (conversation is null)
+            conv = new WhatsAppConversationEntity
             {
-                conversation = new WhatsAppConversationEntity
-                {
-                    TenantId = item.TenantId,
-                    PhoneNumberId = item.PhoneNumberId,
-                    ContactPhone = from,
-                    CreatedAtUtc = receivedAt
-                };
-                db.WhatsAppConversations.Add(conversation);
-            }
-
-            var existingMessage = await db.WhatsAppMessages.SingleOrDefaultAsync(x => x.Wamid == wamid, cancellationToken);
-            if (existingMessage is null)
-            {
-                var type = GetString(message, "type") ?? "unknown";
-                var text = type == "text" && message.TryGetProperty("text", out var textElement)
-                    ? GetString(textElement, "body")
-                    : null;
-                var contactName = GetContactName(payload.RootElement);
-                if (!string.IsNullOrWhiteSpace(contactName))
-                    conversation.ContactName = contactName;
-
-                db.WhatsAppMessages.Add(new WhatsAppMessageEntity
-                {
-                    TenantId = item.TenantId,
-                    Conversation = conversation,
-                    Wamid = wamid,
-                    Direction = "Inbound",
-                    MessageType = type,
-                    ContentJson = message.GetRawText(),
-                    TextPreview = text is null ? null : text[..Math.Min(text.Length, 200)],
-                    Status = "Received",
-                    TimestampUtc = receivedAt,
-                    CreatedAtUtc = DateTime.UtcNow
-                });
-                conversation.LastInboundAtUtc = receivedAt;
-                conversation.WindowExpiresAtUtc = receivedAt.AddHours(24);
-                conversation.UnreadCount++;
-                conversation.UpdatedAtUtc = DateTime.UtcNow;
-                await db.SaveChangesAsync(cancellationToken);
-
-                await bus.PublishAsync(new PlatformEvent
-                {
-                    Type = WhatsAppAdapter.InboundType,
-                    Source = "whatsapp.inbox",
-                    Payload = JsonSerializer.SerializeToElement(new
-                    {
-                        from,
-                        text,
-                        wamid,
-                        phoneNumberId = item.PhoneNumberId,
-                        tenantId = item.TenantId,
-                        messageType = type
-                    })
-                }, cancellationToken);
-            }
-
-            item.Status = "Processed";
-            item.ProcessedAtUtc = DateTime.UtcNow;
-            item.LeaseOwner = null;
-            item.LeaseUntilUtc = null;
-            item.LastError = null;
-            await db.SaveChangesAsync(cancellationToken);
-            return true;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            await RecordWebhookFailureAsync(db, item, ex, cancellationToken);
-            _logger.LogWarning(ex, "WhatsApp webhook inbox item {EventKey} failed (attempt {Attempt})", item.EventKey, item.Attempts);
-            return true;
-        }
-    }
-
-    private async Task<bool> ProcessOneStatusAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var item = await db.WhatsAppStatusInbox
-            .Where(x => !x.Processed)
-            .OrderBy(x => x.ReceivedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (item is null)
-            return false;
-
-        var message = await db.WhatsAppMessages.SingleOrDefaultAsync(x => x.Wamid == item.Wamid, cancellationToken);
-        if (message is null)
-            return false; // Message may arrive in the next webhook; retain the status for a later pass.
-
-        message.Status = item.Status.ToLowerInvariant() switch
-        {
-            "sent" => "Sent",
-            "delivered" => "Delivered",
-            "read" => "Read",
-            "failed" => "Failed",
-            _ => message.Status
-        };
-        item.Processed = true;
-        item.ProcessedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
-        return true;
-    }
-
-    private static async Task RecordWebhookFailureAsync(
-        PlatformDbContext db, WhatsAppWebhookInboxEntity item, Exception exception, CancellationToken cancellationToken)
-    {
-        item.LastError = exception.Message.Length > 2000 ? exception.Message[..2000] : exception.Message;
-        item.LeaseOwner = null;
-        item.LeaseUntilUtc = null;
-        if (item.Attempts >= item.MaxAttempts)
-        {
-            item.Status = "Failed";
+                TenantId = row.TenantId,
+                PhoneNumberId = row.PhoneNumberId,
+                ContactPhone = from,
+                Status = "open",
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                LastInboundAtUtc = now,
+                WindowExpiresAtUtc = now.AddHours(24)
+            };
+            db.WhatsAppConversations.Add(conv);
+            await db.SaveChangesAsync(ct);
         }
         else
         {
-            item.Status = "Pending";
-            var delaySeconds = Math.Min(3600, Math.Pow(2, Math.Min(item.Attempts, 10)));
-            item.NextAttemptAtUtc = DateTime.UtcNow.AddSeconds(delaySeconds);
+            conv.LastInboundAtUtc = now;
+            conv.WindowExpiresAtUtc = now.AddHours(24);
+            conv.UpdatedAtUtc = now;
+            if (conv.Status != "open") conv.Status = "open";
         }
-        await db.SaveChangesAsync(cancellationToken);
+
+        // 2) تجنب التكرار (Wamid فريد)
+        var alreadyExists = await db.WhatsAppMessages.AnyAsync(m => m.Wamid == wamid, ct);
+        long messageId;
+        if (!alreadyExists)
+        {
+            var message = new WhatsAppMessageEntity
+            {
+                TenantId = row.TenantId,
+                ConversationId = conv.Id,
+                Direction = "Inbound",
+                MessageType = type,
+                ContentJson = row.PayloadJson,
+                TextPreview = preview,
+                Status = "Received",
+                TimestampUtc = now,
+                CreatedAtUtc = now,
+                Wamid = wamid
+            };
+            db.WhatsAppMessages.Add(message);
+            await db.SaveChangesAsync(ct);
+            messageId = message.Id;
+        }
+        else
+        {
+            var existing = await db.WhatsAppMessages.AsNoTracking()
+                .Where(m => m.Wamid == wamid)
+                .Select(m => new { m.Id })
+                .FirstAsync(ct);
+            messageId = existing.Id;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // 3) 🔴 بث SignalR — هذا هو السطر الذي كان ناقصاً
+        // ═══════════════════════════════════════════════════════════════
+        try
+        {
+            await _bus.PublishAsync(new PlatformEvent
+            {
+                Type = "whatsapp.inbound",
+                Source = "whatsapp",
+                Payload = JsonSerializer.SerializeToElement(new
+                {
+                    conversationId = conv.Id,
+                    messageId,
+                    from,
+                    text,
+                    type,
+                    wamid,
+                    timestampUtc = now
+                })
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Failed to publish whatsapp.inbound for {Wamid}", wamid);
+        }
+
+        _log.LogInformation(
+            "Inbound {Wamid} from {From} → conv {ConvId}, msg {MsgId}",
+            wamid, from, conv.Id, messageId);
     }
 
-    private static string? GetString(JsonElement element, string property)
-        => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) &&
-           value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-
-    private static DateTime? ReadUnixTime(string? timestamp)
-        => long.TryParse(timestamp, out var unix)
-            ? DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime
-            : null;
-
-    private static string? GetContactName(JsonElement message)
-    {
-        // Contact profile names are stored at the enclosing webhook value, not in an individual message.
-        // A worker deliberately leaves this unset until the webhook captures profile metadata.
-        return null;
-    }
+    private static string? GetStr(JsonElement el, string name)
+        => el.ValueKind == JsonValueKind.Object
+           && el.TryGetProperty(name, out var v)
+           && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }
