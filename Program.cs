@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChatPlatform.Infrastructure.Adapters;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Adapters;
@@ -32,6 +33,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
+builder.Services.AddSingleton<IIntegrationAdapter, SignalRAdapter>();
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient("ResilientClient")
