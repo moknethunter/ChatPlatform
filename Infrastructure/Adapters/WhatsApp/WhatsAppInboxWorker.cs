@@ -74,7 +74,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
         if (batch.Count == 0) return 0;
 
-        foreach (var row in batch)
+        fo٧reach (var row in batch)
         {
             try
             {
@@ -150,7 +150,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
         // 2) تجنب التكرار (Wamid فريد)
         var alreadyExists = await db.WhatsAppMessages.AnyAsync(m => m.Wamid == wamid, ct);
-        long messageId;
+        Guid messageId;
         if (!alreadyExists)
         {
             var message = new WhatsAppMessageEntity
