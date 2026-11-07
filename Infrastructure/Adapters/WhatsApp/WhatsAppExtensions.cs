@@ -251,7 +251,7 @@ public static class WhatsAppExtensions
         // 5) العمال
         services.AddHostedService<WhatsAppInboxWorker>();
         services.AddHostedService<WhatsAppOutboxWorker>();       // 🔴 جديد
-        services.AddHostedService<WhatsAppStatusProcessor>();    // 🔴 جديد
+        //services.AddHostedService<WhatsAppStatusProcessor>();    // 🔴 جديد
 
         return services;
     }
