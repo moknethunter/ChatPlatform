@@ -28,4 +28,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/moknethunter/chatplatform:latest
+          tags: ghcr.io/moknethunter/chatdddd:latest
