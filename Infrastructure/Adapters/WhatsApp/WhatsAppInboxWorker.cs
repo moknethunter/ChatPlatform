@@ -74,7 +74,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
         if (batch.Count == 0) return 0;
 
-        fo٧reach (var row in batch)
+        foreach (var row in batch)
         {
             try
             {
