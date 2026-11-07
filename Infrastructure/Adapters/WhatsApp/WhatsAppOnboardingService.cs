@@ -215,8 +215,8 @@ public sealed record WabaDetailsResult(
     string? BusinessVerificationStatus, string? Status,
     string? ErrorCode, string? ErrorMessage)
 {
-    public static WabaDetailsResult Ok(string? id, string? name, string? ar, string? bv, string? st) =>
-        new(true, id, name, ar, bv, st, null, null);
+    public static WabaDetailsResult Ok(string? id, string? name, string? accountReviewStatus, string? businessVerificationStatus, string? status) =>
+        new(true, id, name, accountReviewStatus, businessVerificationStatus, status, null, null);
     public static WabaDetailsResult Fail(string code, string message) =>
         new(false, null, null, null, null, null, code, message);
 }
