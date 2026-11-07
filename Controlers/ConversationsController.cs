@@ -41,8 +41,8 @@ public class ConversationsController : ControllerBase
         return Ok(list);
     }
 
-    [HttpGet("{id:long}/messages")]
-    public async Task<IActionResult> GetMessages(long id, [FromQuery] int take = 100, CancellationToken ct = default)
+    [HttpGet("{id:Guid}/messages")]
+    public async Task<IActionResult> GetMessages(Guid id, [FromQuery] int take = 100, CancellationToken ct = default)
     {
         var msgs = await _db.WhatsAppMessages
             .AsNoTracking()
