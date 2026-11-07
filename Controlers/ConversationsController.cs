@@ -9,13 +9,22 @@ namespace ChatPlatform.Controllers;
 public class ConversationsController : ControllerBase
 {
     private readonly PlatformDbContext _db;
+
     public ConversationsController(PlatformDbContext db) => _db = db;
 
+    // ═══════════════════════════════════════════════════════════
+    // GET /api/conversations
+    // يعيد قائمة المحادثات مرتبة بالأحدث، مع آخر رسالة
+    // ═══════════════════════════════════════════════════════════
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? tenantId, CancellationToken ct)
+    public async Task<IActionResult> List(
+        [FromQuery] string? tenantId,
+        CancellationToken ct)
     {
         var q = _db.WhatsAppConversations.AsNoTracking();
-        if (!string.IsNullOrEmpty(tenantId)) q = q.Where(c => c.TenantId == tenantId);
+
+        if (!string.IsNullOrEmpty(tenantId))
+            q = q.Where(c => c.TenantId == tenantId);
 
         var list = await q
             .OrderByDescending(c => c.UpdatedAtUtc)
@@ -28,12 +37,19 @@ public class ConversationsController : ControllerBase
                 status = c.Status,
                 lastInboundAtUtc = c.LastInboundAtUtc,
                 windowExpiresAtUtc = c.WindowExpiresAtUtc,
-                isWindowOpen = c.WindowExpiresAtUtc.HasValue && c.WindowExpiresAtUtc.Value > DateTime.UtcNow,
+                isWindowOpen = c.WindowExpiresAtUtc.HasValue
+                            && c.WindowExpiresAtUtc.Value > DateTime.UtcNow,
                 updatedAtUtc = c.UpdatedAtUtc,
                 lastMessage = _db.WhatsAppMessages
                     .Where(m => m.ConversationId == c.Id)
                     .OrderByDescending(m => m.TimestampUtc)
-                    .Select(m => new { text = m.TextPreview, direction = m.Direction, status = m.Status, timestampUtc = m.TimestampUtc })
+                    .Select(m => new
+                    {
+                        text = m.TextPreview,
+                        direction = m.Direction,
+                        status = m.Status,
+                        timestampUtc = m.TimestampUtc
+                    })
                     .FirstOrDefault()
             })
             .ToListAsync(ct);
@@ -41,14 +57,24 @@ public class ConversationsController : ControllerBase
         return Ok(list);
     }
 
-    [HttpGet("{id:Guid}/messages")]
-    public async Task<IActionResult> GetMessages(Guid id, [FromQuery] int take = 100, CancellationToken ct = default)
+    // ═══════════════════════════════════════════════════════════
+    // GET /api/conversations/{id}/messages
+    // يعيد رسائل محادثة محددة، مرتبة تصاعدياً (الأقدم أولاً)
+    // ═══════════════════════════════════════════════════════════
+    [HttpGet("{id:guid}/messages")]
+    public async Task<IActionResult> GetMessages(
+        Guid id,
+        [FromQuery] int take = 100,
+        CancellationToken ct = default)
     {
+        // ✅ تحقق من take (بين 1 و 200)
+        var safeTake = Math.Clamp(take, 1, 200);
+
         var msgs = await _db.WhatsAppMessages
             .AsNoTracking()
             .Where(m => m.ConversationId == id)
             .OrderByDescending(m => m.TimestampUtc)
-            .Take(Math.Min(take, 200))
+            .Take(safeTake)
             .Select(m => new
             {
                 id = m.Id,
@@ -62,7 +88,9 @@ public class ConversationsController : ControllerBase
             })
             .ToListAsync(ct);
 
+        // نعكس الترتيب ليظهر الأقدم أولاً في الواجهة
         msgs.Reverse();
+
         return Ok(msgs);
     }
 }
