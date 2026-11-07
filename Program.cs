@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ChatPlatform.Infrastructure.Adapters;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Adapters;
@@ -18,28 +17,46 @@ using Polly.Extensions.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ══════════════════════════════════════════════════════════════
+// 1) قاعدة البيانات
+// ══════════════════════════════════════════════════════════════
 builder.Services.AddDbContext<PlatformDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default") ?? "Data Source=chatplatform.db"));
 
+// ══════════════════════════════════════════════════════════════
+// 2) الإعدادات وحماية البيانات
+// ══════════════════════════════════════════════════════════════
 builder.Services.Configure<EngineOptions>(builder.Configuration.GetSection("EngineSettings"));
 builder.Services.AddDataProtection()
     .PersistKeysToDbContext<PlatformDbContext>()
     .SetApplicationName("ChatPlatform");
 
+// ══════════════════════════════════════════════════════════════
+// 3) ناقل الأحداث والمحرك
+// ══════════════════════════════════════════════════════════════
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
 builder.Services.AddHostedService<CoreEngine>();
 
+// ══════════════════════════════════════════════════════════════
+// 4) المحوّلات (Adapters)
+// ══════════════════════════════════════════════════════════════
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
-//builder.Services.AddSingleton<IIntegrationAdapter, SignalRAdapter>();
+// SignalRAdapter معطّل مؤقتاً (لم نعد نحتاجه، الواجهة تستخدم Polling)
 
+// ══════════════════════════════════════════════════════════════
+// 5) Controllers + HttpClient
+// ══════════════════════════════════════════════════════════════
 builder.Services.AddControllers();
 builder.Services.AddHttpClient("ResilientClient")
     .AddPolicyHandler(HttpPolicyExtensions.HandleTransientHttpError()
         .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
+// ══════════════════════════════════════════════════════════════
+// 6) SignalR + CORS
+// ══════════════════════════════════════════════════════════════
 builder.Services.AddSignalR();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .SetIsOriginAllowed(origin =>
@@ -53,27 +70,38 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .AllowCredentials()));
 
 var app = builder.Build();
+
+// ══════════════════════════════════════════════════════════════
+// 7) تهيئة قاعدة البيانات — 🔴 التعديل الحاسم
+// ══════════════════════════════════════════════════════════════
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
     try
     {
-        db.Database.Migrate();
+        // ✅ يُنشئ كل الجداول من النماذج تلقائياً
+        db.Database.EnsureCreated();
     }
     catch (Exception ex)
     {
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Failed to apply database migrations.");
+        logger.LogError(ex, "Failed to initialize database.");
         throw;
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+// 8) Middlewares — ⚠️ ترتيب CORS أولاً ثم ApiKey
+// ══════════════════════════════════════════════════════════════
 app.UseMiddleware<GlobalExceptionMiddleware>();
-app.UseMiddleware<ApiKeyMiddleware>();
-app.UseCors();
+app.UseCors();                                       // ← أولاً
+app.UseMiddleware<ApiKeyMiddleware>();               // ← ثانياً
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// ══════════════════════════════════════════════════════════════
+// 9) نقاط النهاية
+// ══════════════════════════════════════════════════════════════
 app.MapGet("/api/platform-info", (HttpRequest request) =>
 {
     var baseUrl = $"{request.Scheme}://{request.Host}";
