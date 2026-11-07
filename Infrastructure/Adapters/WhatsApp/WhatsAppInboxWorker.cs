@@ -16,7 +16,7 @@ namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 /// 2) يبحث/ينشئ محادثة
 /// 3) يحفظ الرسالة الواردة في WhatsAppMessages
 /// 4) يحدّث نافذة 24 ساعة (LastInboundAtUtc + WindowExpiresAtUtc)
-/// 5) ينشر whatsapp.inbound على IEventBus ← يبثه SignalRAdapter عبر SignalR
+/// 5) ينشر whatsapp.inbound على IEventBus (للتسجيل والمحوّلات الأخرى)
 /// 6) يعلّم الصف كـ Done
 /// </summary>
 public sealed class WhatsAppInboxWorker : BackgroundService
@@ -44,10 +44,15 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             try
             {
                 var processed = await ProcessBatchAsync(stoppingToken);
-                var delay = processed == 0 ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(200);
+                var delay = processed == 0
+                    ? TimeSpan.FromSeconds(2)
+                    : TimeSpan.FromMilliseconds(200);
                 await Task.Delay(delay, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Unexpected error in inbox loop");
@@ -64,7 +69,6 @@ public sealed class WhatsAppInboxWorker : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
         var now = DateTime.UtcNow;
 
-        // ⚠️ ملاحظة: Status قد يكون null افتراضياً (لأن webhook لا يضبطه)
         var batch = await db.WhatsAppWebhookInbox
             .Where(x => (x.Status == null || x.Status == "Pending")
                      && x.NextAttemptAtUtc <= now)
@@ -118,7 +122,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
         var now = DateTime.UtcNow;
 
-        // 1) ابحث/أنشئ المحادثة
+        // ═══ 1) ابحث/أنشئ المحادثة ═══
         var conv = await db.WhatsAppConversations
             .FirstOrDefaultAsync(c => c.TenantId == row.TenantId
                                    && c.PhoneNumberId == row.PhoneNumberId
@@ -138,7 +142,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 WindowExpiresAtUtc = now.AddHours(24)
             };
             db.WhatsAppConversations.Add(conv);
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);  // ← لضمان توليد conv.Id (Guid)
         }
         else
         {
@@ -148,15 +152,17 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             if (conv.Status != "open") conv.Status = "open";
         }
 
-        // 2) تجنب التكرار (Wamid فريد)
-        var alreadyExists = await db.WhatsAppMessages.AnyAsync(m => m.Wamid == wamid, ct);
+        // ═══ 2) تحقق من التكرار (Wamid فريد) ═══
+        var alreadyExists = await db.WhatsAppMessages
+            .AnyAsync(m => m.Wamid == wamid, ct);
+
         Guid messageId;
         if (!alreadyExists)
         {
             var message = new WhatsAppMessageEntity
             {
                 TenantId = row.TenantId,
-                ConversationId = conv.Id,
+                ConversationId = conv.Id,        // ← Guid
                 Direction = "Inbound",
                 MessageType = type,
                 ContentJson = row.PayloadJson,
@@ -167,7 +173,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 Wamid = wamid
             };
             db.WhatsAppMessages.Add(message);
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);       // ← لضمان توليد message.Id (Guid)
             messageId = message.Id;
         }
         else
@@ -179,9 +185,9 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             messageId = existing.Id;
         }
 
-        // ═══════════════════════════════════════════════════════════════
-        // 3) 🔴 بث SignalR — هذا هو السطر الذي كان ناقصاً
-        // ═══════════════════════════════════════════════════════════════
+        // ═══ 3) نشر الحدث على IEventBus ═══
+        // ملاحظة: SignalRAdapter محذوف حالياً. الحدث يُستخدم للتسجيل
+        // وللمحوّلات الأخرى (ConsoleAdapter, ChatAdapter...).
         try
         {
             await _bus.PublishAsync(new PlatformEvent
