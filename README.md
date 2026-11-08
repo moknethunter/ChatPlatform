@@ -127,6 +127,46 @@ flowchart TB
 
     style META fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
     style BACKEND fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style CLIENT fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    style CLIENT
+
+fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     style DATA fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style WORKERS fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+    style WORKERS
+fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+
+## 🗂️ بنية المشروع
+
+```mermaid
+flowchart TB
+    subgraph SOLUTION["📦 ChatPlatform Solution"]
+        direction TB
+
+        subgraph PROJ1["🌐 ChatPlatform (Web API)"]
+            P1["📁 Controllers<br/>ConversationsController<br/>MessagesController<br/>TenantsController"]
+            P2["📁 Hubs<br/>ChatHub"]
+            P3["📁 Middleware<br/>GlobalExceptionMiddleware<br/>ApiKeyMiddleware"]
+            P4["📁 wwwroot<br/>privacy.html<br/>terms.html<br/>data-deletion.html"]
+            P5["Program.cs<br/>appsettings.json<br/>Dockerfile"]
+        end
+
+        subgraph PROJ2["⚙️ ChatPlatform.Core"]
+            C1["📁 Abstractions<br/>IIntegrationAdapter"]
+            C2["📁 Events<br/>PlatformEvent"]
+        end
+
+        subgraph PROJ3["💾 ChatPlatform.Infrastructure"]
+            I1["📁 Adapters<br/>Console / Chat / Universal<br/>WhatsApp: Adapter, Client, Workers"]
+            I2["📁 Data<br/>PlatformDbContext<br/>8 Entities"]
+            I3["📁 Engine<br/>CoreEngine"]
+            I4["📁 Messaging<br/>InMemoryEventBus"]
+        end
+    end
+
+    PROJ1 --> PROJ2
+    PROJ1 --> PROJ3
+    PROJ3 --> PROJ2
+
+    style PROJ1 fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style PROJ2 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
+    style PROJ3 fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+```
