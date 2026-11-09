@@ -4,16 +4,13 @@ using System.Text.RegularExpressions;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
-/// <summary>
-/// يستمع لحدث whatsapp.inbound، يطابق رسالة العميل مع قاعدة رد،
-/// ثم ينشر whatsapp.send (يستهلكه WhatsAppAdapter ويُرسله عبر Outbox).
-/// </summary>
 public sealed class WhatsAppAutoReplyAdapter : IIntegrationAdapter
 {
     public string Name => "whatsapp-autoreply";
