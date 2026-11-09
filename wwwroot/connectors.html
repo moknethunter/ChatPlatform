@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>الربط والانبوكس - منصتي</title>
+<style>
+*{box-sizing:border-box;font-family:Tahoma,Arial}
+body{margin:0;background:#f0f2f5}
+.header{background:#075e54;color:#fff;padding:15px;text-align:center;font-size:18px;font-weight:bold;position:sticky;top:0}
+.container{max-width:600px;margin:auto;padding:12px}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px #00000020}
+label{font-weight:bold;font-size:13px}
+input,textarea{width:100%;padding:11px;margin:7px 0 10px;border:1px solid #ddd;border-radius:8px;font-size:14px}
+button{width:100%;padding:12px;border:none;border-radius:8px;background:#25d366;color:#fff;font-weight:bold;font-size:15px;cursor:pointer}
+button.blue{background:#0084ff}
+button.gray{background:#eee;color:#333}
+#status{padding:10px;border-radius:8px;background:#e7f7ed;color:#075e54;font-size:13px;text-align:center;margin-bottom:12px}
+#inbox-list{min-height:200px}
+.msg{padding:10px 12px;border-radius:12px;margin:8px 0;max-width:85%;font-size:14px;line-height:1.6}
+.msg.in{background:#fff;border:1px solid #eee;box-shadow:0 1px 2px #00000010}
+.msg.out{background:#dcf8c6;margin-right:auto;text-align:left}
+.msg b{font-size:12px;color:#075e54;display:block}
+.msg span{font-size:11px;color:#999}
+.flex{display:flex;gap:8px}
+.flex input{flex:1}
+</style>
+</head>
+<body>
+<div class="header">📩 انبوكس واتساب - منصتي</div>
+<div class="container">
+
+<div id="status">⏳ جاري تحميل الرسائل...</div>
+
+<div class="card">
+<h3 style="margin:0 0 5px">🔗 ربط واتساب</h3>
+<label>رقم الواتساب التجريبي</label>
+<input id="phone" value="+1 (555) 634-4290">
+<label>رمز الوصول Token من ميتا</label>
+<input id="token" placeholder="الصقه من زر إنشاء رمز في ميتا">
+<label>رابط Webhook في ميتا</label>
+<input id="webhook" readonly value="https://chatmmmd-6696f.containers.snapdeploy.app/api/whatsapp/webhook">
+<button onclick="save()">💾 حفظ الربط</button>
+<p style="font-size:12px;color:#666">انسخ رابط الـ Webhook هذا والصقه في ميتا > Webhooks > Callback URL</p>
+</div>
+
+<div class="card">
+<h3 style="margin:0">💬 الانبوكس - الرسائل اليدوية</h3>
+<p style="font-size:12px;color:#888">تتحدث تلقائياً كل 3 ثواني</p>
+<div id="inbox-list"></div>
+</div>
+
+<div class="card">
+<h3 style="margin:0 0 8px">✍️ رد يدوي</h3>
+<div class="flex">
+<input id="to" placeholder="رقم المستلم مثلا 967774821733">
+</div>
+<textarea id="replyText" rows="2" placeholder="اكتب ردك هنا..."></textarea>
+<button class="blue" onclick="sendManual()">📤 إرسال رد يدوي</button>
+<button class="gray" onclick="loadInbox()" style="margin-top:8px">🔄 تحديث الآن</button>
+</div>
+
+</div>
+
+<script>
+const API = '/api/whatsapp';
+
+async function loadInbox(){
+  try{
+    let res = await fetch(API + '/messages');
+    let msgs = await res.json();
+    let box = document.getElementById('inbox-list');
+    let st = document.getElementById('status');
+    if(!msgs || msgs.length===0){
+      box.innerHTML = '<p style="text-align:center;color:#999">لا توجد رسائل بعد<br>ارسل هلا من جوالك للرقم التجريبي</p>';
+      st.innerHTML = '⚠️ لا توجد رسائل - ارسل رسالة من جوالك الآن';
+      return;
+    }
+    st.innerHTML = '✅ متصل - عدد الرسائل: ' + msgs.length;
+    box.innerHTML = '';
+    msgs.forEach(m=>{
+      let from = m.from || m.phone || 'زبون';
+      let text = m.text || m.body || '';
+      let time = m.time || '';
+      let dir = m.direction || 'in';
+      box.innerHTML += `<div class="msg ${dir}"><b>${dir==='in'?'📩':'📤'} ${from}</b>${text}<br><span>${time}</span></div>`;
+    });
+  }catch(e){
+    document.getElementById('status').innerHTML = '❌ لم يتم الاتصال بالسيرفر - تأكد ان ملف WhatsAppController يحفظ الرسائل';
+  }
+}
+
+function save(){
+  localStorage.setItem('wa_token', document.getElementById('token').value);
+  localStorage.setItem('wa_phone', document.getElementById('phone').value);
+  alert('تم الحفظ ✅ الآن الصق رابط الـ Webhook في ميتا');
+}
+
+async function sendManual(){
+  let to = document.getElementById('to').value.trim();
+  let text = document.getElementById('replyText').value.trim();
+  if(!to || !text){ alert('اكتب الرقم والرسالة'); return; }
+  await fetch(API + '/send', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({to:to, text:text})
+  });
+  document.getElementById('replyText').value='';
+  loadInbox();
+}
+
+document.getElementById('token').value = localStorage.getItem('wa_token')||'';
+document.getElementById('phone').value = localStorage.getItem('wa_phone')||'+1 (555) 634-4290';
+
+setInterval(loadInbox, 3000);
+loadInbox();
+</script>
+</body>
+</html>
