@@ -44,6 +44,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
+builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // SignalRAdapter معطّل مؤقتاً (لم نعد نحتاجه، الواجهة تستخدم Polling)
 
 // ══════════════════════════════════════════════════════════════
