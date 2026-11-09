@@ -17,7 +17,7 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<WhatsAppConversationEntity> WhatsAppConversations => Set<WhatsAppConversationEntity>();
     public DbSet<WhatsAppMessageEntity> WhatsAppMessages => Set<WhatsAppMessageEntity>();
     public DbSet<WhatsAppOutboxEntity> WhatsAppOutbox => Set<WhatsAppOutboxEntity>();
-
+    public DbSet<AutoReplyRuleEntity> AutoReplyRules => Set<AutoReplyRuleEntity>();
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
@@ -102,5 +102,15 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
             e.Property(x => x.LeaseOwner).HasMaxLength(200);
             e.Property(x => x.MetaMessageId).HasMaxLength(200);
         });
+
+        mb.Entity<AutoReplyRuleEntity>(e =>
+{
+    e.HasKey(x => x.Id);
+    e.HasIndex(x => new { x.TenantId, x.IsActive, x.Priority });
+    e.Property(x => x.Name).HasMaxLength(100).IsRequired();
+    e.Property(x => x.MatchType).HasMaxLength(20).IsRequired();
+    e.Property(x => x.KeywordPattern).HasMaxLength(500);
+    e.Property(x => x.ReplyText).HasMaxLength(2000).IsRequired();
+});
     }
 }
