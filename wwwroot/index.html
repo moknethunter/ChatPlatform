@@ -2,86 +2,779 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>لوحة التكاملات المركزية</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <meta name="theme-color" content="#101827">
+
+    <title>ChatPlatform | لوحة التكاملات</title>
+
     <style>
-        body { font-family: sans-serif; background: #121212; color: white; padding: 20px; }
-        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #333; }
-        input, textarea, select { width: 100%; padding: 10px; margin: 5px 0; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 5px; box-sizing: border-box; }
-        button { padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; width: 100%; margin-top: 5px;}
-        .delete-btn { background: #dc3545; padding: 5px 10px; width: auto; margin: 0; font-size: 12px;}
-        .item { display: flex; justify-content: space-between; align-items: center; background: #2d2d2d; padding: 10px; border-radius: 5px; margin-bottom: 5px; }
-        .success { color: #4caf50; }
+        :root {
+            --bg: #0b1220;
+            --panel: #111c2e;
+            --panel2: #17243a;
+            --border: #263650;
+            --text: #edf3ff;
+            --muted: #91a2bb;
+            --primary: #3978f6;
+            --success: #20c997;
+            --danger: #f05b69;
+            --warning: #f5b942;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Tahoma, Arial, sans-serif;
+            min-height: 100vh;
+        }
+
+        button, input, textarea, select {
+            font: inherit;
+        }
+
+        .layout {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 245px;
+            background: #0e192a;
+            border-left: 1px solid var(--border);
+            padding: 24px 15px;
+            flex-shrink: 0;
+        }
+
+        .brand {
+            font-size: 21px;
+            font-weight: bold;
+            margin-bottom: 35px;
+            padding: 0 10px;
+        }
+
+        .brand span {
+            color: #5b91ff;
+        }
+
+        .nav-title {
+            color: var(--muted);
+            font-size: 12px;
+            padding: 10px;
+        }
+
+        .nav a {
+            display: block;
+            text-decoration: none;
+            color: #b7c5d9;
+            padding: 13px 12px;
+            border-radius: 9px;
+            margin: 5px 0;
+            transition: .2s;
+        }
+
+        .nav a:hover,
+        .nav a.active {
+            background: #1c3151;
+            color: white;
+        }
+
+        .main {
+            flex: 1;
+            min-width: 0;
+            padding: 28px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 28px;
+        }
+
+        h1 {
+            font-size: 25px;
+            margin: 0 0 8px;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .connection {
+            padding: 9px 14px;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .connection.online {
+            color: var(--success);
+        }
+
+        .connection.offline {
+            color: var(--danger);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 15px;
+            margin-bottom: 24px;
+        }
+
+        .stat, .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            padding: 20px;
+        }
+
+        .stat-label {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .stat-value {
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 12px;
+        }
+
+        .content {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, .85fr);
+            gap: 20px;
+            align-items: start;
+        }
+
+        .card h2 {
+            font-size: 17px;
+            margin: 0 0 18px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            color: #c4d0e2;
+            margin: 14px 0 7px;
+        }
+
+        input, textarea, select {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background: #0c1728;
+            color: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            outline: none;
+        }
+
+        input:focus, textarea:focus, select:focus {
+            border-color: var(--primary);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+            direction: ltr;
+            text-align: left;
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--muted);
+            margin-top: 6px;
+            line-height: 1.7;
+        }
+
+        .btn {
+            border: 0;
+            padding: 12px 17px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            color: white;
+            background: var(--primary);
+        }
+
+        .btn:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            padding: 8px 12px;
+            font-size: 12px;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .message {
+            display: none;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.7;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .message.error {
+            background: #4a202a;
+            color: #ffc1c8;
+        }
+
+        .message.success {
+            background: #123d36;
+            color: #9cf1d8;
+        }
+
+        .message.info {
+            background: #172f52;
+            color: #c4dcff;
+        }
+
+        .connector {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            padding: 13px;
+            margin-bottom: 10px;
+        }
+
+        .connector-info {
+            min-width: 0;
+        }
+
+        .connector-name {
+            font-weight: bold;
+            overflow-wrap: anywhere;
+        }
+
+        .connector-url {
+            color: var(--muted);
+            font-size: 11px;
+            margin-top: 6px;
+            overflow-wrap: anywhere;
+            direction: ltr;
+            text-align: right;
+        }
+
+        .empty {
+            text-align: center;
+            color: var(--muted);
+            padding: 35px 10px;
+            font-size: 13px;
+        }
+
+        .footer {
+            color: var(--muted);
+            text-align: center;
+            font-size: 11px;
+            margin-top: 35px;
+        }
+
+        @media(max-width: 950px) {
+            .content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media(max-width: 650px) {
+            .sidebar {
+                display: none;
+            }
+
+            .main {
+                padding: 16px;
+            }
+
+            .stats {
+                grid-template-columns: 1fr;
+            }
+
+            .stat {
+                padding: 15px;
+            }
+
+            h1 {
+                font-size: 21px;
+            }
+        }
     </style>
 </head>
+
 <body>
-    <h2>🔌 منصة الربط المركزية</h2>
-    <a href="/" style="color: #007bff; display: block; margin-bottom: 20px;">← العودة لتطبيق الشات</a>
 
-    <div class="card">
-        <h3>إضافة تكامل جديد (API)</h3>
-        <input type="text" id="name" placeholder="اسم التكامل (مثال: Telegram Sales)">
-        <input type="text" id="url" placeholder="رابط الـ API (مثال: https://api.telegram.org/bot.../sendMessage)">
-        
-        <select id="method">
-            <option value="POST">POST</option>
-            <option value="GET">GET</option>
-        </select>
+<div class="layout">
 
-        <input type="text" id="authKey" placeholder="اسم الهيدر (Authorization أو X-Api-Key)" value="Authorization">
-        <input type="text" id="authToken" placeholder="التوكن أو المفتاح السري (Token)">
-        
-        <textarea id="template" rows="3" placeholder='قالب البيانات JSON، مثال: {"chat_id":"123","text":"{Message}"}'></textarea>
-        
-        <button onclick="addConnector()">➕ إضافة التكامل</button>
-        <p id="status" class="success"></p>
-    </div>
+    <aside class="sidebar">
 
-    <div class="card">
-        <h3>التكاملات النشطة</h3>
-        <div id="list"></div>
-    </div>
+        <div class="brand">
+            Chat<span>Platform</span>
+        </div>
 
-    <script>
-        function loadConnectors() {
-            fetch('/api/connectors').then(r => r.json()).then(data => {
-                const list = document.getElementById('list');
-                list.innerHTML = '';
-                if (data.length === 0) list.innerHTML = '<p>لا توجد تكاملات مضافة.</p>';
-                data.forEach(item => {
-                    list.innerHTML += `
-                        <div class="item">
-                            <div><strong>${item.name}</strong><br><small style="color:#888">${item.targetUrl}</small></div>
-                            <button class="delete-btn" onclick="deleteConnector('${item.id}')">حذف</button>
-                        </div>
-                    `;
-                });
-            });
+        <div class="nav-title">القائمة الرئيسية</div>
+
+        <nav class="nav">
+            <a href="/" class="active">لوحة التكاملات</a>
+            <a href="/inbox.html">صندوق المحادثات</a>
+            <a href="/whatsapp.html">إدارة WhatsApp</a>
+            <a href="/autoreply.html">الردود الآلية</a>
+            <a href="/templates.html">قوالب الرسائل</a>
+            <a href="/settings.html">الإعدادات</a>
+            <a href="/privacy.html">الخصوصية</a>
+        </nav>
+
+    </aside>
+
+    <main class="main">
+
+        <header class="topbar">
+
+            <div>
+                <h1>لوحة التكاملات المركزية</h1>
+                <div class="subtitle">
+                    إدارة وربط الخدمات الخارجية بمنصة ChatPlatform
+                </div>
+            </div>
+
+            <div id="connection" class="connection">
+                جاري فحص الاتصال...
+            </div>
+
+        </header>
+
+        <section class="stats">
+
+            <div class="stat">
+                <div class="stat-label">إجمالي التكاملات</div>
+                <div class="stat-value" id="totalCount">—</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-label">حالة الخادم</div>
+                <div class="stat-value" id="serverStatus">—</div>
+            </div>
+
+            <div class="stat">
+                <div class="stat-label">حالة الواجهة</div>
+                <div class="stat-value" style="color:var(--success)">
+                    نشطة
+                </div>
+            </div>
+
+        </section>
+
+        <div id="globalMessage" class="message"></div>
+
+        <section class="content">
+
+            <div class="card">
+
+                <h2>إضافة تكامل جديد</h2>
+
+                <form id="connectorForm">
+
+                    <label for="name">اسم التكامل</label>
+                    <input
+                        id="name"
+                        type="text"
+                        maxlength="100"
+                        placeholder="مثال: Telegram Sales"
+                        required
+                    >
+
+                    <label for="url">عنوان API</label>
+                    <input
+                        id="url"
+                        type="url"
+                        placeholder="https://api.example.com/endpoint"
+                        required
+                    >
+
+                    <label for="method">طريقة الاتصال</label>
+                    <select id="method">
+                        <option value="POST">POST</option>
+                        <option value="GET">GET</option>
+                    </select>
+
+                    <label for="authKey">اسم هيدر المصادقة</label>
+                    <input
+                        id="authKey"
+                        type="text"
+                        maxlength="100"
+                        value="Authorization"
+                    >
+
+                    <label for="authToken">رمز المصادقة</label>
+                    <input
+                        id="authToken"
+                        type="password"
+                        autocomplete="new-password"
+                        maxlength="2000"
+                        placeholder="أدخل الرمز السري"
+                    >
+
+                    <div class="hint">
+                        لا تعرض المنصة الرمز السري بعد حفظه.
+                        تأكد من أن الخادم يخزنه بطريقة آمنة.
+                    </div>
+
+                    <label for="template">قالب البيانات JSON</label>
+                    <textarea
+                        id="template"
+                        placeholder='{"chat_id":"123","text":"{Message}"}'
+                    ></textarea>
+
+                    <div class="hint">
+                        يجب أن يكون قالب البيانات بصيغة JSON صحيحة.
+                    </div>
+
+                    <div class="form-actions">
+
+                        <button
+                            type="submit"
+                            id="saveButton"
+                            class="btn"
+                        >
+                            إضافة التكامل
+                        </button>
+
+                        <button
+                            type="reset"
+                            class="btn btn-secondary"
+                        >
+                            مسح الحقول
+                        </button>
+
+                    </div>
+
+                </form>
+
+                <div id="formMessage" class="message"></div>
+
+            </div>
+
+            <div class="card">
+
+                <h2>التكاملات المسجلة</h2>
+
+                <button
+                    id="refreshButton"
+                    class="btn btn-secondary"
+                    type="button"
+                >
+                    تحديث القائمة
+                </button>
+
+                <div id="connectorList" style="margin-top:18px">
+
+                    <div class="empty">
+                        جاري تحميل التكاملات...
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+        <footer class="footer">
+            ChatPlatform · Unified Integration Management
+        </footer>
+
+    </main>
+
+</div>
+
+<script src="/api.js"></script>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+
+function showMessage(element, text, type = "info") {
+    element.textContent = text;
+    element.className = "message show " + type;
+}
+
+function clearMessage(element) {
+    element.textContent = "";
+    element.className = "message";
+}
+
+function getConnectorArray(data) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.items)) return data.items;
+    if (Array.isArray(data?.data)) return data.data;
+    return null;
+}
+
+async function checkServer() {
+    const badge = $("connection");
+
+    try {
+        const result = await ChatPlatformAPI.getHealth();
+
+        badge.textContent = "● الخادم متصل";
+        badge.className = "connection online";
+
+        $("serverStatus").textContent = "متصل";
+
+    } catch (error) {
+        badge.textContent = "● تعذر الاتصال";
+        badge.className = "connection offline";
+
+        $("serverStatus").textContent = "غير متصل";
+    }
+}
+
+function renderConnectors(items) {
+    const list = $("connectorList");
+
+    list.replaceChildren();
+
+    $("totalCount").textContent = items.length;
+
+    if (items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "لا توجد تكاملات مسجلة حتى الآن.";
+        list.appendChild(empty);
+        return;
+    }
+
+    for (const item of items) {
+
+        const row = document.createElement("div");
+        row.className = "connector";
+
+        const info = document.createElement("div");
+        info.className = "connector-info";
+
+        const name = document.createElement("div");
+        name.className = "connector-name";
+        name.textContent = item.name || "تكامل بدون اسم";
+
+        const url = document.createElement("div");
+        url.className = "connector-url";
+        url.textContent = item.targetUrl || "";
+
+        info.append(name, url);
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "btn btn-danger";
+        remove.textContent = "حذف";
+
+        remove.addEventListener("click", () => {
+            deleteConnector(item.id, remove);
+        });
+
+        row.append(info, remove);
+        list.appendChild(row);
+    }
+}
+
+async function loadConnectors() {
+    const list = $("connectorList");
+
+    list.textContent = "جاري تحميل التكاملات...";
+
+    try {
+        const result = await ChatPlatformAPI.getConnectors();
+
+        const items = getConnectorArray(result);
+
+        if (!items) {
+            throw new Error("تنسيق استجابة التكاملات غير معروف.");
         }
 
-        function addConnector() {
-            const data = {
-                name: document.getElementById('name').value,
-                targetUrl: document.getElementById('url').value,
-                httpMethod: document.getElementById('method').value,
-                authHeaderKey: document.getElementById('authKey').value,
-                authToken: document.getElementById('authToken').value,
-                payloadTemplate: document.getElementById('template').value
-            };
-            fetch('/api/connectors', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            }).then(() => {
-                document.getElementById('status').textContent = '✅ تمت الإضافة بنجاح!';
-                loadConnectors();
-            });
-        }
+        renderConnectors(items);
 
-        function deleteConnector(id) {
-            fetch('/api/connectors/' + id, { method: 'DELETE' }).then(() => loadConnectors());
-        }
+        clearMessage($("globalMessage"));
 
-        loadConnectors();
-    </script>
+    } catch (error) {
+
+        list.textContent = "";
+
+        const message = document.createElement("div");
+        message.className = "empty";
+        message.textContent =
+            error.status === 401 || error.status === 403
+                ? "الوصول إلى التكاملات يتطلب مصادقة من الخادم. لم يتم إرسال مفتاح سري من المتصفح."
+                : error.message || "تعذر تحميل التكاملات.";
+
+        list.appendChild(message);
+    }
+}
+
+async function addConnector(event) {
+    event.preventDefault();
+
+    const button = $("saveButton");
+    const message = $("formMessage");
+
+    clearMessage(message);
+
+    const name = $("name").value.trim();
+    const rawUrl = $("url").value.trim();
+    const method = $("method").value;
+    const authKey = $("authKey").value.trim();
+    const authToken = $("authToken").value;
+    const template = $("template").value.trim();
+
+    if (!name || !rawUrl) {
+        showMessage(message, "اسم التكامل والرابط مطلوبان.", "error");
+        return;
+    }
+
+    let target;
+
+    try {
+        target = new URL(rawUrl);
+    } catch {
+        showMessage(message, "رابط API غير صحيح.", "error");
+        return;
+    }
+
+    if (target.protocol !== "https:" &&
+        target.hostname !== "localhost") {
+        showMessage(message, "يجب استخدام HTTPS مع الخدمات الخارجية.", "error");
+        return;
+    }
+
+    if (template) {
+        try {
+            JSON.parse(template);
+        } catch {
+            showMessage(message, "قالب البيانات ليس JSON صالحاً.", "error");
+            return;
+        }
+    }
+
+    const data = {
+        name,
+        targetUrl: target.href,
+        httpMethod: method,
+        authHeaderKey: authKey,
+        authToken,
+        payloadTemplate: template
+    };
+
+    button.disabled = true;
+    button.textContent = "جاري الحفظ...";
+
+    try {
+        await ChatPlatformAPI.createConnector(data);
+
+        showMessage(
+            message,
+            "تم إرسال طلب الإضافة بنجاح.",
+            "success"
+        );
+
+        $("connectorForm").reset();
+
+        await loadConnectors();
+
+    } catch (error) {
+
+        showMessage(
+            message,
+            error.message || "تعذر إضافة التكامل.",
+            "error"
+        );
+
+    } finally {
+        button.disabled = false;
+        button.textContent = "إضافة التكامل";
+    }
+}
+
+async function deleteConnector(id, button) {
+
+    if (!id) return;
+
+    if (!confirm("هل تريد حذف هذا التكامل؟")) return;
+
+    button.disabled = true;
+
+    try {
+        await ChatPlatformAPI.deleteConnector(id);
+
+        showMessage(
+            $("globalMessage"),
+            "تم تنفيذ طلب الحذف.",
+            "success"
+        );
+
+        await loadConnectors();
+
+    } catch (error) {
+
+        showMessage(
+            $("globalMessage"),
+            error.message || "تعذر حذف التكامل.",
+            "error"
+        );
+
+        button.disabled = false;
+    }
+}
+
+$("connectorForm").addEventListener("submit", addConnector);
+
+$("refreshButton").addEventListener("click", async () => {
+    await loadConnectors();
+});
+
+async function initialize() {
+    if (!window.ChatPlatformAPI) {
+        showMessage(
+            $("globalMessage"),
+            "ملف api.js غير موجود أو لم يتم تحميله.",
+            "error"
+        );
+        return;
+    }
+
+    await checkServer();
+    await loadConnectors();
+}
+
+initialize();
+</script>
+
 </body>
 </html>
