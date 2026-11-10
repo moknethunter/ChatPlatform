@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>إعدادات المنصة | ChatPlatform</title>
+
+<style>
+:root {
+    --bg:#0b1120;
+    --panel:#111c30;
+    --border:#24334d;
+    --text:#e8eef8;
+    --muted:#91a3bd;
+    --primary:#477cf5;
+    --green:#16a879;
+    --red:#e05252;
+}
+*{box-sizing:border-box}
+body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Tahoma,Arial,sans-serif;
+}
+.layout{display:flex;min-height:100vh}
+aside{
+    width:230px;
+    background:#0e192b;
+    border-left:1px solid var(--border);
+    padding:22px 14px;
+    flex-shrink:0;
+}
+.logo{font-size:21px;font-weight:bold;margin:5px 10px 30px}
+nav a{
+    display:block;
+    color:var(--muted);
+    text-decoration:none;
+    padding:13px;
+    border-radius:9px;
+    margin:5px 0;
+}
+nav a:hover,nav a.active{
+    background:#1c3152;
+    color:white;
+}
+main{flex:1;padding:28px;min-width:0}
+h1{font-size:25px;margin:0 0 8px}
+.subtitle{color:var(--muted);margin-bottom:25px}
+.card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:13px;
+    padding:20px;
+    margin-bottom:20px;
+}
+.grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:15px;
+}
+label{
+    display:block;
+    font-size:13px;
+    color:var(--muted);
+    margin-bottom:7px;
+}
+input,select,textarea{
+    width:100%;
+    padding:12px;
+    background:#0b1527;
+    color:white;
+    border:1px solid var(--border);
+    border-radius:8px;
+    outline:none;
+}
+input:disabled{
+    opacity:.65;
+    cursor:not-allowed;
+}
+button{
+    border:0;
+    border-radius:8px;
+    padding:11px 18px;
+    background:var(--primary);
+    color:white;
+    cursor:pointer;
+    font-weight:bold;
+}
+button:disabled{opacity:.5;cursor:not-allowed}
+.secondary{background:#263750}
+.actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}
+.status{
+    display:inline-block;
+    padding:6px 10px;
+    border-radius:20px;
+    background:#124a3c;
+    color:#8af0c9;
+    font-size:12px;
+}
+.warning{
+    background:#49391b;
+    color:#ffe09a;
+    border:1px solid #715726;
+    border-radius:9px;
+    padding:13px;
+    line-height:1.8;
+    font-size:13px;
+}
+.info{
+    color:var(--muted);
+    font-size:13px;
+    line-height:1.9;
+}
+#message{
+    margin-top:12px;
+    color:#9ec0ff;
+    font-size:13px;
+}
+.item{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:12px;
+    padding:13px 0;
+    border-bottom:1px solid var(--border);
+}
+.item:last-child{border-bottom:0}
+.item-title{font-size:14px}
+.item-desc{font-size:12px;color:var(--muted);margin-top:5px}
+code{
+    color:#a7c5ff;
+    word-break:break-all;
+}
+@media(max-width:800px){
+    .layout{display:block}
+    aside{
+        width:100%;
+        border-left:0;
+        border-bottom:1px solid var(--border);
+    }
+    nav{display:flex;overflow-x:auto;gap:5px}
+    nav a{white-space:nowrap}
+    main{padding:16px}
+    .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+
+<body>
+
+<div class="layout">
+
+<aside>
+    <div class="logo">ChatPlatform</div>
+
+    <nav>
+        <a href="/">لوحة التحكم</a>
+        <a href="/inbox.html">صندوق المحادثات</a>
+        <a href="/whatsapp.html">حسابات واتساب</a>
+        <a href="/autoreply.html">الرد الآلي</a>
+        <a href="/templates.html">قوالب الرسائل</a>
+        <a class="active" href="/settings.html">الإعدادات</a>
+        <a href="/privacy.html">الخصوصية</a>
+    </nav>
+</aside>
+
+<main>
+
+    <h1>إعدادات المنصة</h1>
+
+    <div class="subtitle">
+        معلومات النظام وحالة الخدمات وإعدادات الاتصال والأمان.
+    </div>
+
+    <!-- Platform Status -->
+
+    <section class="card">
+
+        <h3>حالة المنصة</h3>
+
+        <div class="item">
+            <div>
+                <div class="item-title">حالة الخادم</div>
+                <div class="item-desc">الاتصال بخادم ChatPlatform</div>
+            </div>
+            <span id="serverStatus" class="status">جارٍ الفحص...</span>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">معلومات المنصة</div>
+                <div class="item-desc">إصدار النظام وبيانات التشغيل</div>
+            </div>
+            <span id="platformStatus" class="status">جارٍ الفحص...</span>
+        </div>
+
+        <div class="actions">
+            <button class="secondary" onclick="loadSystemStatus()">
+                تحديث الحالة
+            </button>
+        </div>
+
+    </section>
+
+
+    <!-- Organization -->
+
+    <section class="card">
+
+        <h3>المؤسسة الحالية</h3>
+
+        <div class="grid">
+
+            <div>
+                <label>معرّف المؤسسة Tenant ID</label>
+                <input id="tenantId" placeholder="أدخل معرّف المؤسسة">
+            </div>
+
+            <div>
+                <label>اسم المؤسسة</label>
+                <input id="tenantName" placeholder="اسم المؤسسة">
+            </div>
+
+        </div>
+
+        <div class="warning" style="margin-top:15px">
+            هذه الصفحة لا تعدّل بيانات المؤسسة في قاعدة البيانات.
+            يجب ربطها لاحقاً بواجهة إدارة المؤسسات في Backend.
+        </div>
+
+    </section>
+
+
+    <!-- WhatsApp -->
+
+    <section class="card">
+
+        <h3>إعدادات WhatsApp Cloud API</h3>
+
+        <div class="grid">
+
+            <div>
+                <label>رابط Webhook</label>
+                <input id="webhookUrl" readonly>
+            </div>
+
+            <div>
+                <label>مسار Webhook</label>
+                <input value="/webhook" readonly>
+            </div>
+
+            <div>
+                <label>حالة تكامل واتساب</label>
+                <input value="تعتمد على إعداد الخادم وحساب Meta" readonly>
+            </div>
+
+            <div>
+                <label>إصدار Meta Graph API</label>
+                <input value="v21.0" readonly>
+            </div>
+
+        </div>
+
+        <p class="info">
+            يتم ضبط Verify Token وApp Secret ورموز الوصول في إعدادات
+            الخادم ومتغيرات البيئة، وليس داخل هذه الصفحة.
+        </p>
+
+    </section>
+
+
+    <!-- Security -->
+
+    <section class="card">
+
+        <h3>الأمان وحماية البيانات</h3>
+
+        <div class="item">
+            <div>
+                <div class="item-title">حماية مفاتيح Meta</div>
+                <div class="item-desc">
+                    يجب تخزين الرموز في الخادم بصورة مشفرة.
+                </div>
+            </div>
+            <span class="status">إعداد خادمي</span>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">مصادقة المستخدمين</div>
+                <div class="item-desc">
+                    يجب تفعيل نظام تسجيل الدخول والصلاحيات.
+                </div>
+            </div>
+            <span id="authStatus" class="status">يتطلب التحقق</span>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">عزل بيانات المؤسسات</div>
+                <div class="item-desc">
+                    يجب التحقق من Tenant لكل عملية API.
+                </div>
+            </div>
+            <span class="status">يتطلب تحققاً خادمياً</span>
+        </div>
+
+    </section>
+
+
+    <!-- API Information -->
+
+    <section class="card">
+
+        <h3>معلومات الاتصال بالمنصة</h3>
+
+        <div class="item">
+            <div>
+                <div class="item-title">عنوان المنصة</div>
+                <div class="item-desc" id="origin"></div>
+            </div>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">واجهة API</div>
+                <div class="item-desc">
+                    <code>/api/</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">قاعدة البيانات</div>
+                <div class="item-desc">
+                    SQLite / EF Core وفق إعداد الخادم.
+                </div>
+            </div>
+        </div>
+
+    </section>
+
+
+    <div id="message"></div>
+
+</main>
+</div>
+
+
+<script src="/api.js"></script>
+
+<script>
+
+const $ = id => document.getElementById(id);
+
+function setStatus(id,text,success){
+    const element = $(id);
+
+    element.textContent = text;
+
+    element.style.background = success
+        ? "#124a3c"
+        : "#49391b";
+
+    element.style.color = success
+        ? "#8af0c9"
+        : "#ffe09a";
+}
+
+
+// =====================================
+// PLATFORM STATUS
+// =====================================
+
+async function loadSystemStatus(){
+
+    $("serverStatus").textContent = "جارٍ الفحص...";
+    $("platformStatus").textContent = "جارٍ الفحص...";
+
+    try{
+
+        const health = await ChatPlatformAPI.getHealth();
+
+        setStatus(
+            "serverStatus",
+            "متصل",
+            true
+        );
+
+    }catch(error){
+
+        setStatus(
+            "serverStatus",
+            "غير متصل",
+            false
+        );
+    }
+
+    try{
+
+        const info = await ChatPlatformAPI.getPlatformInfo();
+
+        setStatus(
+            "platformStatus",
+            "تم الاتصال",
+            true
+        );
+
+        if(info && typeof info === "object"){
+
+            if(info.version){
+                $("message").textContent =
+                    "إصدار المنصة: " + info.version;
+            }
+
+            if(info.name){
+                document.title = info.name + " | الإعدادات";
+            }
+        }
+
+    }catch(error){
+
+        setStatus(
+            "platformStatus",
+            "غير متاح",
+            false
+        );
+    }
+}
+
+
+// =====================================
+// WEBHOOK URL
+// =====================================
+
+function loadWebhookUrl(){
+
+    $("webhookUrl").value =
+        window.location.origin + "/webhook";
+
+}
+
+
+// =====================================
+// INITIALIZATION
+// =====================================
+
+document.addEventListener("DOMContentLoaded",()=>{
+
+    $("origin").textContent = window.location.origin;
+
+    loadWebhookUrl();
+
+    loadSystemStatus();
+
+});
+
+</script>
+
+</body>
+</html>
