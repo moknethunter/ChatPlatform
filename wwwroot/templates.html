@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>قوالب واتساب | ChatPlatform</title>
+
+<style>
+:root {
+    --bg:#0b1120;
+    --panel:#111c30;
+    --border:#24334d;
+    --text:#e8eef8;
+    --muted:#91a3bd;
+    --primary:#477cf5;
+    --green:#16a879;
+    --red:#e05252;
+}
+*{box-sizing:border-box}
+body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Tahoma,Arial,sans-serif;
+}
+.layout{display:flex;min-height:100vh}
+aside{
+    width:230px;
+    background:#0e192b;
+    border-left:1px solid var(--border);
+    padding:22px 14px;
+}
+.logo{font-size:21px;font-weight:bold;margin:5px 10px 30px}
+nav a{
+    display:block;
+    color:var(--muted);
+    text-decoration:none;
+    padding:13px;
+    border-radius:9px;
+    margin:5px 0;
+}
+nav a:hover,nav a.active{
+    background:#1c3152;
+    color:white;
+}
+main{flex:1;padding:28px;min-width:0}
+h1{font-size:25px;margin:0 0 8px}
+.subtitle{color:var(--muted);margin-bottom:25px}
+.card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:13px;
+    padding:20px;
+    margin-bottom:20px;
+}
+.grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:14px;
+}
+label{display:block;font-size:13px;color:var(--muted);margin-bottom:7px}
+input,select,textarea{
+    width:100%;
+    padding:12px;
+    background:#0b1527;
+    color:white;
+    border:1px solid var(--border);
+    border-radius:8px;
+    outline:none;
+}
+textarea{min-height:100px;resize:vertical}
+button{
+    border:0;
+    border-radius:8px;
+    padding:11px 18px;
+    background:var(--primary);
+    color:white;
+    cursor:pointer;
+    font-weight:bold;
+}
+button:disabled{opacity:.5;cursor:not-allowed}
+.actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}
+.secondary{background:#263750}
+.danger{background:#923d48}
+table{width:100%;border-collapse:collapse;min-width:650px}
+th,td{
+    text-align:right;
+    padding:13px 10px;
+    border-bottom:1px solid var(--border);
+    font-size:13px;
+}
+th{color:var(--muted)}
+.table-wrap{overflow-x:auto}
+.badge{
+    padding:5px 9px;
+    border-radius:20px;
+    font-size:11px;
+    background:#263750;
+}
+.approved{background:#124a3c;color:#8af0c9}
+.rejected{background:#572b35;color:#ffb1b1}
+.pending{background:#55451f;color:#ffe09a}
+#message{margin-top:12px;color:#9ec0ff;font-size:13px}
+.empty{color:var(--muted);padding:25px;text-align:center}
+@media(max-width:800px){
+    .layout{display:block}
+    aside{width:100%;border-left:0;border-bottom:1px solid var(--border)}
+    nav{display:flex;overflow-x:auto;gap:5px}
+    nav a{white-space:nowrap}
+    main{padding:16px}
+    .grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+
+<body>
+<div class="layout">
+
+<aside>
+    <div class="logo">ChatPlatform</div>
+    <nav>
+        <a href="/">لوحة التحكم</a>
+        <a href="/inbox.html">صندوق المحادثات</a>
+        <a href="/whatsapp.html">حسابات واتساب</a>
+        <a href="/autoreply.html">الرد الآلي</a>
+        <a class="active" href="/templates.html">قوالب الرسائل</a>
+        <a href="/settings.html">الإعدادات</a>
+        <a href="/privacy.html">الخصوصية</a>
+    </nav>
+</aside>
+
+<main>
+    <h1>قوالب رسائل واتساب</h1>
+    <div class="subtitle">
+        إدارة القوالب ومتابعة اعتمادها واستخدامها في التواصل مع العملاء.
+    </div>
+
+    <section class="card">
+        <h3>إضافة قالب إلى المنصة</h3>
+
+        <div class="grid">
+            <div>
+                <label>اسم القالب</label>
+                <input id="name" placeholder="مثال: order_confirmation">
+            </div>
+
+            <div>
+                <label>حساب واتساب</label>
+                <select id="tenantId">
+                    <option value="">اختر الحساب</option>
+                </select>
+            </div>
+
+            <div>
+                <label>تصنيف القالب</label>
+                <select id="category">
+                    <option value="UTILITY">خدمي Utility</option>
+                    <option value="MARKETING">تسويقي Marketing</option>
+                    <option value="AUTHENTICATION">مصادقة Authentication</option>
+                </select>
+            </div>
+
+            <div>
+                <label>لغة القالب</label>
+                <select id="language">
+                    <option value="ar">العربية</option>
+                    <option value="en_US">الإنجليزية الأمريكية</option>
+                    <option value="en">الإنجليزية</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-top:15px">
+            <label>نص القالب</label>
+            <textarea id="body" placeholder="مرحباً {{1}}، تم استلام طلبك رقم {{2}}."></textarea>
+        </div>
+
+        <div class="actions">
+            <button id="saveButton" onclick="saveTemplate()">حفظ القالب</button>
+            <button class="secondary" onclick="loadTemplates()">تحديث القائمة</button>
+        </div>
+
+        <div id="message"></div>
+    </section>
+
+    <section class="card">
+        <h3>القوالب المسجلة</h3>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>اسم القالب</th>
+                        <th>التصنيف</th>
+                        <th>اللغة</th>
+                        <th>الحالة</th>
+                        <th>الإجراء</th>
+                    </tr>
+                </thead>
+                <tbody id="templates">
+                    <tr><td colspan="5" class="empty">جارٍ تحميل القوالب...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="card">
+        <h3>ملاحظات مهمة</h3>
+        <p style="color:var(--muted);line-height:2;font-size:13px">
+            • إضافة القالب هنا إلى المنصة لا تعني اعتماده لدى Meta.<br>
+            • يجب إرسال القالب إلى Meta للمراجعة والاعتماد قبل استخدامه.<br>
+            • الرسائل خارج نافذة خدمة العميل البالغة 24 ساعة تتطلب قالباً معتمداً.<br>
+            • يجب الالتزام بموافقة العميل على تلقي الرسائل التسويقية.
+        </p>
+    </section>
+</main>
+</div>
+
+<script src="/api.js"></script>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function showMessage(text){
+    $("message").textContent = text;
+}
+
+function statusBadge(status){
+    const value = String(status || "غير محدد").toUpperCase();
+
+    if(value === "APPROVED")
+        return '<span class="badge approved">معتمد</span>';
+
+    if(value === "REJECTED")
+        return '<span class="badge rejected">مرفوض</span>';
+
+    return '<span class="badge pending">قيد المراجعة / غير محدد</span>';
+}
+
+async function loadTenants(){
+    try{
+        const result = await ChatPlatformAPI.getTenants();
+        const items = Array.isArray(result) ? result : result.items || [];
+
+        $("tenantId").replaceChildren(
+            new Option("اختر الحساب","")
+        );
+
+        items.forEach(item=>{
+            const id = item.id || item.tenantId;
+            const name = item.name || item.phoneNumberId || id;
+
+            if(id)
+                $("tenantId").add(new Option(name,id));
+        });
+    }catch(error){
+        showMessage("تعذر تحميل حسابات واتساب: " + error.message);
+    }
+}
+
+async function loadTemplates(){
+    const tbody = $("templates");
+
+    tbody.replaceChildren();
+    const loading = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.className = "empty";
+    cell.textContent = "جارٍ تحميل البيانات...";
+    loading.appendChild(cell);
+    tbody.appendChild(loading);
+
+    try{
+        const result = await ChatPlatformAPI.getTemplates();
+        const items = Array.isArray(result) ? result : result.items || [];
+
+        tbody.replaceChildren();
+
+        if(!items.length){
+            const row = tbody.insertRow();
+            const td = row.insertCell();
+            td.colSpan = 5;
+            td.className = "empty";
+            td.textContent = "لا توجد قوالب مسجلة.";
+            return;
+        }
+
+        items.forEach(item=>{
+            const row = tbody.insertRow();
+
+            const values = [
+                item.name,
+                item.category,
+                item.language
+            ];
+
+            values.forEach(value=>{
+                const td = row.insertCell();
+                td.textContent = value || "-";
+            });
+
+            const status = row.insertCell();
+            status.innerHTML = statusBadge(item.status);
+
+            const action = row.insertCell();
+            action.textContent = "—";
+        });
+
+    }catch(error){
+        tbody.replaceChildren();
+        const row = tbody.insertRow();
+        const td = row.insertCell();
+        td.colSpan = 5;
+        td.className = "empty";
+        td.textContent = "تعذر تحميل القوالب: " + error.message;
+    }
+}
+
+async function saveTemplate(){
+    const button = $("saveButton");
+
+    const data = {
+        name: $("name").value.trim(),
+        tenantId: $("tenantId").value,
+        category: $("category").value,
+        language: $("language").value,
+        body: $("body").value.trim()
+    };
+
+    if(!data.name || !data.tenantId || !data.body){
+        showMessage("يرجى إدخال اسم القالب والحساب والنص.");
+        return;
+    }
+
+    button.disabled = true;
+
+    try{
+        await ChatPlatformAPI.createTemplate(data);
+
+        showMessage("تم إرسال طلب حفظ القالب إلى الخادم.");
+        $("name").value = "";
+        $("body").value = "";
+
+        await loadTemplates();
+
+    }catch(error){
+        showMessage("فشل الحفظ: " + error.message);
+    }finally{
+        button.disabled = false;
+    }
+}
+
+document.addEventListener("DOMContentLoaded",async()=>{
+    await loadTenants();
+    await loadTemplates();
+});
+</script>
+
+</body>
+</html>
