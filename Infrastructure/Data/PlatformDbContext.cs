@@ -17,6 +17,7 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<WhatsAppConversationEntity> WhatsAppConversations => Set<WhatsAppConversationEntity>();
     public DbSet<WhatsAppMessageEntity> WhatsAppMessages => Set<WhatsAppMessageEntity>();
     public DbSet<WhatsAppOutboxEntity> WhatsAppOutbox => Set<WhatsAppOutboxEntity>();
+    public DbSet<WhatsAppTemplateEntity> WhatsAppTemplates => Set<WhatsAppTemplateEntity>();
     public DbSet<AutoReplyRuleEntity> AutoReplyRules => Set<AutoReplyRuleEntity>();
     protected override void OnModelCreating(ModelBuilder mb)
     {
@@ -112,5 +113,57 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     e.Property(x => x.KeywordPattern).HasMaxLength(500);
     e.Property(x => x.ReplyText).HasMaxLength(2000).IsRequired();
 });
+    mb.Entity<WhatsAppTemplateEntity>(e =>
+{
+    e.HasKey(x => x.Id);
+
+    e.Property(x => x.TenantId)
+        .HasMaxLength(100)
+        .IsRequired();
+
+    e.Property(x => x.WhatsAppTenantId)
+        .HasMaxLength(100)
+        .IsRequired();
+
+    e.Property(x => x.Name)
+        .HasMaxLength(100)
+        .IsRequired();
+
+    e.Property(x => x.Category)
+        .HasMaxLength(30)
+        .IsRequired();
+
+    e.Property(x => x.Language)
+        .HasMaxLength(20)
+        .IsRequired();
+
+    e.Property(x => x.Body)
+        .HasMaxLength(4000)
+        .IsRequired();
+
+    e.Property(x => x.Status)
+        .HasMaxLength(30)
+        .IsRequired();
+
+    e.HasIndex(x => new
+    {
+        x.TenantId,
+        x.WhatsAppTenantId,
+        x.Name
+    }).IsUnique();
+
+    e.HasIndex(x => new
+    {
+        x.TenantId,
+        x.WhatsAppTenantId,
+        x.IsActive
+    });
+
+    e.HasOne<WhatsAppTenantEntity>()
+        .WithMany()
+        .HasForeignKey(x => x.WhatsAppTenantId)
+        .OnDelete(DeleteBehavior.Restrict);
+});
+
     }
 }
