@@ -1,49 +1,330 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>سياسة الخصوصية — ChatPlatform</title>
-    <style>
-        body { font-family: system-ui, sans-serif; max-width: 800px; margin: 40px auto; padding: 20px; line-height: 1.8; color: #222; }
-        h1 { color: #1a73e8; border-bottom: 2px solid #1a73e8; padding-bottom: 10px; }
-        h2 { color: #333; margin-top: 30px; }
-        a { color: #1a73e8; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>الخصوصية وحماية البيانات | ChatPlatform</title>
+
+<style>
+:root {
+    --bg:#0b1120;
+    --panel:#111c30;
+    --border:#24334d;
+    --text:#e8eef8;
+    --muted:#91a3bd;
+    --primary:#477cf5;
+    --green:#16a879;
+    --red:#e05252;
+}
+*{box-sizing:border-box}
+body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Tahoma,Arial,sans-serif;
+}
+.layout{display:flex;min-height:100vh}
+aside{
+    width:230px;
+    background:#0e192b;
+    border-left:1px solid var(--border);
+    padding:22px 14px;
+    flex-shrink:0;
+}
+.logo{font-size:21px;font-weight:bold;margin:5px 10px 30px}
+nav a{
+    display:block;
+    color:var(--muted);
+    text-decoration:none;
+    padding:13px;
+    border-radius:9px;
+    margin:5px 0;
+}
+nav a:hover,nav a.active{
+    background:#1c3152;
+    color:white;
+}
+main{flex:1;padding:28px;min-width:0}
+h1{font-size:25px;margin:0 0 8px}
+h2{font-size:18px;margin-top:0}
+.subtitle{color:var(--muted);margin-bottom:25px}
+.card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:13px;
+    padding:20px;
+    margin-bottom:20px;
+}
+p,li{
+    color:var(--muted);
+    font-size:14px;
+    line-height:2;
+}
+ul{padding-right:22px}
+label{
+    display:block;
+    color:var(--muted);
+    font-size:13px;
+    margin-bottom:7px;
+}
+input,textarea,select{
+    width:100%;
+    padding:12px;
+    background:#0b1527;
+    color:white;
+    border:1px solid var(--border);
+    border-radius:8px;
+    outline:none;
+}
+textarea{min-height:110px;resize:vertical}
+button{
+    background:var(--primary);
+    color:white;
+    border:0;
+    border-radius:8px;
+    padding:12px 18px;
+    cursor:pointer;
+    font-weight:bold;
+}
+button:disabled{opacity:.5;cursor:not-allowed}
+.notice{
+    padding:14px;
+    border-radius:9px;
+    background:#49391b;
+    color:#ffe09a;
+    font-size:13px;
+    line-height:1.9;
+    margin-top:15px;
+}
+.info{
+    background:#142d42;
+    border:1px solid #244b68;
+    padding:14px;
+    border-radius:9px;
+    color:#b8dafa;
+    font-size:13px;
+    line-height:1.9;
+}
+.grid{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:14px;
+}
+.actions{margin-top:15px}
+#message{font-size:13px;margin-top:12px;color:#9ec0ff}
+@media(max-width:800px){
+    .layout{display:block}
+    aside{
+        width:100%;
+        border-left:0;
+        border-bottom:1px solid var(--border);
+    }
+    nav{display:flex;overflow-x:auto;gap:5px}
+    nav a{white-space:nowrap}
+    main{padding:16px}
+    .grid{grid-template-columns:1fr}
+}
+</style>
 </head>
+
 <body>
-    <h1>سياسة الخصوصية</h1>
-    <p><strong>آخر تحديث:</strong> 2 نوفمبر 2025</p>
 
-    <h2>1. من نحن</h2>
-    <p>ChatPlatform هي منصة تكامل مركزية تتيح للشركات ربط خدماتها بأنظمة المراسلة (مثل WhatsApp Business API) وإدارة الاتصالات عبر واجهة برمجية موحدة.</p>
+<div class="layout">
 
-    <h2>2. البيانات التي نجمعها</h2>
-    <ul>
-        <li><strong>بيانات الحساب:</strong> اسم المستخدم، البريد الإلكتروني، اسم الشركة.</li>
-        <li><strong>بيانات واتساب:</strong> معرفات الحساب (WABA ID, Phone Number ID) وتوكنات الوصول المشفرة.</li>
-        <li><strong>بيانات المحادثات:</strong> محتوى الرسائل الواردة والصادرة عبر المنصة.</li>
-        <li><strong>بيانات تقنية:</strong> عنوان IP، نوع المتصفح، سجلات النظام (Audit Logs).</li>
-    </ul>
+<aside>
+    <div class="logo">ChatPlatform</div>
+    <nav>
+        <a href="/">لوحة التحكم</a>
+        <a href="/inbox.html">صندوق المحادثات</a>
+        <a href="/whatsapp.html">حسابات واتساب</a>
+        <a href="/autoreply.html">الرد الآلي</a>
+        <a href="/templates.html">قوالب الرسائل</a>
+        <a href="/settings.html">الإعدادات</a>
+        <a class="active" href="/privacy.html">الخصوصية</a>
+    </nav>
+</aside>
 
-    <h2>3. كيف نستخدم البيانات</h2>
-    <ul>
-        <li>تشغيل خدمة المراسلة عبر واتساب بيزنز.</li>
-        <li>الرد التلقائي على الاستفسارات.</li>
-        <li>التزاماً بالمتطلبات القانونية والتنظيمية.</li>
-        <li>تحسين جودة الخدمة ومراقبة الأخطاء.</li>
-    </ul>
+<main>
 
-    <h2>4. تخزين البيانات وحمايتها</h2>
-    <p>نستخدم تشفير AES-256 لتوكنات الوصول (IDataProtection)، واتصالات HTTPS مشفرة. البيانات لا تُشارك مع أطراف ثالثة خارج نطاق تقديم الخدمة.</p>
+<h1>الخصوصية وحماية البيانات</h1>
 
-    <h2>5. حقوقك</h2>
-    <p>يمكنك في أي وقت: (أ) طلب نسخة من بياناتك، (ب) تصحيحها، (ج) حذف حسابك نهائياً عبر مراسلتنا.</p>
+<div class="subtitle">
+إدارة البيانات الشخصية وحقوق المستخدمين في ChatPlatform.
+</div>
 
-    <h2>6. حذف البيانات (Data Deletion)</h2>
-    <p>لطلب حذف بياناتك، أرسل بريداً إلى: <a href="mailto:privacy@your-domain.com">privacy@your-domain.com</a>. سيتم الحذف خلال 30 يوماً.</p>
+<section class="card">
+<h2>1. مقدمة</h2>
+<p>
+توضح هذه الصفحة كيفية تعامل منصة ChatPlatform مع البيانات
+التي يتم جمعها أو معالجتها عند استخدام خدمات المنصة
+وتكاملاتها مع WhatsApp Business Cloud API.
+</p>
+<p>
+يجب استكمال هذه السياسة بمعلومات الجهة المالكة للمنصة
+ووسائل التواصل الرسمية قبل نشرها للمستخدمين.
+</p>
+</section>
 
-    <h2>7. الاتصال بنا</h2>
-    <p><a href="mailto:privacy@your-domain.com">privacy@your-domain.com</a></p>
+<section class="card">
+<h2>2. البيانات التي قد تتم معالجتها</h2>
+<ul>
+<li>بيانات المؤسسات وحسابات المستخدمين.</li>
+<li>أرقام هواتف العملاء وجهات الاتصال.</li>
+<li>الرسائل الواردة والصادرة وحالات تسليمها.</li>
+<li>بيانات التكامل مع خدمات WhatsApp.</li>
+<li>سجلات العمليات والأخطاء لأغراض التشغيل والأمان.</li>
+</ul>
+</section>
+
+<section class="card">
+<h2>3. أغراض معالجة البيانات</h2>
+<ul>
+<li>تشغيل خدمة المحادثات وإدارة الرسائل.</li>
+<li>تنفيذ الردود الآلية التي يحددها مسؤول المؤسسة.</li>
+<li>إدارة حسابات WhatsApp المرتبطة بالمنصة.</li>
+<li>حماية الخدمة واكتشاف الاستخدام غير المصرح به.</li>
+<li>تشخيص الأعطال وتحسين أداء النظام.</li>
+</ul>
+</section>
+
+<section class="card">
+<h2>4. حماية البيانات</h2>
+<ul>
+<li>تقييد الوصول إلى البيانات بحسب صلاحيات المستخدم.</li>
+<li>حماية رموز الوصول وعدم عرضها في واجهة المتصفح.</li>
+<li>التحقق من توقيعات Webhook الواردة من Meta.</li>
+<li>عزل بيانات المؤسسات عن بعضها في الخادم.</li>
+<li>تحديد مدة الاحتفاظ بالبيانات وفق الغرض والمتطلبات القانونية.</li>
+</ul>
+
+<div class="notice">
+هذه البنود تمثل متطلبات وسياسات مستهدفة؛ لا تعتبر جميعها
+مطبقة تقنياً حتى يتم التحقق من تنفيذها في Backend.
+</div>
+</section>
+
+<section class="card">
+<h2>5. مشاركة البيانات</h2>
+<p>
+قد تتم معالجة بيانات الرسائل من خلال خدمات Meta المرتبطة
+بـ WhatsApp Business Cloud API، وذلك بحسب التكامل الذي
+تفعله المؤسسة.
+</p>
+<p>
+يجب توضيح أي مزودي خدمات استضافة أو معالجة إضافيين
+وحدود مشاركة البيانات معهم في النسخة النهائية من السياسة.
+</p>
+</section>
+
+<section class="card">
+<h2>6. طلب الوصول إلى البيانات أو حذفها</h2>
+
+<p>
+يمكن للمستخدم طلب مراجعة بياناته أو تصحيحها أو حذفها،
+وفق الصلاحيات والمتطلبات القانونية وسياسة الاحتفاظ بالبيانات.
+</p>
+
+<div class="info">
+نموذج الطلب أدناه واجهة توضيحية فقط. لم يتم ربطه بخدمة
+Backend لمعالجة طلبات الخصوصية بعد، ولذلك لن يرسل
+أي بيانات أو يدّعي تسجيل طلب حذف.
+</div>
+
+<div style="margin-top:20px">
+
+<div class="grid">
+
+<div>
+<label>الاسم</label>
+<input id="requestName" maxlength="150"
+placeholder="اسم مقدم الطلب">
+</div>
+
+<div>
+<label>البريد الإلكتروني</label>
+<input id="requestEmail" type="email" maxlength="254"
+placeholder="البريد الإلكتروني">
+</div>
+
+<div>
+<label>رقم الهاتف المرتبط بالحساب</label>
+<input id="requestPhone" maxlength="30"
+placeholder="رقم الهاتف">
+</div>
+
+<div>
+<label>نوع الطلب</label>
+<select id="requestType">
+<option value="ACCESS">طلب الوصول إلى البيانات</option>
+<option value="CORRECTION">طلب تصحيح البيانات</option>
+<option value="DELETION">طلب حذف البيانات</option>
+</select>
+</div>
+
+</div>
+
+<div style="margin-top:15px">
+<label>تفاصيل الطلب</label>
+<textarea id="requestDetails" maxlength="3000"
+placeholder="اكتب تفاصيل طلبك..."></textarea>
+</div>
+
+<div class="actions">
+<button type="button" disabled>
+إرسال طلب الخصوصية — غير مفعل حالياً
+</button>
+</div>
+
+</div>
+</section>
+
+<section class="card">
+<h2>7. حذف بيانات واتساب</h2>
+<p>
+حذف حساب واتساب من المنصة لا يعني بالضرورة حذف حساب
+WhatsApp Business من Meta، كما أن حذف الربط لا يعني
+حذف جميع الرسائل الموجودة لدى الأطراف الأخرى.
+</p>
+<p>
+يجب أن تتضمن آلية الحذف المستقبلية تحديد المؤسسة والحساب
+والبيانات المطلوبة، والتحقق من هوية مقدم الطلب، وتسجيل
+عملية الحذف ونتيجتها.
+</p>
+</section>
+
+<section class="card">
+<h2>8. التواصل بشأن الخصوصية</h2>
+<p>
+يجب على مالك المنصة إضافة بريد إلكتروني رسمي مخصص
+لطلبات الخصوصية وحماية البيانات قبل إتاحة هذه الصفحة للعامة.
+</p>
+<p>
+عنوان المنصة الحالي:
+<code id="siteOrigin"></code>
+</p>
+</section>
+
+<section class="card">
+<h2>9. تحديث السياسة</h2>
+<p>
+قد يتم تحديث سياسة الخصوصية عند إضافة خدمات أو تكاملات
+جديدة أو عند تغيير طريقة معالجة البيانات. يجب توضيح تاريخ
+آخر تحديث في النسخة المعتمدة.
+</p>
+<p>آخر تحديث للواجهة: 10 نوفمبر 2026.</p>
+</section>
+
+</main>
+</div>
+
+<script>
+"use strict";
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("siteOrigin").textContent =
+        window.location.origin;
+});
+</script>
+
 </body>
 </html>
