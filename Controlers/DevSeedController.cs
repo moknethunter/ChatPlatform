@@ -38,6 +38,14 @@ public sealed class DevSeedController : ControllerBase
                 message = "phoneNumberId, wabaId, businessToken are required" });
         }
 
+        var tenantId = string.IsNullOrWhiteSpace(req.TenantId)
+            ? TenantEntity.DefaultTenantId
+            : req.TenantId.Trim();
+
+        var tenantExists = await _db.Tenants.AnyAsync(x => x.Id == tenantId, ct);
+        if (!tenantExists)
+            return BadRequest(new { error = "tenant_not_found", tenantId });
+
         var encrypted = _protector.Protect(req.BusinessToken);
 
         var existing = await _db.WhatsAppTenants
@@ -45,6 +53,7 @@ public sealed class DevSeedController : ControllerBase
 
         if (existing != null)
         {
+            existing.TenantId = tenantId;
             existing.WabaId = req.WabaId;
             existing.BusinessTokenEncrypted = encrypted;
             existing.IsActive = true;
@@ -53,7 +62,7 @@ public sealed class DevSeedController : ControllerBase
         {
             _db.WhatsAppTenants.Add(new WhatsAppTenantEntity
             {
-                TenantId = req.TenantId ?? "default",
+                TenantId = tenantId,
                 PhoneNumberId = req.PhoneNumberId,
                 WabaId = req.WabaId,
                 BusinessTokenEncrypted = encrypted,
@@ -68,7 +77,7 @@ public sealed class DevSeedController : ControllerBase
         return Ok(new
         {
             success = true,
-            tenantId = req.TenantId ?? "default",
+            tenantId,
             phoneNumberId = req.PhoneNumberId
         });
     }
@@ -77,6 +86,7 @@ public sealed class DevSeedController : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
     {
         var tenants = await _db.WhatsAppTenants
+            .AsNoTracking()
             .Select(t => new
             {
                 t.TenantId,
