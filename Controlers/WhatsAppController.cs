@@ -1,221 +1,384 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding;
+using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
+namespace ChatPlatform.Controllers;
 
 [ApiController]
 [Route("api/whatsapp")]
-public class WhatsAppController : ControllerBase
+public sealed class WhatsAppController : ControllerBase
 {
-// تخزين مؤقت - لين تربطه بقاعدة البيانات حقك
-// tenantId -> بيانات الربط
-private static readonly ConcurrentDictionary<string, WhatsAppConnection> _connections = new();
-// tenantId -> قائمة الرسائل
-private static readonly ConcurrentDictionary<string, List<WhatsAppMessage>> _messages = new();
+    private readonly PlatformDbContext _db;
+    private readonly IHttpClientFactory _httpFactory;
+    private readonly IWhatsAppTenantResolver _tenantResolver;
+    private readonly ILogger<WhatsAppController> _logger;
 
-private readonly IConfiguration _config;  
-private readonly IHttpClientFactory _http;  
-private readonly ILogger<WhatsAppController> _logger;  
+    public WhatsAppController(
+        PlatformDbContext db,
+        IHttpClientFactory httpFactory,
+        IWhatsAppTenantResolver tenantResolver,
+        ILogger<WhatsAppController> logger)
+    {
+        _db = db;
+        _httpFactory = httpFactory;
+        _tenantResolver = tenantResolver;
+        _logger = logger;
+    }
 
-public WhatsAppController(IConfiguration config, IHttpClientFactory http, ILogger<WhatsAppController> logger)  
-{  
-    _config = config;  
-    _http = http;  
-    _logger = logger;  
-}  
+    [HttpGet("webhook")]
+    public IActionResult VerifyWebhook(
+        [FromQuery(Name = "hub.mode")] string mode,
+        [FromQuery(Name = "hub.verify_token")] string verifyToken,
+        [FromQuery(Name = "hub.challenge")] string challenge)
+    {
+        var expected = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
+            ?? "mokco-verify-123";
 
-// ============ 1. تحقق ميتا من الـ Webhook ============  
-// هذا هو اللي ميتا تتصل عليه اول مرة  
-// GET /api/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=XXX&hub.challenge=XXX  
-[HttpGet("webhook")]  
-public IActionResult VerifyWebhook(  
-    [FromQuery(Name = "hub.mode")] string mode,  
-    [FromQuery(Name = "hub.verify_token")] string verifyToken,  
-    [FromQuery(Name = "hub.challenge")] string challenge)  
-{  
-    var expected = _config["WhatsApp:VerifyToken"] ?? _config["WHATSAPP_VERIFY_TOKEN"] ?? "mokco-verify-123";  
+        if (string.Equals(mode, "subscribe", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(verifyToken, expected, StringComparison.Ordinal))
+        {
+            _logger.LogInformation("WhatsApp webhook verified.");
+            return Ok(challenge);
+        }
 
-    if (mode == "subscribe" && verifyToken == expected)  
-    {  
-        _logger.LogInformation("Webhook verified");  
-        return Ok(challenge);  
-    }  
-    return Forbid();  
-}  
+        return Forbid();
+    }
 
-// ============ 2. استقبال رسائل الواتساب من ميتا ============  
-// POST /api/whatsapp/webhook  
-[HttpPost("webhook")]  
-public async Task<IActionResult> ReceiveWebhook([FromBody] JsonElement body)  
-{  
-    try  
-    {  
-        _logger.LogInformation("Webhook received: {Body}", body.GetRawText());  
+    [HttpPost("webhook")]
+    public async Task<IActionResult> ReceiveWebhook(
+        [FromBody] JsonElement body,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (body.ValueKind != JsonValueKind.Object)
+                return BadRequest(new { ok = false, message = "Invalid payload" });
 
-        // ميتا ترسل entry -> changes -> value -> messages  
-        if (body.TryGetProperty("entry", out var entries))  
-        {  
-            foreach (var entry in entries.EnumerateArray())  
-            {  
-                if (!entry.TryGetProperty("changes", out var changes)) continue;  
-                foreach (var change in changes.EnumerateArray())  
-                {  
-                    if (!change.TryGetProperty("value", out var value)) continue;  
+            if (!body.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+                return Ok();
 
-                    // رقم الواتساب اللي وصلت عليه الرسالة - نستخدمه كـ tenant  
-                    string phoneNumberId = value.TryGetProperty("metadata", out var meta) && meta.TryGetProperty("phone_number_id", out var pnid)  
-                        ? pnid.GetString() ?? "default"  
-                        : "default";  
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
+                    continue;
 
-                    // نطلع الـ tenantId من الـ phone_number_id  
-                    string tenantId = GetTenantByPhoneId(phoneNumberId);  
+                foreach (var change in changes.EnumerateArray())
+                {
+                    if (!change.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Object)
+                        continue;
 
-                    if (value.TryGetProperty("messages", out var msgs))  
-                    {  
-                        foreach (var m in msgs.EnumerateArray())  
-                        {  
-                            var msg = new WhatsAppMessage  
-                            {  
-                                Id = m.TryGetProperty("id", out var id) ? id.GetString() ?? Guid.NewGuid().ToString() : Guid.NewGuid().ToString(),  
-                                From = m.TryGetProperty("from", out var from) ? from.GetString() ?? "" : "",  
-                                Text = m.TryGetProperty("text", out var text) && text.TryGetProperty("body", out var b) ? b.GetString() ?? "" : "",  
-                                Type = m.TryGetProperty("type", out var t) ? t.GetString() ?? "text" : "text",  
-                                Timestamp = DateTime.UtcNow,  
-                                Direction = "in",  
-                                TenantId = tenantId  
-                            };  
+                    var phoneNumberId = GetNestedString(value, "metadata", "phone_number_id");
+                    if (string.IsNullOrWhiteSpace(phoneNumberId))
+                        continue;
 
-                            // لو رسالة صورة / صوت / فيديو - خزن اسم النوع  
-                            if (msg.Type != "text" && string.IsNullOrEmpty(msg.Text))  
-                                msg.Text = $"[{msg.Type}]";  
+                    var tenant = await _tenantResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+                    if (tenant == null)
+                    {
+                        _logger.LogWarning("Unknown phoneNumberId in webhook: {PhoneNumberId}", phoneNumberId);
+                        continue;
+                    }
 
-                            var list = _messages.GetOrAdd(tenantId, _ => new List<WhatsAppMessage>());  
-                            lock (list) { list.Add(msg); }  
+                    if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var message in messages.EnumerateArray())
+                        {
+                            var wamid = GetString(message, "id");
+                            var from = GetString(message, "from") ?? "";
+                            var type = GetString(message, "type") ?? "text";
+                            var text = "";
 
-                            _logger.LogInformation("Saved message from {From} to {Tenant}: {Text}", msg.From, tenantId, msg.Text);  
-                        }  
-                    }  
+                            if (message.TryGetProperty("text", out var textNode) &&
+                                textNode.ValueKind == JsonValueKind.Object &&
+                                textNode.TryGetProperty("body", out var bodyNode))
+                            {
+                                text = bodyNode.GetString() ?? "";
+                            }
 
-                    // حالات الرسائل - تم الارسال / تم الاستلام / تمت القراءة  
-                    if (value.TryGetProperty("statuses", out var statuses))  
-                    {  
-                        foreach (var s in statuses.EnumerateArray())  
-                        {  
-                            _logger.LogInformation("Status: {Status} for {Id}",   
-                                s.TryGetProperty("status", out var st) ? st.GetString() : "?",  
-                                s.TryGetProperty("id", out var sid) ? sid.GetString() : "?");  
-                        }  
-                    }  
-                }  
-            }  
-        }  
-        return Ok();  
-    }  
-    catch (Exception ex)  
-    {  
-        _logger.LogError(ex, "Webhook error");  
-        return Ok(); // لازم نرجع Ok دايما عشان ميتا ما تعيد الارسال  
-    }  
-}  
+                            if (string.IsNullOrWhiteSpace(wamid))
+                                continue;
 
-// ============ 3. حفظ الربط - هذا اللي يضغط عليه زر "حفظ الربط" ============  
-// POST /api/whatsapp/save  
-// Body: { tenantId, phoneNumber, phoneNumberId, accessToken, verifyToken }  
-[HttpPost("save")]  
-public IActionResult SaveConnection([FromBody] SaveConnectionDto dto)  
-{  
-    if (string.IsNullOrEmpty(dto.TenantId) || string.IsNullOrEmpty(dto.AccessToken))  
-        return BadRequest(new { ok = false, message = "TenantId و AccessToken مطلوبة" });  
+                            var conversation = await _db.WhatsAppConversations
+                                .FirstOrDefaultAsync(c =>
+                                    c.TenantId == tenant.TenantId &&
+                                    c.PhoneNumberId == phoneNumberId &&
+                                    c.ContactPhone == from, ct);
 
-    _connections[dto.TenantId] = new WhatsAppConnection  
-    {  
-        TenantId = dto.TenantId,  
-        PhoneNumber = dto.PhoneNumber ?? "",  
-        PhoneNumberId = dto.PhoneNumberId ?? "",  
-        AccessToken = dto.AccessToken,  
-        VerifyToken = dto.VerifyToken ?? "",  
-        IsConnected = true,  
-        ConnectedAt = DateTime.UtcNow  
-    };  
+                            if (conversation == null)
+                            {
+                                conversation = new WhatsAppConversationEntity
+                                {
+                                    TenantId = tenant.TenantId,
+                                    PhoneNumberId = phoneNumberId,
+                                    ContactPhone = from,
+                                    Status = "open",
+                                    CreatedAtUtc = DateTime.UtcNow,
+                                    UpdatedAtUtc = DateTime.UtcNow,
+                                    LastInboundAtUtc = DateTime.UtcNow,
+                                    WindowExpiresAtUtc = DateTime.UtcNow.AddHours(24)
+                                };
 
-    _logger.LogInformation("WhatsApp connected for tenant {Tenant} number {Number}", dto.TenantId, dto.PhoneNumber);  
-    return Ok(new { ok = true, message = "تم حفظ الربط بنجاح ✅", tenantId = dto.TenantId });  
-}  
+                                _db.WhatsAppConversations.Add(conversation);
+                                await _db.SaveChangesAsync(ct);
+                            }
+                            else
+                            {
+                                conversation.LastInboundAtUtc = DateTime.UtcNow;
+                                conversation.WindowExpiresAtUtc = DateTime.UtcNow.AddHours(24);
+                                conversation.UpdatedAtUtc = DateTime.UtcNow;
+                                conversation.Status = "open";
+                            }
 
-// نفس الحفظ بس باسم ثاني - لان بعض الواجهات تنادي connect  
-[HttpPost("connect")]  
-public IActionResult Connect([FromBody] SaveConnectionDto dto) => SaveConnection(dto);  
+                            var exists = await _db.WhatsAppMessages
+                                .AnyAsync(m => m.Wamid == wamid, ct);
 
-// ============ 4. حالة الربط - عشان الواجهة تعرف هل مربوط ولا لا ============  
-// GET /api/whatsapp/status?tenantId=tenant-mokco-001  
-[HttpGet("status")]  
-public IActionResult GetStatus([FromQuery] string tenantId)  
-{  
-    if (string.IsNullOrEmpty(tenantId)) tenantId = "tenant-mokco-001";  
-    if (_connections.TryGetValue(tenantId, out var c))  
-        return Ok(new { ok = true, connected = true, phoneNumber = c.PhoneNumber, phoneNumberId = c.PhoneNumberId, connectedAt = c.ConnectedAt });  
-    return Ok(new { ok = true, connected = false, phoneNumber = "", phoneNumberId = "" });  
-}  
+                            if (!exists)
+                            {
+                                var messageEntity = new WhatsAppMessageEntity
+                                {
+                                    TenantId = tenant.TenantId,
+                                    ConversationId = conversation.Id,
+                                    Direction = "Inbound",
+                                    MessageType = type,
+                                    ContentJson = message.GetRawText(),
+                                    TextPreview = string.IsNullOrWhiteSpace(text) ? $"[{type}]" : text,
+                                    Status = "Received",
+                                    Wamid = wamid,
+                                    TimestampUtc = DateTime.UtcNow,
+                                    CreatedAtUtc = DateTime.UtcNow
+                                };
 
-// ============ 5. جلب الرسائل للانبوكس ============  
-// GET /api/whatsapp/messages?tenantId=xxx  
-[HttpGet("messages")]  
-public IActionResult GetMessages([FromQuery] string tenantId)  
-{  
-    if (string.IsNullOrEmpty(tenantId)) tenantId = "tenant-mokco-001";  
-    if (_messages.TryGetValue(tenantId, out var list))  
-    {  
-        lock (list) { return Ok(new { ok = true, messages = list.OrderByDescending(x => x.Timestamp).Take(100).ToList() }); }  
-    }  
-    return Ok(new { ok = true, messages = new List<WhatsAppMessage>() });  
-}  
+                                _db.WhatsAppMessages.Add(messageEntity);
+                                await _db.SaveChangesAsync(ct);
 
-// ============ 6. ارسال رسالة من الانبوكس ============  
-// POST /api/whatsapp/send  
-// Body: { tenantId, to, text }  
-[HttpPost("send")]  
-public async Task<IActionResult> SendMessage([FromBody] SendMessageDto dto)  
-{  
-    if (!_connections.TryGetValue(dto.TenantId, out var conn))  
-        return BadRequest(new { ok = false, message = "الواتساب غير مربوط لهذا المتجر، اربطه اولاً من صفحة connectors" });  
+                                _logger.LogInformation(
+                                    "Saved inbound message: tenant={Tenant}, from={From}, type={Type}, wamid={Wamid}",
+                                    tenant.TenantId, from, type, wamid);
+                            }
+                        }
+                    }
 
-    var client = _http.CreateClient();  
-    client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", conn.AccessToken);  
+                    if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var status in statuses.EnumerateArray())
+                        {
+                            var wamid = GetString(status, "id");
+                            var statusName = GetString(status, "status");
+                            if (!string.IsNullOrWhiteSpace(wamid) && !string.IsNullOrWhiteSpace(statusName))
+                            {
+                                _logger.LogInformation("WhatsApp status: {Wamid} => {Status}", wamid, statusName);
+                            }
+                        }
+                    }
+                }
+            }
 
-    var payload = new  
-    {  
-        messaging_product = "whatsapp",  
-        recipient_type = "individual",  
-        to = dto.To,  
-        type = "text",  
-        text = new { preview_url = false, body = dto.Text }  
-    };  
+            return Ok(new { ok = true });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "WhatsApp webhook processing failed.");
+            return Ok(new { ok = false, message = "Webhook processed with error" });
+        }
+    }
 
-    var res = await client.PostAsJsonAsync($"https://graph.facebook.com/v21.0/{conn.PhoneNumberId}/messages", payload);  
-    var resBody = await res.Content.ReadAsStringAsync();  
+    [HttpPost("save")]
+    public async Task<IActionResult> SaveConnection([FromBody] SaveConnectionDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.TenantId) || string.IsNullOrWhiteSpace(dto.PhoneNumberId) || string.IsNullOrWhiteSpace(dto.AccessToken))
+        {
+            return BadRequest(new { ok = false, message = "TenantId, PhoneNumberId and AccessToken are required" });
+        }
 
-    if (!res.IsSuccessStatusCode)  
-    {  
-        _logger.LogError("Send failed: {Body}", resBody);  
-        return BadRequest(new { ok = false, message = "فشل الارسال", detail = resBody });  
-    }  
+        var tenant = await _db.WhatsAppTenants
+            .FirstOrDefaultAsync(x => x.PhoneNumberId == dto.PhoneNumberId, ct);
 
-    // حفظ الرسالة المرسلة  
-    var list = _messages.GetOrAdd(dto.TenantId, _ => new List<WhatsAppMessage>());  
-    lock (list)  
-    {  
-        list.Add(new WhatsAppMessage  
-        {  
-            Id = Guid.NewGuid().ToString(),  
-            From = conn.PhoneNumber,  
-            To = dto.To,  
-            Text = dto.Text,  
-            Type = "text",  
-            Timestamp = DateTime.UtcNow,  
-            Direction = "out",  
-            TenantId = dto.TenantId  
-        });  
-    }  
+        if (tenant == null)
+        {
+            tenant = new WhatsAppTenantEntity
+            {
+                TenantId = dto.TenantId,
+                PhoneNumberId = dto.PhoneNumberId,
+                WabaId = dto.WabaId ?? "",
+                BusinessTokenEncrypted = dto.AccessToken,
+                IsActive = true
+            };
+            _db.WhatsAppTenants.Add(tenant);
+        }
+        else
+        {
+            tenant.TenantId = dto.TenantId;
+            tenant.WabaId = dto.WabaId ?? tenant.WabaId;
+            tenant.BusinessTokenEncrypted = dto.AccessToken;
+            tenant.IsActive = true;
+        }
 
-    return Ok(new { ok = true
+        await _db.SaveChangesAsync(ct);
 
-هذا الكود للواتساب كنترولر هل عندك افضل منه
+        return Ok(new { ok = true, message = "Saved successfully", tenantId = dto.TenantId });
+    }
+
+    [HttpGet("status")]
+    public async Task<IActionResult> GetStatus([FromQuery] string tenantId, CancellationToken ct)
+    {
+        var tenant = await _db.WhatsAppTenants
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.TenantId == tenantId, ct);
+
+        if (tenant == null)
+            return Ok(new { ok = true, connected = false });
+
+        return Ok(new
+        {
+            ok = true,
+            connected = true,
+            tenantId = tenant.TenantId,
+            phoneNumberId = tenant.PhoneNumberId,
+            wabaId = tenant.WabaId
+        });
+    }
+
+    [HttpGet("messages")]
+    public async Task<IActionResult> GetMessages(
+        [FromQuery] string? tenantId,
+        [FromQuery] int take = 100,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+            tenantId = "default";
+
+        var safeTake = Math.Clamp(take, 1, 200);
+
+        var items = await _db.WhatsAppMessages
+            .AsNoTracking()
+            .Where(m => m.TenantId == tenantId)
+            .OrderByDescending(m => m.TimestampUtc)
+            .Take(safeTake)
+            .Select(m => new
+            {
+                id = m.Id,
+                direction = m.Direction,
+                messageType = m.MessageType,
+                textPreview = m.TextPreview,
+                status = m.Status,
+                timestampUtc = m.TimestampUtc,
+                wamid = m.Wamid
+            })
+            .ToListAsync(ct);
+
+        return Ok(new { ok = true, messages = items });
+    }
+
+    [HttpPost("send")]
+    public async Task<IActionResult> SendMessage([FromBody] SendMessageDto dto, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(dto.TenantId) ||
+            string.IsNullOrWhiteSpace(dto.To) ||
+            string.IsNullOrWhiteSpace(dto.Text))
+        {
+            return BadRequest(new { ok = false, message = "TenantId, To and Text are required" });
+        }
+
+        var account = await _db.WhatsAppTenants
+            .FirstOrDefaultAsync(x => x.TenantId == dto.TenantId && x.IsActive, ct);
+
+        if (account == null)
+            return BadRequest(new { ok = false, message = "WhatsApp account is not connected for this tenant" });
+
+        var client = _httpFactory.CreateClient("whatsapp");
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", account.BusinessTokenEncrypted);
+
+        var payload = new
+        {
+            messaging_product = "whatsapp",
+            recipient_type = "individual",
+            to = dto.To,
+            type = "text",
+            text = new { preview_url = false, body = dto.Text }
+        };
+
+        var response = await client.PostAsJsonAsync($"{account.PhoneNumberId}/messages", payload, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError("WhatsApp send failed: {Status} {Body}", response.StatusCode, body);
+            return BadRequest(new { ok = false, message = "Send failed", detail = body });
+        }
+
+        var conversation = await _db.WhatsAppConversations
+            .FirstOrDefaultAsync(c =>
+                c.TenantId == dto.TenantId &&
+                c.PhoneNumberId == account.PhoneNumberId &&
+                c.ContactPhone == dto.To, ct);
+
+        if (conversation == null)
+        {
+            conversation = new WhatsAppConversationEntity
+            {
+                TenantId = dto.TenantId,
+                PhoneNumberId = account.PhoneNumberId,
+                ContactPhone = dto.To,
+                Status = "open",
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow
+            };
+            _db.WhatsAppConversations.Add(conversation);
+            await _db.SaveChangesAsync(ct);
+        }
+
+        _db.WhatsAppMessages.Add(new WhatsAppMessageEntity
+        {
+            TenantId = dto.TenantId,
+            ConversationId = conversation.Id,
+            Direction = "Outbound",
+            MessageType = "text",
+            ContentJson = JsonSerializer.Serialize(payload),
+            TextPreview = dto.Text,
+            Status = "Sent",
+            TimestampUtc = DateTime.UtcNow,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { ok = true, message = "Message sent" });
+    }
+
+    private static string? GetString(JsonElement element, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (!element.TryGetProperty(property, out var value))
+            return null;
+
+        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    private static string? GetNestedString(JsonElement element, string parent, string property)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (!element.TryGetProperty(parent, out var nested))
+            return null;
+
+        return GetString(nested, property);
+    }
+}
+
+public sealed record SaveConnectionDto(
+    string TenantId,
+    string PhoneNumberId,
+    string AccessToken,
+    string? WabaId,
+    string? VerifyToken);
+
+public sealed record SendMessageDto(
+    string TenantId,
+    string To,
+    string Text);
