@@ -8,11 +8,16 @@ namespace ChatPlatform.Controllers;
 
 /// <summary>
 /// ⚠️ للتجربة فقط — احذفه بعد أول اختبار ناجح.
-/// يحفظ التوكن المشفر في WhatsAppTenants.
+/// يزرع 3 مؤسسات ثابتة + يحفظ التوكن المشفر في WhatsAppTenants.
 /// </summary>
 [ApiController, Route("dev/seed")]
 public sealed class DevSeedController : ControllerBase
 {
+    // ===== الـ TenantId الثابتة - لا تغيرها أبداً =====
+    public const string Tenant1Id = "tenant-mokco-001";     // مؤسستك mokco
+    public const string Tenant2Id = "tenant-mohammed-002";   // مؤسسة صديقك محمد
+    public const string Tenant3Id = "tenant-empty-003";      // الفارغة المحجوزة
+
     private readonly PlatformDbContext _db;
     private readonly IDataProtector _protector;
     private readonly ILogger<DevSeedController> _log;
@@ -27,6 +32,30 @@ public sealed class DevSeedController : ControllerBase
         _log = log;
     }
 
+    // ===== 1. زرع المؤسسات الثلاث - ناديه أول مرة بس =====
+    // POST /dev/seed/init-tenants
+    [HttpPost("init-tenants")]
+    public async Task<IActionResult> InitTenants(CancellationToken ct)
+    {
+        var tenants = new[]
+        {
+            new TenantEntity { Id = Tenant1Id, Name = "mokco", Phone = "967774821733", IsActive = true },
+            new TenantEntity { Id = Tenant2Id, Name = "محمد", Phone = "967777616175", IsActive = true },
+            new TenantEntity { Id = Tenant3Id, Name = "مؤسسة فارغة - للحجز", Phone = null, IsActive = false },
+        };
+
+        foreach (var t in tenants)
+        {
+            var exists = await _db.Tenants.AnyAsync(x => x.Id == t.Id, ct);
+            if (!exists)
+                _db.Tenants.Add(t);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { success = true, tenants = new[] { Tenant1Id, Tenant2Id, Tenant3Id } });
+    }
+
+    // ===== 2. ربط الواتساب =====
     [HttpPost]
     public async Task<IActionResult> Seed([FromBody] SeedReq req, CancellationToken ct)
     {
@@ -53,7 +82,7 @@ public sealed class DevSeedController : ControllerBase
         {
             _db.WhatsAppTenants.Add(new WhatsAppTenantEntity
             {
-                TenantId = req.TenantId ?? "default",
+                TenantId = req.TenantId ?? Tenant1Id,
                 PhoneNumberId = req.PhoneNumberId,
                 WabaId = req.WabaId,
                 BusinessTokenEncrypted = encrypted,
@@ -68,7 +97,7 @@ public sealed class DevSeedController : ControllerBase
         return Ok(new
         {
             success = true,
-            tenantId = req.TenantId ?? "default",
+            tenantId = req.TenantId ?? Tenant1Id,
             phoneNumberId = req.PhoneNumberId
         });
     }
