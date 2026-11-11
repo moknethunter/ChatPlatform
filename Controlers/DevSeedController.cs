@@ -14,8 +14,8 @@ namespace ChatPlatform.Controllers;
 public sealed class DevSeedController : ControllerBase
 {
     // ===== الـ TenantId الثابتة - لا تغيرها أبداً =====
-    public const string Tenant1Id = "tenant-mokco-001";     // مؤسستك mokco
-    public const string Tenant2Id = "tenant-mohammed-002";   // مؤسسة صديقك محمد
+    public const string Tenant1Id = "tenant-mokco-001";     // مؤسستك mokco - 967774821733
+    public const string Tenant2Id = "tenant-mohammed-002";   // مؤسسة صديقك محمد - 967777616175
     public const string Tenant3Id = "tenant-empty-003";      // الفارغة المحجوزة
 
     private readonly PlatformDbContext _db;
@@ -39,9 +39,9 @@ public sealed class DevSeedController : ControllerBase
     {
         var tenants = new[]
         {
-            new TenantEntity { Id = Tenant1Id, Name = "mokco", Phone = "967774821733", IsActive = true },
-            new TenantEntity { Id = Tenant2Id, Name = "محمد", Phone = "967777616175", IsActive = true },
-            new TenantEntity { Id = Tenant3Id, Name = "مؤسسة فارغة - للحجز", Phone = null, IsActive = false },
+            new TenantEntity { Id = Tenant1Id, Name = "mokco", IsActive = true },
+            new TenantEntity { Id = Tenant2Id, Name = "محمد", IsActive = true },
+            new TenantEntity { Id = Tenant3Id, Name = "مؤسسة فارغة - للحجز", IsActive = false },
         };
 
         foreach (var t in tenants)
