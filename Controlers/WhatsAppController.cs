@@ -4,6 +4,8 @@ using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 
 namespace ChatPlatform.Controllers;
 
@@ -28,6 +30,7 @@ public sealed class WhatsAppController : ControllerBase
         _logger = logger;
     }
 
+    // GET: api/whatsapp/webhook
     [HttpGet("webhook")]
     public IActionResult VerifyWebhook(
         [FromQuery(Name = "hub.mode")] string mode,
@@ -47,6 +50,7 @@ public sealed class WhatsAppController : ControllerBase
         return Forbid();
     }
 
+    // POST: api/whatsapp/webhook
     [HttpPost("webhook")]
     public async Task<IActionResult> ReceiveWebhook(
         [FromBody] JsonElement body,
@@ -57,31 +61,44 @@ public sealed class WhatsAppController : ControllerBase
             if (body.ValueKind != JsonValueKind.Object)
                 return BadRequest(new { ok = false, message = "Invalid payload" });
 
-            if (!body.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+            if (!body.TryGetProperty("entry", out var entries)
+                || entries.ValueKind != JsonValueKind.Array)
                 return Ok();
 
             foreach (var entry in entries.EnumerateArray())
             {
-                if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
+                if (!entry.TryGetProperty("changes", out var changes)
+                    || changes.ValueKind != JsonValueKind.Array)
                     continue;
 
                 foreach (var change in changes.EnumerateArray())
                 {
-                    if (!change.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Object)
+                    if (!change.TryGetProperty("value", out var value)
+                        || value.ValueKind != JsonValueKind.Object)
                         continue;
 
-                    var phoneNumberId = GetNestedString(value, "metadata", "phone_number_id");
+                    var phoneNumberId =
+                        GetNestedString(value, "metadata", "phone_number_id");
+
                     if (string.IsNullOrWhiteSpace(phoneNumberId))
                         continue;
 
-                    var tenant = await _tenantResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+                    var tenant =
+                        await _tenantResolver.ResolveByPhoneNumberIdAsync(
+                            phoneNumberId, ct);
+
                     if (tenant == null)
                     {
-                        _logger.LogWarning("Unknown phoneNumberId in webhook: {PhoneNumberId}", phoneNumberId);
+                        _logger.LogWarning(
+                            "Unknown phoneNumberId in webhook: {PhoneNumberId}",
+                            phoneNumberId);
+
                         continue;
                     }
 
-                    if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+                    // Incoming messages
+                    if (value.TryGetProperty("messages", out var messages)
+                        && messages.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var message in messages.EnumerateArray())
                         {
@@ -90,9 +107,9 @@ public sealed class WhatsAppController : ControllerBase
                             var type = GetString(message, "type") ?? "text";
                             var text = "";
 
-                            if (message.TryGetProperty("text", out var textNode) &&
-                                textNode.ValueKind == JsonValueKind.Object &&
-                                textNode.TryGetProperty("body", out var bodyNode))
+                            if (message.TryGetProperty("text", out var textNode)
+                                && textNode.ValueKind == JsonValueKind.Object
+                                && textNode.TryGetProperty("body", out var bodyNode))
                             {
                                 text = bodyNode.GetString() ?? "";
                             }
@@ -100,11 +117,12 @@ public sealed class WhatsAppController : ControllerBase
                             if (string.IsNullOrWhiteSpace(wamid))
                                 continue;
 
-                            var conversation = await _db.WhatsAppConversations
-                                .FirstOrDefaultAsync(c =>
-                                    c.TenantId == tenant.TenantId &&
-                                    c.PhoneNumberId == phoneNumberId &&
-                                    c.ContactPhone == from, ct);
+                            var conversation =
+                                await _db.WhatsAppConversations
+                                    .FirstOrDefaultAsync(c =>
+                                        c.TenantId == tenant.TenantId &&
+                                        c.PhoneNumberId == phoneNumberId &&
+                                        c.ContactPhone == from, ct);
 
                             if (conversation == null)
                             {
@@ -117,7 +135,8 @@ public sealed class WhatsAppController : ControllerBase
                                     CreatedAtUtc = DateTime.UtcNow,
                                     UpdatedAtUtc = DateTime.UtcNow,
                                     LastInboundAtUtc = DateTime.UtcNow,
-                                    WindowExpiresAtUtc = DateTime.UtcNow.AddHours(24)
+                                    WindowExpiresAtUtc =
+                                        DateTime.UtcNow.AddHours(24)
                                 };
 
                                 _db.WhatsAppConversations.Add(conversation);
@@ -126,7 +145,9 @@ public sealed class WhatsAppController : ControllerBase
                             else
                             {
                                 conversation.LastInboundAtUtc = DateTime.UtcNow;
-                                conversation.WindowExpiresAtUtc = DateTime.UtcNow.AddHours(24);
+                                conversation.WindowExpiresAtUtc =
+                                    DateTime.UtcNow.AddHours(24);
+
                                 conversation.UpdatedAtUtc = DateTime.UtcNow;
                                 conversation.Status = "open";
                             }
@@ -136,19 +157,23 @@ public sealed class WhatsAppController : ControllerBase
 
                             if (!exists)
                             {
-                                var messageEntity = new WhatsAppMessageEntity
-                                {
-                                    TenantId = tenant.TenantId,
-                                    ConversationId = conversation.Id,
-                                    Direction = "Inbound",
-                                    MessageType = type,
-                                    ContentJson = message.GetRawText(),
-                                    TextPreview = string.IsNullOrWhiteSpace(text) ? $"[{type}]" : text,
-                                    Status = "Received",
-                                    Wamid = wamid,
-                                    TimestampUtc = DateTime.UtcNow,
-                                    CreatedAtUtc = DateTime.UtcNow
-                                };
+                                var messageEntity =
+                                    new WhatsAppMessageEntity
+                                    {
+                                        TenantId = tenant.TenantId,
+                                        ConversationId = conversation.Id,
+                                        Direction = "Inbound",
+                                        MessageType = type,
+                                        ContentJson = message.GetRawText(),
+                                        TextPreview =
+                                            string.IsNullOrWhiteSpace(text)
+                                                ? $"[{type}]"
+                                                : text,
+                                        Status = "Received",
+                                        Wamid = wamid,
+                                        TimestampUtc = DateTime.UtcNow,
+                                        CreatedAtUtc = DateTime.UtcNow
+                                    };
 
                                 _db.WhatsAppMessages.Add(messageEntity);
                                 await _db.SaveChangesAsync(ct);
@@ -160,15 +185,21 @@ public sealed class WhatsAppController : ControllerBase
                         }
                     }
 
-                    if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
+                    // Message statuses
+                    if (value.TryGetProperty("statuses", out var statuses)
+                        && statuses.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var status in statuses.EnumerateArray())
                         {
                             var wamid = GetString(status, "id");
                             var statusName = GetString(status, "status");
-                            if (!string.IsNullOrWhiteSpace(wamid) && !string.IsNullOrWhiteSpace(statusName))
+
+                            if (!string.IsNullOrWhiteSpace(wamid)
+                                && !string.IsNullOrWhiteSpace(statusName))
                             {
-                                _logger.LogInformation("WhatsApp status: {Wamid} => {Status}", wamid, statusName);
+                                _logger.LogInformation(
+                                    "WhatsApp status: {Wamid} => {Status}",
+                                    wamid, statusName);
                             }
                         }
                     }
@@ -180,20 +211,35 @@ public sealed class WhatsAppController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "WhatsApp webhook processing failed.");
-            return Ok(new { ok = false, message = "Webhook processed with error" });
+
+            return Ok(new
+            {
+                ok = false,
+                message = "Webhook processed with error"
+            });
         }
     }
 
+    // POST: api/whatsapp/save
     [HttpPost("save")]
-    public async Task<IActionResult> SaveConnection([FromBody] SaveConnectionDto dto, CancellationToken ct)
+    public async Task<IActionResult> SaveConnection(
+        [FromBody] SaveConnectionDto dto,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(dto.TenantId) || string.IsNullOrWhiteSpace(dto.PhoneNumberId) || string.IsNullOrWhiteSpace(dto.AccessToken))
+        if (string.IsNullOrWhiteSpace(dto.TenantId)
+            || string.IsNullOrWhiteSpace(dto.PhoneNumberId)
+            || string.IsNullOrWhiteSpace(dto.AccessToken))
         {
-            return BadRequest(new { ok = false, message = "TenantId, PhoneNumberId and AccessToken are required" });
+            return BadRequest(new
+            {
+                ok = false,
+                message = "TenantId, PhoneNumberId and AccessToken are required"
+            });
         }
 
         var tenant = await _db.WhatsAppTenants
-            .FirstOrDefaultAsync(x => x.PhoneNumberId == dto.PhoneNumberId, ct);
+            .FirstOrDefaultAsync(
+                x => x.PhoneNumberId == dto.PhoneNumberId, ct);
 
         if (tenant == null)
         {
@@ -205,6 +251,7 @@ public sealed class WhatsAppController : ControllerBase
                 BusinessTokenEncrypted = dto.AccessToken,
                 IsActive = true
             };
+
             _db.WhatsAppTenants.Add(tenant);
         }
         else
@@ -217,11 +264,19 @@ public sealed class WhatsAppController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new { ok = true, message = "Saved successfully", tenantId = dto.TenantId });
+        return Ok(new
+        {
+            ok = true,
+            message = "Saved successfully",
+            tenantId = dto.TenantId
+        });
     }
 
+    // GET: api/whatsapp/status
     [HttpGet("status")]
-    public async Task<IActionResult> GetStatus([FromQuery] string tenantId, CancellationToken ct)
+    public async Task<IActionResult> GetStatus(
+        [FromQuery] string tenantId,
+        CancellationToken ct)
     {
         var tenant = await _db.WhatsAppTenants
             .AsNoTracking()
@@ -240,6 +295,7 @@ public sealed class WhatsAppController : ControllerBase
         });
     }
 
+    // GET: api/whatsapp/messages
     [HttpGet("messages")]
     public async Task<IActionResult> GetMessages(
         [FromQuery] string? tenantId,
@@ -268,28 +324,53 @@ public sealed class WhatsAppController : ControllerBase
             })
             .ToListAsync(ct);
 
-        return Ok(new { ok = true, messages = items });
+        return Ok(new
+        {
+            ok = true,
+            messages = items
+        });
     }
 
+    // POST: api/whatsapp/send
     [HttpPost("send")]
-    public async Task<IActionResult> SendMessage([FromBody] SendMessageDto dto, CancellationToken ct)
+    public async Task<IActionResult> SendMessage(
+        [FromBody] SendMessageDto dto,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(dto.TenantId) ||
-            string.IsNullOrWhiteSpace(dto.To) ||
-            string.IsNullOrWhiteSpace(dto.Text))
+        if (string.IsNullOrWhiteSpace(dto.TenantId)
+            || string.IsNullOrWhiteSpace(dto.To)
+            || string.IsNullOrWhiteSpace(dto.Text))
         {
-            return BadRequest(new { ok = false, message = "TenantId, To and Text are required" });
+            return BadRequest(new
+            {
+                ok = false,
+                message = "TenantId, To and Text are required"
+            });
         }
 
         var account = await _db.WhatsAppTenants
-            .FirstOrDefaultAsync(x => x.TenantId == dto.TenantId && x.IsActive, ct);
+            .FirstOrDefaultAsync(
+                x => x.TenantId == dto.TenantId && x.IsActive, ct);
 
         if (account == null)
-            return BadRequest(new { ok = false, message = "WhatsApp account is not connected for this tenant" });
+        {
+            return BadRequest(new
+            {
+                ok = false,
+                message = "WhatsApp account is not connected for this tenant"
+            });
+        }
 
         var client = _httpFactory.CreateClient("whatsapp");
+
+        // Meta Graph API version: v26.0
+        client.BaseAddress = new Uri(
+            "https://graph.facebook.com/v26.0/");
+
         client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", account.BusinessTokenEncrypted);
+            new AuthenticationHeaderValue(
+                "Bearer",
+                account.BusinessTokenEncrypted);
 
         var payload = new
         {
@@ -297,16 +378,34 @@ public sealed class WhatsAppController : ControllerBase
             recipient_type = "individual",
             to = dto.To,
             type = "text",
-            text = new { preview_url = false, body = dto.Text }
+            text = new
+            {
+                preview_url = false,
+                body = dto.Text
+            }
         };
 
-        var response = await client.PostAsJsonAsync($"{account.PhoneNumberId}/messages", payload, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
+        var response = await client.PostAsJsonAsync(
+            $"{account.PhoneNumberId}/messages",
+            payload,
+            ct);
+
+        var responseBody =
+            await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
         {
-            _logger.LogError("WhatsApp send failed: {Status} {Body}", response.StatusCode, body);
-            return BadRequest(new { ok = false, message = "Send failed", detail = body });
+            _logger.LogError(
+                "WhatsApp send failed: {Status} {Body}",
+                response.StatusCode,
+                responseBody);
+
+            return BadRequest(new
+            {
+                ok = false,
+                message = "Send failed",
+                detail = responseBody
+            });
         }
 
         var conversation = await _db.WhatsAppConversations
@@ -326,6 +425,7 @@ public sealed class WhatsAppController : ControllerBase
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow
             };
+
             _db.WhatsAppConversations.Add(conversation);
             await _db.SaveChangesAsync(ct);
         }
@@ -345,10 +445,16 @@ public sealed class WhatsAppController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        return Ok(new { ok = true, message = "Message sent" });
+        return Ok(new
+        {
+            ok = true,
+            message = "Message sent"
+        });
     }
 
-    private static string? GetString(JsonElement element, string property)
+    private static string? GetString(
+        JsonElement element,
+        string property)
     {
         if (element.ValueKind != JsonValueKind.Object)
             return null;
@@ -356,10 +462,15 @@ public sealed class WhatsAppController : ControllerBase
         if (!element.TryGetProperty(property, out var value))
             return null;
 
-        return value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
     }
 
-    private static string? GetNestedString(JsonElement element, string parent, string property)
+    private static string? GetNestedString(
+        JsonElement element,
+        string parent,
+        string property)
     {
         if (element.ValueKind != JsonValueKind.Object)
             return null;
