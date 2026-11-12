@@ -2,6 +2,7 @@ using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
 {
     private const int LeaseSeconds = 60;
     private const int MaxErrorDelaySeconds = 300;
-    
+
     private const string StatusPending = "Pending";
     private const string StatusProcessing = "Processing";
     private const string StatusSent = "Sent";
@@ -23,7 +24,9 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
     private readonly IDataProtector _protector;
     private readonly ILogger<WhatsAppOutboxWorker> _logger;
 
-    private readonly string _leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
+    // معرف فريد لهذه النسخة من التطبيق لمنع تعارض العمال (Workers)
+    private readonly string _leaseOwner = 
+        $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 
     public WhatsAppOutboxWorker(
         IServiceScopeFactory scopeFactory,
@@ -44,8 +47,10 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             try
             {
                 var processed = await ProcessOneAsync(stoppingToken);
-                // ذكاء في التوقيت: إذا لم توجد رسائل، انتظر ثانية. إذا كانت هناك رسائل، تابع فوراً.
-                if (!processed) await Task.Delay(1000, stoppingToken);
+                
+                // إذا لم توجد رسائل، انتظر ثانية. إذا كانت هناك رسائل، تابع فوراً.
+                if (!processed) 
+                    await Task.Delay(1000, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -81,7 +86,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
 
         if (candidateId == null) return false;
 
-        // 2. القفل الذري (Atomic Claim)
+        // 2. الحجز الذري للرسالة (Atomic Claim)
         var claimed = await db.WhatsAppOutbox
             .Where(x => x.Id == candidateId.Value 
                         && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
@@ -97,7 +102,10 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
 
         db.ChangeTracker.Clear(); // تنظيف الذاكرة
 
-        var item = await db.WhatsAppOutbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
+        var item = await db.WhatsAppOutbox
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
+
         if (item == null) return true;
 
         // 3. جلب الحساب والتحقق من المستأجر
@@ -112,12 +120,13 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             return true;
         }
 
-        // 4. فك تشفير التوكن
+        // 4. فك تشفير رمز الوصول
         string token;
         try
         {
             if (string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
                 throw new InvalidOperationException("Encrypted token is empty.");
+                
             token = _protector.Unprotect(account.BusinessTokenEncrypted);
         }
         catch (Exception ex)
@@ -127,10 +136,10 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             return true;
         }
 
-        // 5. إرسال الرسالة عبر Cloud API
+        // 5. إرسال الرسالة عبر WhatsApp Cloud API
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 
-        // 6. معالجة النتيجة
+        // 6. معالجة نتيجة الإرسال
         if (result.IsSuccess)
         {
             await MarkSentAsync(db, item, result.MetaMessageId, ct);
@@ -147,10 +156,9 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         return true;
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // دوال مساعدة (Helpers) - أذكى وأقل تكراراً
-    // ══════════════════════════════════════════════════════════════
-
+    // =========================================================
+    // تحديث الرسالة بعد نجاح الإرسال
+    // =========================================================
     private async Task MarkSentAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string? metaId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
@@ -171,12 +179,17 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         {
             await db.WhatsAppMessages
                 .Where(m => m.Id == item.MessageId.Value)
-                .ExecuteUpdateAsync(u => u.SetProperty(m => m.Status, StatusSent).SetProperty(m => m.Wamid, metaId), ct);
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(m => m.Status, StatusSent)
+                    .SetProperty(m => m.Wamid, metaId), ct);
         }
 
         _logger.LogInformation("Outbox {Id} sent. MetaMessageId={MetaId}", item.Id, metaId);
     }
 
+    // =========================================================
+    // إعادة المحاولة عند الخطأ المؤقت
+    // =========================================================
     private async Task RetryAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string error, CancellationToken ct)
     {
         var dead = item.Attempts >= Math.Max(1, item.MaxAttempts);
@@ -192,6 +205,9 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         _logger.LogWarning("Outbox {Id} retry. Attempts={Attempts}, Dead={Dead}", item.Id, item.Attempts, dead);
     }
 
+    // =========================================================
+    // الفشل النهائي
+    // =========================================================
     private async Task FailPermanentAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string error, CancellationToken ct)
     {
         var affected = await UpdateOutboxStateAsync(db, item.Id, u => u
@@ -211,13 +227,13 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         _logger.LogError("Outbox {Id} permanently failed: {Error}", item.Id, error);
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // دالة موحدة لتحديث حالة الـ Outbox (تضمن أمان الـ Lease)
-    // ══════════════════════════════════════════════════════════════
+    // =========================================================
+    // دالة مساعدة: تحديث حالة Outbox مع التحقق من ملكية القفل
+    // =========================================================
     private async Task<int> UpdateOutboxStateAsync(
         PlatformDbContext db, 
         Guid outboxId, 
-        Action<Microsoft.EntityFrameworkCore.Query.UpdateSettersBuilder<WhatsAppOutboxEntity>> setter, 
+        Action<SetPropertyCalls<WhatsAppOutboxEntity>> setter, 
         CancellationToken ct)
     {
         return await db.WhatsAppOutbox
