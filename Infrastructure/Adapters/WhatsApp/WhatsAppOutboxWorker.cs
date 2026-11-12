@@ -1,4 +1,5 @@
 using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,13 +10,20 @@ namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
 public sealed class WhatsAppOutboxWorker : BackgroundService
 {
-    private const int MaxAttempts = 10;
     private const int LeaseSeconds = 60;
+    private const int MaxErrorDelaySeconds = 300;
+    
+    private const string StatusPending = "Pending";
+    private const string StatusProcessing = "Processing";
+    private const string StatusSent = "Sent";
+    private const string StatusFailed = "Failed";
+    private const string StatusDeadLetter = "DeadLetter";
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IDataProtector _protector;
     private readonly ILogger<WhatsAppOutboxWorker> _logger;
-    private readonly string _leaseOwner;
+
+    private readonly string _leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 
     public WhatsAppOutboxWorker(
         IServiceScopeFactory scopeFactory,
@@ -25,26 +33,32 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         _scopeFactory = scopeFactory;
         _protector = protection.CreateProtector("BusinessToken");
         _logger = logger;
-        _leaseOwner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("WhatsAppOutboxWorker started (owner={Owner})", _leaseOwner);
+        _logger.LogInformation("WhatsAppOutboxWorker started. Owner={Owner}", _leaseOwner);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var processed = await ProcessOneAsync(stoppingToken);
+                // ذكاء في التوقيت: إذا لم توجد رسائل، انتظر ثانية. إذا كانت هناك رسائل، تابع فوراً.
                 if (!processed) await Task.Delay(1000, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Outbox worker loop error");
+                _logger.LogError(ex, "Outbox worker loop error.");
                 await Task.Delay(5000, stoppingToken);
             }
         }
+
+        _logger.LogInformation("WhatsAppOutboxWorker stopped.");
     }
 
     private async Task<bool> ProcessOneAsync(CancellationToken ct)
@@ -54,150 +68,165 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         var client = scope.ServiceProvider.GetRequiredService<IWhatsAppCloudClient>();
         var now = DateTime.UtcNow;
 
-        // 1) اقرأ المرشح AsNoTracking
-        var candidateId = await db.WhatsAppOutbox.AsNoTracking()
-            .Where(x => ((x.Status == "Pending" && x.NextAttemptAtUtc <= now)
-                      || (x.Status == "Processing" && x.LeaseUntilUtc < now))
-                     && x.Attempts < x.MaxAttempts)
+        // 1. البحث عن رسالة جاهزة للإرسال
+        var candidateId = await db.WhatsAppOutbox
+            .AsNoTracking()
+            .Where(x => ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
+                         (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                        && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
+                        && x.Attempts < x.MaxAttempts)
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => (Guid?)x.Id)
             .FirstOrDefaultAsync(ct);
 
         if (candidateId == null) return false;
 
-        // 2) حجز ذري
+        // 2. القفل الذري (Atomic Claim)
         var claimed = await db.WhatsAppOutbox
-            .Where(x => x.Id == candidateId.Value
-                     && ((x.Status == "Pending" && x.NextAttemptAtUtc <= now)
-                      || (x.Status == "Processing" && x.LeaseUntilUtc < now)))
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.Status, "Processing")
+            .Where(x => x.Id == candidateId.Value 
+                        && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
+                            (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                        && x.Attempts < x.MaxAttempts)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, StatusProcessing)
                 .SetProperty(x => x.LeaseUntilUtc, now.AddSeconds(LeaseSeconds))
                 .SetProperty(x => x.LeaseOwner, _leaseOwner)
                 .SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
 
         if (claimed == 0) return true;
 
-        db.ChangeTracker.Clear();
+        db.ChangeTracker.Clear(); // تنظيف الذاكرة
 
-        var item = await db.WhatsAppOutbox.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
+        var item = await db.WhatsAppOutbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
         if (item == null) return true;
 
-        // 3) جلب التوكن
-        var account = await db.WhatsAppTenants.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.PhoneNumberId == item.PhoneNumberId && a.IsActive, ct);
+        // 3. جلب الحساب والتحقق من المستأجر
+        var account = await db.WhatsAppTenants
+            .AsNoTracking()
+            .Include(x => x.Tenant)
+            .FirstOrDefaultAsync(x => x.PhoneNumberId == item.PhoneNumberId && x.IsActive, ct);
 
-        if (account == null)
+        if (account == null || account.Tenant == null || !account.Tenant.IsActive || account.TenantId != item.TenantId)
         {
-            await FailPermanentAsync(db, item.Id, "no_active_tenant", ct);
+            await FailPermanentAsync(db, item, "no_active_matching_tenant", ct);
             return true;
         }
 
+        // 4. فك تشفير التوكن
         string token;
-        try { token = _protector.Unprotect(account.BusinessTokenEncrypted); }
+        try
+        {
+            if (string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
+                throw new InvalidOperationException("Encrypted token is empty.");
+            token = _protector.Unprotect(account.BusinessTokenEncrypted);
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Token decrypt failed for phoneId={P}", item.PhoneNumberId);
-            await FailPermanentAsync(db, item.Id, "token_decrypt_failed", ct);
+            _logger.LogError(ex, "Token decrypt failed. PhoneNumberId={PhoneId}", item.PhoneNumberId);
+            await FailPermanentAsync(db, item, "token_decrypt_failed", ct);
             return true;
         }
 
-        // 4) الإرسال
+        // 5. إرسال الرسالة عبر Cloud API
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 
+        // 6. معالجة النتيجة
         if (result.IsSuccess)
-            await MarkSentAsync(db, item.Id, item.MessageId, result.MetaMessageId, ct);
+        {
+            await MarkSentAsync(db, item, result.MetaMessageId, ct);
+        }
         else if (result.IsTransient)
-            await RetryAsync(db, item.Id, result.Raw ?? "transient", ct);
+        {
+            await RetryAsync(db, item, result.Raw ?? "transient_error", ct);
+        }
         else
-            await FailPermanentAsync(db, item.Id, result.Raw ?? "permanent", ct);
+        {
+            await FailPermanentAsync(db, item, result.Raw ?? "permanent_error", ct);
+        }
 
         return true;
     }
 
-    private async Task MarkSentAsync(
-        PlatformDbContext db, Guid outboxId, Guid? messageId,
-        string? metaId, CancellationToken ct)
+    // ══════════════════════════════════════════════════════════════
+    // دوال مساعدة (Helpers) - أذكى وأقل تكراراً
+    // ══════════════════════════════════════════════════════════════
+
+    private async Task MarkSentAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string? metaId, CancellationToken ct)
     {
         var now = DateTime.UtcNow;
 
-        var affected = await db.WhatsAppOutbox
-            .Where(x => x.Id == outboxId && x.Status == "Processing" && x.LeaseOwner == _leaseOwner)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.Status, "Sent")
-                .SetProperty(x => x.SentAtUtc, now)
-                .SetProperty(x => x.MetaMessageId, metaId)
-                .SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
-                .SetProperty(x => x.LeaseOwner, (string?)null)
-                .SetProperty(x => x.LastError, (string?)null)
-                .SetProperty(x => x.UpdatedAtUtc, now), ct);
+        var affected = await UpdateOutboxStateAsync(db, item.Id, u => u
+            .SetProperty(x => x.Status, StatusSent)
+            .SetProperty(x => x.SentAtUtc, now)
+            .SetProperty(x => x.MetaMessageId, metaId)
+            .SetProperty(x => x.UpdatedAtUtc, now), ct);
 
         if (affected == 0)
         {
-            _logger.LogWarning("Outbox {Id} lost lease before MarkSent", outboxId);
+            _logger.LogWarning("Outbox {Id} lost its lease before completion.", item.Id);
             return;
         }
 
-        // تحديث MessageEntity المرتبطة
-        if (messageId.HasValue)
+        if (item.MessageId.HasValue)
         {
             await db.WhatsAppMessages
-                .Where(m => m.Id == messageId.Value)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(m => m.Status, "Sent")
-                    .SetProperty(m => m.Wamid, metaId), ct);
+                .Where(m => m.Id == item.MessageId.Value)
+                .ExecuteUpdateAsync(u => u.SetProperty(m => m.Status, StatusSent).SetProperty(m => m.Wamid, metaId), ct);
         }
 
-        _logger.LogInformation("Outbox {Id} sent (MetaId={MetaId})", outboxId, metaId);
+        _logger.LogInformation("Outbox {Id} sent. MetaMessageId={MetaId}", item.Id, metaId);
     }
 
-    private async Task RetryAsync(
-        PlatformDbContext db, Guid outboxId, string error, CancellationToken ct)
+    private async Task RetryAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string error, CancellationToken ct)
     {
+        var dead = item.Attempts >= Math.Max(1, item.MaxAttempts);
+        var delaySeconds = Math.Min(MaxErrorDelaySeconds, Math.Pow(2, Math.Min(item.Attempts, 8)));
         var now = DateTime.UtcNow;
-        var attempts = await db.WhatsAppOutbox.AsNoTracking()
-            .Where(x => x.Id == outboxId).Select(x => x.Attempts).FirstOrDefaultAsync(ct);
-        var isDead = attempts >= MaxAttempts;
-        var delay = Math.Min(300, Math.Pow(2, Math.Min(attempts, 8)));
 
-        await db.WhatsAppOutbox
-            .Where(x => x.Id == outboxId && x.Status == "Processing" && x.LeaseOwner == _leaseOwner)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.Status, isDead ? "DeadLetter" : "Pending")
-                .SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
-                .SetProperty(x => x.LeaseOwner, (string?)null)
-                .SetProperty(x => x.LastError, error)
-                .SetProperty(x => x.NextAttemptAtUtc, now.AddSeconds(delay))
-                .SetProperty(x => x.UpdatedAtUtc, now), ct);
+        await UpdateOutboxStateAsync(db, item.Id, u => u
+            .SetProperty(x => x.Status, dead ? StatusDeadLetter : StatusPending)
+            .SetProperty(x => x.LastError, error)
+            .SetProperty(x => x.NextAttemptAtUtc, now.AddSeconds(delaySeconds))
+            .SetProperty(x => x.UpdatedAtUtc, now), ct);
 
-        _logger.LogWarning("Outbox {Id} retry in {Delay}s: {Error}", outboxId, delay, error);
+        _logger.LogWarning("Outbox {Id} retry. Attempts={Attempts}, Dead={Dead}", item.Id, item.Attempts, dead);
     }
 
-    private async Task FailPermanentAsync(
-        PlatformDbContext db, Guid outboxId, string error, CancellationToken ct)
+    private async Task FailPermanentAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string error, CancellationToken ct)
     {
-        var now = DateTime.UtcNow;
+        var affected = await UpdateOutboxStateAsync(db, item.Id, u => u
+            .SetProperty(x => x.Status, StatusFailed)
+            .SetProperty(x => x.LastError, error)
+            .SetProperty(x => x.UpdatedAtUtc, DateTime.UtcNow), ct);
 
-        var messageId = await db.WhatsAppOutbox.AsNoTracking()
-            .Where(x => x.Id == outboxId).Select(x => x.MessageId).FirstOrDefaultAsync(ct);
+        if (affected == 0) return;
 
-        await db.WhatsAppOutbox
-            .Where(x => x.Id == outboxId && x.Status == "Processing" && x.LeaseOwner == _leaseOwner)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.Status, "Failed")
-                .SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
-                .SetProperty(x => x.LeaseOwner, (string?)null)
-                .SetProperty(x => x.LastError, error)
-                .SetProperty(x => x.UpdatedAtUtc, now), ct);
-
-        if (messageId.HasValue)
+        if (item.MessageId.HasValue)
         {
             await db.WhatsAppMessages
-                .Where(m => m.Id == messageId.Value)
-                .ExecuteUpdateAsync(s => s.SetProperty(m => m.Status, "Failed"), ct);
+                .Where(m => m.Id == item.MessageId.Value && m.TenantId == item.TenantId)
+                .ExecuteUpdateAsync(u => u.SetProperty(m => m.Status, StatusFailed), ct);
         }
 
-        _logger.LogError("Outbox {Id} permanently failed: {Error}", outboxId, error);
+        _logger.LogError("Outbox {Id} permanently failed: {Error}", item.Id, error);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // دالة موحدة لتحديث حالة الـ Outbox (تضمن أمان الـ Lease)
+    // ══════════════════════════════════════════════════════════════
+    private async Task<int> UpdateOutboxStateAsync(
+        PlatformDbContext db, 
+        Guid outboxId, 
+        Action<Microsoft.EntityFrameworkCore.Query.UpdateSettersBuilder<WhatsAppOutboxEntity>> setter, 
+        CancellationToken ct)
+    {
+        return await db.WhatsAppOutbox
+            .Where(x => x.Id == outboxId && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
+            .ExecuteUpdateAsync(u => 
+            {
+                setter(u);
+                u.SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
+                 .SetProperty(x => x.LeaseOwner, (string?)null);
+            }, ct);
     }
 }
