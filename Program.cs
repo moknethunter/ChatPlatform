@@ -12,6 +12,7 @@ using ChatPlatform.Hubs;
 using ChatPlatform.Middleware;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Polly;
 using Polly.Extensions.Http;
 
 var builder = WebApplication.CreateBuilder(args);
