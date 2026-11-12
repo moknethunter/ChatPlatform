@@ -43,7 +43,7 @@ public sealed class WhatsAppTenantResolver : IWhatsAppTenantResolver
         if (account == null)
         {
             _logger.LogWarning(
-                "WhatsApp account not found for PhoneNumberId: {PhoneNumberId}",
+                "WhatsApp account not found. PhoneNumberId={PhoneNumberId}",
                 phoneNumberId);
 
             return null;
@@ -52,7 +52,7 @@ public sealed class WhatsAppTenantResolver : IWhatsAppTenantResolver
         if (!account.IsActive)
         {
             _logger.LogWarning(
-                "WhatsApp account is inactive: {PhoneNumberId}",
+                "WhatsApp account is inactive. PhoneNumberId={PhoneNumberId}",
                 phoneNumberId);
 
             return null;
@@ -61,7 +61,16 @@ public sealed class WhatsAppTenantResolver : IWhatsAppTenantResolver
         if (account.Tenant == null || !account.Tenant.IsActive)
         {
             _logger.LogWarning(
-                "WhatsApp account has no active tenant: {PhoneNumberId}",
+                "WhatsApp account has no active tenant. PhoneNumberId={PhoneNumberId}",
+                phoneNumberId);
+
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(account.TenantId))
+        {
+            _logger.LogWarning(
+                "WhatsApp account has an empty TenantId. PhoneNumberId={PhoneNumberId}",
                 phoneNumberId);
 
             return null;
