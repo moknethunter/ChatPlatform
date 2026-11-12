@@ -17,447 +17,238 @@ namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
 public static class WhatsAppExtensions
 {
-    private const string VerifyTokenEnvVar = "WHATSAPP_VERIFY_TOKEN";
-    private const string AppSecretEnvVar = "WHATSAPP_APP_SECRET";
-
     private const int MaxWebhookBodyBytes = 1024 * 1024;
-    private const int ReadBufferSize = 8192;
 
-    public static IServiceCollection AddWhatsAppAdapter(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    public static IServiceCollection AddWhatsAppAdapter(this IServiceCollection services, IConfiguration configuration)
     {
-        services.Configure<WhatsAppOptions>(
-            configuration.GetSection(WhatsAppOptions.SectionName));
-
+        services.Configure<WhatsAppOptions>(configuration.GetSection(WhatsAppOptions.SectionName));
+        
         services.AddHttpClient("whatsapp", client =>
         {
-            client.BaseAddress =
-                new Uri("https://graph.facebook.com/v21.0/");
-
+            client.BaseAddress = new Uri("https://graph.facebook.com/v26.0/");
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
-        services.AddScoped<
-            IWhatsAppTenantResolver,
-            WhatsAppTenantResolver>();
-
+        services.AddScoped<IWhatsAppTenantResolver, WhatsAppTenantResolver>();
+        services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
         services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
-
         services.AddHostedService<WhatsAppInboxWorker>();
         services.AddHostedService<WhatsAppOutboxWorker>();
 
         return services;
     }
 
-    public static IEndpointRouteBuilder MapWhatsAppWebhook(
-        this IEndpointRouteBuilder app,
-        IConfiguration configuration)
+    public static IEndpointRouteBuilder MapWhatsAppWebhook(this IEndpointRouteBuilder app, IConfiguration configuration)
     {
-        var verifyToken =
-            Environment.GetEnvironmentVariable(VerifyTokenEnvVar)
-            ?? configuration["WhatsApp:VerifyToken"];
+        var verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN") ?? configuration["WhatsApp:VerifyToken"];
+        var appSecret = Environment.GetEnvironmentVariable("META_APP_SECRET") 
+                        ?? Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET") 
+                        ?? configuration["WhatsApp:AppSecret"];
 
-        var appSecret =
-            Environment.GetEnvironmentVariable(AppSecretEnvVar)
-            ?? configuration["WhatsApp:AppSecret"];
-
-        // Meta verification
-        app.MapGet("/webhook", (HttpContext context) =>
+        // 1. Meta GET Verification
+        app.MapGet("/api/whatsapp/webhook", (HttpContext context) =>
         {
-            if (string.IsNullOrWhiteSpace(verifyToken))
-                return Results.StatusCode(
-                    StatusCodes.Status503ServiceUnavailable);
+            if (string.IsNullOrWhiteSpace(verifyToken)) return Results.StatusCode(503);
 
-            var mode = context.Request.Query["hub.mode"].ToString();
-            var token = context.Request.Query["hub.verify_token"].ToString();
-            var challenge = context.Request.Query["hub.challenge"].ToString();
-
-            if (!string.Equals(
-                    mode, "subscribe", StringComparison.Ordinal))
-                return Results.BadRequest();
-
-            if (!FixedTimeStringEquals(token, verifyToken))
+            var q = context.Request.Query;
+            if (q["hub.mode"] != "subscribe" || !FixedTimeStringEquals(q["hub.verify_token"], verifyToken))
                 return Results.Unauthorized();
 
-            if (string.IsNullOrWhiteSpace(challenge))
-                return Results.BadRequest();
-
-            return Results.Text(challenge, "text/plain");
+            var challenge = q["hub.challenge"].ToString();
+            return string.IsNullOrWhiteSpace(challenge) ? Results.BadRequest() : Results.Text(challenge, "text/plain");
         });
 
-        // Incoming messages and delivery statuses
-        app.MapPost("/webhook", async (
-            HttpContext context,
-            PlatformDbContext db,
-            IWhatsAppTenantResolver tenantResolver,
-            ILoggerFactory loggerFactory,
-            CancellationToken cancellationToken) =>
+        // 2. Meta POST Webhook
+        app.MapPost("/api/whatsapp/webhook", async (
+            HttpContext context, PlatformDbContext db, IWhatsAppTenantResolver tenantResolver, 
+            ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
-            var logger =
-                loggerFactory.CreateLogger("WhatsApp.Webhook");
+            var logger = loggerFactory.CreateLogger("WhatsApp.Webhook");
 
             if (string.IsNullOrWhiteSpace(appSecret))
             {
-                logger.LogError(
-                    "WhatsApp AppSecret is not configured.");
-
-                return Results.StatusCode(
-                    StatusCodes.Status503ServiceUnavailable);
+                logger.LogError("WhatsApp AppSecret is missing.");
+                return Results.StatusCode(503);
             }
 
-            if (context.Request.ContentLength is > MaxWebhookBodyBytes)
-                return Results.StatusCode(
-                    StatusCodes.Status413PayloadTooLarge);
+            // قراءة الـ Body والتحقق من التوقيع
+            var body = await ReadLimitedBodyAsync(context.Request, MaxWebhookBodyBytes, ct);
+            if (body == null) return Results.StatusCode(413);
 
-            byte[] body;
-
-            try
+            var signature = context.Request.Headers["X-Hub-Signature-256"].ToString();
+            if (!WhatsAppSignatureValidator.Validate(body, signature, appSecret))
             {
-                body = await ReadLimitedBodyAsync(
-                    context.Request,
-                    MaxWebhookBodyBytes,
-                    cancellationToken);
-            }
-            catch (InvalidDataException)
-            {
-                return Results.StatusCode(
-                    StatusCodes.Status413PayloadTooLarge);
-            }
-            catch (Exception ex) when (
-                ex is not OperationCanceledException)
-            {
-                logger.LogWarning(
-                    ex, "Failed to read WhatsApp webhook body.");
-
-                return Results.BadRequest();
-            }
-
-            var signature = context.Request.Headers[
-                "X-Hub-Signature-256"].ToString();
-
-            if (!WhatsAppSignatureValidator.Validate(
-                    body, signature, appSecret))
-            {
-                logger.LogWarning(
-                    "Rejected WhatsApp webhook: invalid signature.");
-
+                logger.LogWarning("Invalid WhatsApp webhook signature.");
                 return Results.Unauthorized();
             }
 
-            JsonDocument document;
-
+            // معالجة البيانات
             try
             {
-                document = JsonDocument.Parse(body);
+                using var document = JsonDocument.Parse(body);
+                var savedCount = await ProcessWebhookPayloadAsync(document.RootElement, db, tenantResolver, logger, ct);
+                
+                logger.LogInformation("WhatsApp webhook saved {Count} events.", savedCount);
+                return Results.Ok(new { received = true, saved = savedCount });
             }
-            catch (JsonException ex)
+            catch (JsonException)
             {
-                logger.LogWarning(
-                    ex, "Invalid WhatsApp webhook JSON.");
-
                 return Results.BadRequest();
             }
-
-            using (document)
+            catch (OperationCanceledException)
             {
-                var root = document.RootElement;
-
-                if (!root.TryGetProperty("entry", out var entries) ||
-                    entries.ValueKind != JsonValueKind.Array)
-                {
-                    return Results.BadRequest();
-                }
-
-                var savedCount = 0;
-
-                try
-                {
-                    foreach (var entry in entries.EnumerateArray())
-                    {
-                        if (!entry.TryGetProperty(
-                                "changes", out var changes) ||
-                            changes.ValueKind != JsonValueKind.Array)
-                            continue;
-
-                        foreach (var change in changes.EnumerateArray())
-                        {
-                            if (!change.TryGetProperty(
-                                    "value", out var value) ||
-                                value.ValueKind != JsonValueKind.Object)
-                                continue;
-
-                            var phoneNumberId = GetNestedString(
-                                value,
-                                "metadata",
-                                "phone_number_id");
-
-                            if (string.IsNullOrWhiteSpace(phoneNumberId))
-                            {
-                                logger.LogWarning(
-                                    "Webhook change has no phone_number_id.");
-
-                                continue;
-                            }
-
-                            var tenant =
-                                await tenantResolver.ResolveByPhoneNumberIdAsync(
-                                    phoneNumberId,
-                                    cancellationToken);
-
-                            if (tenant == null ||
-                                string.IsNullOrWhiteSpace(tenant.TenantId))
-                            {
-                                logger.LogWarning(
-                                    "Ignoring webhook event for unknown or inactive WhatsApp account. PhoneNumberId={PhoneId}",
-                                    phoneNumberId);
-
-                                // Do not retry indefinitely for an
-                                // account that is not registered.
-                                continue;
-                            }
-
-                            // Inbound messages
-                            if (value.TryGetProperty(
-                                    "messages", out var messages) &&
-                                messages.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var message in messages.EnumerateArray())
-                                {
-                                    var wamid = GetString(message, "id");
-
-                                    if (string.IsNullOrWhiteSpace(wamid))
-                                        continue;
-
-                                    var eventKey =
-                                        WhatsAppEventKeys.ForMessage(wamid);
-
-                                    var exists =
-                                        await db.WhatsAppWebhookInbox
-                                            .AnyAsync(
-                                                x => x.EventKey == eventKey,
-                                                cancellationToken);
-
-                                    if (exists)
-                                        continue;
-
-                                    var now = DateTime.UtcNow;
-
-                                    var row =
-                                        new WhatsAppWebhookInboxEntity
-                                        {
-                                            TenantId = tenant.TenantId,
-                                            EventKey = eventKey,
-                                            PhoneNumberId = phoneNumberId,
-                                            PayloadJson = message.GetRawText(),
-                                            ReceivedAtUtc = now,
-                                            NextAttemptAtUtc = now
-                                        };
-
-                                    db.WhatsAppWebhookInbox.Add(row);
-
-                                    if (await SaveEventSafelyAsync(
-                                            db,
-                                            row,
-                                            x => db.WhatsAppWebhookInbox.AnyAsync(
-                                                e => e.EventKey == eventKey,
-                                                cancellationToken),
-                                            cancellationToken))
-                                    {
-                                        savedCount++;
-                                    }
-                                }
-                            }
-
-                            // Delivery and read statuses
-                            if (value.TryGetProperty(
-                                    "statuses", out var statuses) &&
-                                statuses.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var status in statuses.EnumerateArray())
-                                {
-                                    var wamid = GetString(status, "id");
-                                    var statusName = GetString(status, "status");
-                                    var timestampText =
-                                        GetString(status, "timestamp");
-
-                                    if (string.IsNullOrWhiteSpace(wamid) ||
-                                        string.IsNullOrWhiteSpace(statusName) ||
-                                        !long.TryParse(
-                                            timestampText,
-                                            out var timestamp))
-                                        continue;
-
-                                    var eventKey =
-                                        WhatsAppEventKeys.ForStatus(
-                                            wamid,
-                                            statusName,
-                                            timestamp);
-
-                                    var exists =
-                                        await db.WhatsAppStatusInbox
-                                            .AnyAsync(
-                                                x => x.EventKey == eventKey,
-                                                cancellationToken);
-
-                                    if (exists)
-                                        continue;
-
-                                    var statusRow =
-                                        new WhatsAppStatusInboxEntity
-                                        {
-                                            TenantId = tenant.TenantId,
-                                            EventKey = eventKey,
-                                            PhoneNumberId = phoneNumberId,
-                                            ContactPhone =
-                                                GetString(status, "recipient_id")
-                                                ?? "",
-                                            Wamid = wamid,
-                                            Status = statusName,
-                                            StatusTimestamp = timestamp,
-                                            PayloadJson = status.GetRawText(),
-                                            ReceivedAtUtc = DateTime.UtcNow
-                                        };
-
-                                    db.WhatsAppStatusInbox.Add(statusRow);
-
-                                    if (await SaveEventSafelyAsync(
-                                            db,
-                                            statusRow,
-                                            x => db.WhatsAppStatusInbox.AnyAsync(
-                                                e => e.EventKey == eventKey,
-                                                cancellationToken),
-                                            cancellationToken))
-                                    {
-                                        savedCount++;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    logger.LogInformation(
-                        "WhatsApp webhook persisted. New events: {Count}",
-                        savedCount);
-
-                    return Results.Ok();
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(
-                        ex,
-                        "WhatsApp webhook persistence failed.");
-
-                    return Results.StatusCode(
-                        StatusCodes.Status503ServiceUnavailable);
-                }
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Webhook persistence failed.");
+                return Results.StatusCode(503);
             }
         });
 
         return app;
     }
 
-    private static async Task<byte[]> ReadLimitedBodyAsync(
-        HttpRequest request,
-        int maxBytes,
-        CancellationToken cancellationToken)
+    // ══════════════════════════════════════════════════════════════
+    // منطق معالجة البيانات (مفصول لتقليل التعقيد)
+    // ══════════════════════════════════════════════════════════════
+    private static async Task<int> ProcessWebhookPayloadAsync(
+        JsonElement root, PlatformDbContext db, IWhatsAppTenantResolver tenantResolver, ILogger logger, CancellationToken ct)
     {
-        using var buffer = new MemoryStream();
-        var chunk = new byte[ReadBufferSize];
-        var total = 0;
+        if (!root.TryGetProperty("entry", out var entries) || entries.ValueKind != JsonValueKind.Array)
+            return 0;
 
-        while (true)
+        var savedCount = 0;
+
+        foreach (var entry in entries.EnumerateArray())
         {
-            var read = await request.Body.ReadAsync(
-                chunk.AsMemory(0, chunk.Length),
-                cancellationToken);
+            if (!entry.TryGetProperty("changes", out var changes) || changes.ValueKind != JsonValueKind.Array)
+                continue;
 
-            if (read == 0)
-                break;
+            foreach (var change in changes.EnumerateArray())
+            {
+                if (!change.TryGetProperty("value", out var value) || value.ValueKind != JsonValueKind.Object)
+                    continue;
 
-            total += read;
+                var phoneNumberId = value.GetNestedString("metadata", "phone_number_id");
+                if (string.IsNullOrWhiteSpace(phoneNumberId)) continue;
 
-            if (total > maxBytes)
-                throw new InvalidDataException(
-                    "Webhook body exceeds the allowed size.");
+                var tenant = await tenantResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+                if (tenant == null || string.IsNullOrWhiteSpace(tenant.TenantId))
+                {
+                    logger.LogWarning("Unknown WhatsApp account. PhoneNumberId={PhoneId}", phoneNumberId);
+                    continue;
+                }
 
-            await buffer.WriteAsync(
-                chunk.AsMemory(0, read),
-                cancellationToken);
+                // معالجة الرسائل الواردة
+                if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var msg in messages.EnumerateArray())
+                    {
+                        var wamid = msg.GetString("id");
+                        if (string.IsNullOrWhiteSpace(wamid)) continue;
+
+                        var eventKey = WhatsAppEventKeys.ForMessage(wamid);
+                        if (await db.WhatsAppWebhookInbox.AnyAsync(x => x.EventKey == eventKey, ct)) continue;
+
+                        var row = new WhatsAppWebhookInboxEntity
+                        {
+                            TenantId = tenant.TenantId, EventKey = eventKey, PhoneNumberId = phoneNumberId,
+                            PayloadJson = msg.GetRawText(), ReceivedAtUtc = DateTime.UtcNow, NextAttemptAtUtc = DateTime.UtcNow, Status = "Pending"
+                        };
+
+                        db.WhatsAppWebhookInbox.Add(row);
+                        if (await SaveEventSafelyAsync(db, row, () => db.WhatsAppWebhookInbox.AnyAsync(x => x.EventKey == eventKey, ct), ct))
+                            savedCount++;
+                    }
+                }
+
+                // معالجة حالات التسليم (Statuses)
+                if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var status in statuses.EnumerateArray())
+                    {
+                        var wamid = status.GetString("id");
+                        var statusName = status.GetString("status");
+                        if (string.IsNullOrWhiteSpace(wamid) || string.IsNullOrWhiteSpace(statusName) || 
+                            !long.TryParse(status.GetString("timestamp"), out var timestamp)) continue;
+
+                        var eventKey = WhatsAppEventKeys.ForStatus(wamid, statusName, timestamp);
+                        if (await db.WhatsAppStatusInbox.AnyAsync(x => x.EventKey == eventKey, ct)) continue;
+
+                        var statusRow = new WhatsAppStatusInboxEntity
+                        {
+                            TenantId = tenant.TenantId, EventKey = eventKey, PhoneNumberId = phoneNumberId,
+                            ContactPhone = status.GetString("recipient_id") ?? "", Wamid = wamid, Status = statusName,
+                            StatusTimestamp = timestamp, PayloadJson = status.GetRawText(), ReceivedAtUtc = DateTime.UtcNow
+                        };
+
+                        db.WhatsAppStatusInbox.Add(statusRow);
+                        if (await SaveEventSafelyAsync(db, statusRow, () => db.WhatsAppStatusInbox.AnyAsync(x => x.EventKey == eventKey, ct), ct))
+                            savedCount++;
+                    }
+                }
+            }
         }
 
-        return buffer.ToArray();
+        return savedCount;
     }
 
-    private static async Task<bool> SaveEventSafelyAsync<TEntity>(
-        PlatformDbContext db,
-        TEntity row,
-        Func<TEntity, Task<bool>> duplicateCheck,
-        CancellationToken cancellationToken)
-        where TEntity : class
+    // ══════════════════════════════════════════════════════════════
+    // دوال مساعدة (Helpers)
+    // ══════════════════════════════════════════════════════════════
+    private static async Task<byte[]?> ReadLimitedBodyAsync(HttpRequest request, int maxBytes, CancellationToken ct)
+    {
+        if (request.ContentLength > maxBytes) return null;
+
+        using var ms = new MemoryStream();
+        var buffer = new byte[8192];
+        int total = 0, read;
+
+        while ((read = await request.Body.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+        {
+            total += read;
+            if (total > maxBytes) return null;
+            await ms.WriteAsync(buffer.AsMemory(0, read), ct);
+        }
+
+        return ms.ToArray();
+    }
+
+    private static async Task<bool> SaveEventSafelyAsync<TEntity>(PlatformDbContext db, TEntity row, Func<Task<bool>> duplicateCheck, CancellationToken ct) where TEntity : class
     {
         try
         {
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(ct);
             return true;
         }
         catch (DbUpdateException)
         {
             db.Entry(row).State = EntityState.Detached;
-
-            if (await duplicateCheck(row))
-                return false;
-
+            if (await duplicateCheck()) return false;
             throw;
         }
     }
 
-    private static bool FixedTimeStringEquals(
-        string? left,
-        string? right)
+    private static bool FixedTimeStringEquals(string? left, string? right)
     {
-        if (left == null || right == null)
-            return false;
-
-        var leftBytes = Encoding.UTF8.GetBytes(left);
-        var rightBytes = Encoding.UTF8.GetBytes(right);
-
-        return leftBytes.Length == rightBytes.Length &&
-               CryptographicOperations.FixedTimeEquals(
-                   leftBytes,
-                   rightBytes);
+        if (left == null || right == null) return false;
+        var a = Encoding.UTF8.GetBytes(left);
+        var b = Encoding.UTF8.GetBytes(right);
+        return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
     }
+}
 
-    private static string? GetNestedString(
-        JsonElement element,
-        string parent,
-        string property)
-    {
-        if (element.ValueKind != JsonValueKind.Object)
-            return null;
+// ══════════════════════════════════════════════════════════════
+// Extension Methods لتبسيط قراءة الـ JSON
+// ══════════════════════════════════════════════════════════════
+public static class JsonElementExtensions
+{
+    public static string? GetString(this JsonElement element, string property) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
 
-        if (!element.TryGetProperty(parent, out var nested))
-            return null;
-
-        return GetString(nested, property);
-    }
-
-    private static string? GetString(
-        JsonElement element,
-        string property)
-    {
-        if (element.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (!element.TryGetProperty(property, out var value))
-            return null;
-
-        return value.ValueKind == JsonValueKind.String
-            ? value.GetString()
-            : null;
-    }
+    public static string? GetNestedString(this JsonElement element, string parent, string property) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(parent, out var nested)
+            ? nested.GetString(property) : null;
 }
