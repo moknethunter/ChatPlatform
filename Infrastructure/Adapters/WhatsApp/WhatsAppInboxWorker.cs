@@ -10,20 +10,22 @@ using Microsoft.Extensions.Logging;
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
-/// <summary>
-/// يقرأ الرسائل الواردة من WhatsAppWebhookInbox ويعالجها:
-/// 1) يستخرج بيانات الرسالة من PayloadJson
-/// 2) يبحث/ينشئ محادثة
-/// 3) يحفظ الرسالة الواردة في WhatsAppMessages
-/// 4) يحدّث نافذة 24 ساعة (LastInboundAtUtc + WindowExpiresAtUtc)
-/// 5) ينشر whatsapp.inbound على IEventBus (للتسجيل والمحوّلات الأخرى)
-/// 6) يعلّم الصف كـ Done
-/// </summary>
 public sealed class WhatsAppInboxWorker : BackgroundService
 {
+    private const int BatchSize = 20;
+    private const int LeaseSeconds = 120;
+    private const int MaxErrorDelaySeconds = 300;
+    private const string StatusPending = "Pending";
+    private const string StatusProcessing = "Processing";
+    private const string StatusDone = "Done";
+    private const string StatusDeadLetter = "DeadLetter";
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IEventBus _bus;
     private readonly ILogger<WhatsAppInboxWorker> _log;
+
+    private readonly string _leaseOwner =
+        $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 
     public WhatsAppInboxWorker(
         IServiceScopeFactory scopeFactory,
@@ -37,17 +39,15 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _log.LogInformation("WhatsAppInboxWorker started");
+        _log.LogInformation("WhatsAppInboxWorker started. Owner={Owner}", _leaseOwner);
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var processed = await ProcessBatchAsync(stoppingToken);
-                var delay = processed == 0
-                    ? TimeSpan.FromSeconds(2)
-                    : TimeSpan.FromMilliseconds(200);
-                await Task.Delay(delay, stoppingToken);
+                // ذكاء في التوقيت: إذا لم توجد رسائل، انتظر ثانيتين. إذا كانت هناك رسائل، تابع فوراً.
+                await Task.Delay(processed == 0 ? TimeSpan.FromSeconds(2) : TimeSpan.FromMilliseconds(200), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -55,46 +55,77 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _log.LogError(ex, "Unexpected error in inbox loop");
+                _log.LogError(ex, "Inbox worker loop failed.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
             }
         }
 
-        _log.LogInformation("WhatsAppInboxWorker stopped");
+        _log.LogInformation("WhatsAppInboxWorker stopped.");
     }
 
     private async Task<int> ProcessBatchAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var now = DateTime.UtcNow;
+        var processed = 0;
 
-        var batch = await db.WhatsAppWebhookInbox
-            .Where(x => (x.Status == null || x.Status == "Pending")
-                     && x.NextAttemptAtUtc <= now)
-            .OrderBy(x => x.ReceivedAtUtc)
-            .Take(20)
-            .ToListAsync(ct);
-
-        if (batch.Count == 0) return 0;
-
-        foreach (var row in batch)
+        for (var i = 0; i < BatchSize; i++)
         {
+            ct.ThrowIfCancellationRequested();
+            var now = DateTime.UtcNow;
+
+            // 1. البحث عن رسالة جاهزة للمعالجة
+            var candidateId = await db.WhatsAppWebhookInbox
+                .AsNoTracking()
+                .Where(x => (x.Status == StatusPending || x.Status == null || (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                            && x.NextAttemptAtUtc <= now
+                            && x.Attempts < x.MaxAttempts)
+                .OrderBy(x => x.ReceivedAtUtc)
+                .Select(x => (Guid?)x.Id)
+                .FirstOrDefaultAsync(ct);
+
+            if (candidateId == null) break;
+
+            // 2. القفل الذري (Atomic Claim) - نضمن أن رسالة واحدة لا يلتقطها إلا عامل واحد
+            var claimed = await db.WhatsAppWebhookInbox
+                .Where(x => x.Id == candidateId.Value 
+                            && (x.Status == StatusPending || x.Status == null || (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                            && x.Attempts < x.MaxAttempts)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(x => x.Status, StatusProcessing)
+                    .SetProperty(x => x.LeaseOwner, _leaseOwner)
+                    .SetProperty(x => x.LeaseUntilUtc, now.AddSeconds(LeaseSeconds))
+                    .SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
+
+            if (claimed == 0) continue;
+
+            db.ChangeTracker.Clear(); // تنظيف الذاكرة
+
+            var row = await db.WhatsAppWebhookInbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
+            if (row == null) continue;
+
             try
             {
+                // 3. المعالجة الفعلية
                 await ProcessOneAsync(db, row, ct);
-                row.Status = "Done";
+                
+                // 4. تحديث الحالة إلى مكتمل
+                await MarkCompletedAsync(db, row.Id, ct);
+                processed++;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 _log.LogError(ex, "Failed to process inbox row {Id}", row.Id);
-                row.Status = "Pending";
-                row.NextAttemptAtUtc = DateTime.UtcNow.AddMinutes(1);
+                // 5. تحديث الحالة إلى فشل أو DeadLetter
+                await MarkFailedAsync(db, row, ex.Message, ct);
             }
-            await db.SaveChangesAsync(ct);
         }
 
-        return batch.Count;
+        return processed;
     }
 
     private async Task ProcessOneAsync(PlatformDbContext db, WhatsAppWebhookInboxEntity row, CancellationToken ct)
@@ -102,35 +133,39 @@ public sealed class WhatsAppInboxWorker : BackgroundService
         using var doc = JsonDocument.Parse(row.PayloadJson);
         var msg = doc.RootElement;
 
-        var wamid = GetStr(msg, "id");
-        var from = GetStr(msg, "from");
-        var type = GetStr(msg, "type") ?? "unknown";
+        var wamid = msg.GetString("id");
+        var from = msg.GetString("from");
+        var type = msg.GetString("type") ?? "unknown";
 
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(wamid))
         {
-            _log.LogWarning("Inbox {Id}: missing from/wamid, skipping", row.Id);
+            _log.LogWarning("Inbox {Id} has missing sender or message ID.", row.Id);
+            return; // سيتم اعتباره مكتملاً لأننا لا نستطيع معالجته
+        }
+
+        // منع التكرار (Idempotency)
+        if (await db.WhatsAppMessages.AsNoTracking().AnyAsync(x => x.Wamid == wamid, ct))
+        {
+            _log.LogInformation("Message {Wamid} already exists.", wamid);
             return;
         }
 
-        // استخراج النص (إن وُجد)
-        string? text = null;
-        if (type == "text" && msg.TryGetProperty("text", out var textObj))
-            text = GetStr(textObj, "body");
+        var text = (type == "text" && msg.TryGetProperty("text", out var textObj)) 
+            ? textObj.GetString("body") 
+            : null;
 
         var preview = text ?? $"[{type}]";
         if (preview.Length > 200) preview = preview[..200];
 
         var now = DateTime.UtcNow;
 
-        // ═══ 1) ابحث/أنشئ المحادثة ═══
-        var conv = await db.WhatsAppConversations
-            .FirstOrDefaultAsync(c => c.TenantId == row.TenantId
-                                   && c.PhoneNumberId == row.PhoneNumberId
-                                   && c.ContactPhone == from, ct);
+        // جلب أو إنشاء المحادثة
+        var conversation = await db.WhatsAppConversations.FirstOrDefaultAsync(
+            x => x.TenantId == row.TenantId && x.PhoneNumberId == row.PhoneNumberId && x.ContactPhone == from, ct);
 
-        if (conv is null)
+        if (conversation == null)
         {
-            conv = new WhatsAppConversationEntity
+            conversation = new WhatsAppConversationEntity
             {
                 TenantId = row.TenantId,
                 PhoneNumberId = row.PhoneNumberId,
@@ -139,55 +174,41 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now,
                 LastInboundAtUtc = now,
-                WindowExpiresAtUtc = now.AddHours(24)
+                WindowExpiresAtUtc = now.AddHours(24),
+                UnreadCount = 1
             };
-            db.WhatsAppConversations.Add(conv);
-            await db.SaveChangesAsync(ct);  // ← لضمان توليد conv.Id (Guid)
+            db.WhatsAppConversations.Add(conversation);
         }
         else
         {
-            conv.LastInboundAtUtc = now;
-            conv.WindowExpiresAtUtc = now.AddHours(24);
-            conv.UpdatedAtUtc = now;
-            if (conv.Status != "open") conv.Status = "open";
+            conversation.LastInboundAtUtc = now;
+            conversation.WindowExpiresAtUtc = now.AddHours(24);
+            conversation.UpdatedAtUtc = now;
+            conversation.UnreadCount++;
+            if (conversation.Status != "open") conversation.Status = "open";
         }
 
-        // ═══ 2) تحقق من التكرار (Wamid فريد) ═══
-        var alreadyExists = await db.WhatsAppMessages
-            .AnyAsync(m => m.Wamid == wamid, ct);
-
-        Guid messageId;
-        if (!alreadyExists)
+        // إنشاء الرسالة
+        var message = new WhatsAppMessageEntity
         {
-            var message = new WhatsAppMessageEntity
-            {
-                TenantId = row.TenantId,
-                ConversationId = conv.Id,        // ← Guid
-                Direction = "Inbound",
-                MessageType = type,
-                ContentJson = row.PayloadJson,
-                TextPreview = preview,
-                Status = "Received",
-                TimestampUtc = now,
-                CreatedAtUtc = now,
-                Wamid = wamid
-            };
-            db.WhatsAppMessages.Add(message);
-            await db.SaveChangesAsync(ct);       // ← لضمان توليد message.Id (Guid)
-            messageId = message.Id;
-        }
-        else
-        {
-            var existing = await db.WhatsAppMessages.AsNoTracking()
-                .Where(m => m.Wamid == wamid)
-                .Select(m => new { m.Id })
-                .FirstAsync(ct);
-            messageId = existing.Id;
-        }
+            TenantId = row.TenantId,
+            ConversationId = conversation.Id,
+            Direction = "Inbound",
+            MessageType = type,
+            ContentJson = row.PayloadJson,
+            TextPreview = preview,
+            Status = "Received",
+            TimestampUtc = now,
+            CreatedAtUtc = now,
+            Wamid = wamid
+        };
 
-        // ═══ 3) نشر الحدث على IEventBus ═══
-        // ملاحظة: SignalRAdapter محذوف حالياً. الحدث يُستخدم للتسجيل
-        // وللمحوّلات الأخرى (ConsoleAdapter, ChatAdapter...).
+        db.WhatsAppMessages.Add(message);
+
+        // 🚀 تحسين ذكي: حفظ المحادثة والرسالة معاً في خطوة واحدة (Transaction ضمني)
+        await db.SaveChangesAsync(ct);
+
+        // نشر الحدث (Event)
         try
         {
             await _bus.PublishAsync(new PlatformEvent
@@ -196,8 +217,10 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 Source = "whatsapp",
                 Payload = JsonSerializer.SerializeToElement(new
                 {
-                    conversationId = conv.Id,
-                    messageId,
+                    conversationId = conversation.Id,
+                    messageId = message.Id,
+                    tenantId = row.TenantId,
+                    phoneNumberId = row.PhoneNumberId,
                     from,
                     text,
                     type,
@@ -208,16 +231,44 @@ public sealed class WhatsAppInboxWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Failed to publish whatsapp.inbound for {Wamid}", wamid);
+            // الرسالة محفوظة بأمان في الداتا بيز، لا نريد إفشال العملية بسبب الباص.
+            _log.LogError(ex, "Failed to publish inbound event for {Wamid}", wamid);
         }
 
-        _log.LogInformation(
-            "Inbound {Wamid} from {From} → conv {ConvId}, msg {MsgId}",
-            wamid, from, conv.Id, messageId);
+        _log.LogInformation("Inbound message saved. Wamid={Wamid}, Conversation={ConversationId}", wamid, conversation.Id);
     }
 
-    private static string? GetStr(JsonElement el, string name)
-        => el.ValueKind == JsonValueKind.Object
-           && el.TryGetProperty(name, out var v)
-           && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    // ══════════════════════════════════════════════════════════════
+    // دوال مساعدة لتحديث الحالة (DRY Principle)
+    // ══════════════════════════════════════════════════════════════
+    
+    private async Task MarkCompletedAsync(PlatformDbContext db, Guid id, CancellationToken ct)
+    {
+        var now = DateTime.UtcNow;
+        await db.WhatsAppWebhookInbox
+            .Where(x => x.Id == id && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, StatusDone)
+                .SetProperty(x => x.ProcessedAtUtc, now)
+                .SetProperty(x => x.LeaseOwner, (string?)null)
+                .SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
+                .SetProperty(x => x.LastError, (string?)null), ct);
+    }
+
+    private async Task MarkFailedAsync(PlatformDbContext db, WhatsAppWebhookInboxEntity row, string error, CancellationToken ct)
+    {
+        // ذكاء: قراءة المحاولات من الصف الذي تم جلبه، بدون زيادة خاطئة
+        var dead = row.Attempts >= Math.Max(1, row.MaxAttempts);
+        var delaySeconds = Math.Min(MaxErrorDelaySeconds, Math.Pow(2, Math.Min(row.Attempts, 8)));
+        var nextAttempt = DateTime.UtcNow.AddSeconds(delaySeconds);
+
+        await db.WhatsAppWebhookInbox
+            .Where(x => x.Id == row.Id && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, dead ? StatusDeadLetter : StatusPending)
+                .SetProperty(x => x.NextAttemptAtUtc, nextAttempt)
+                .SetProperty(x => x.LastError, error)
+                .SetProperty(x => x.LeaseOwner, (string?)null)
+                .SetProperty(x => x.LeaseUntilUtc, (DateTime?)null), ct);
+    }
 }
