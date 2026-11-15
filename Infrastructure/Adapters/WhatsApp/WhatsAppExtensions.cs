@@ -40,26 +40,32 @@ public static class WhatsAppExtensions
 
     public static IEndpointRouteBuilder MapWhatsAppWebhook(this IEndpointRouteBuilder app, IConfiguration configuration)
     {
-        var verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN") ?? configuration["WhatsApp:VerifyToken"];
+        // The dashboard and Meta callback URL use this single canonical route: /webhook.
+        var verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
+                          ?? Environment.GetEnvironmentVariable("VERIFY_TOKEN")
+                          ?? configuration["WhatsApp:VerifyToken"];
         var appSecret = Environment.GetEnvironmentVariable("META_APP_SECRET") 
                         ?? Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET") 
                         ?? configuration["WhatsApp:AppSecret"];
 
-        // 1. Meta GET Verification
-        app.MapGet("/api/whatsapp/webhook", (HttpContext context) =>
+        // Meta verification handshake: return the raw challenge as plain text.
+        app.MapGet("/webhook", (HttpContext context) =>
         {
             if (string.IsNullOrWhiteSpace(verifyToken)) return Results.StatusCode(503);
 
             var q = context.Request.Query;
-            if (q["hub.mode"] != "subscribe" || !FixedTimeStringEquals(q["hub.verify_token"], verifyToken))
+            if (!string.Equals(q["hub.mode"].ToString(), "subscribe", StringComparison.Ordinal)
+                || !FixedTimeStringEquals(q["hub.verify_token"].ToString(), verifyToken))
                 return Results.Unauthorized();
 
             var challenge = q["hub.challenge"].ToString();
-            return string.IsNullOrWhiteSpace(challenge) ? Results.BadRequest() : Results.Text(challenge, "text/plain");
+            return string.IsNullOrWhiteSpace(challenge)
+                ? Results.BadRequest()
+                : Results.Text(challenge, "text/plain");
         });
 
-        // 2. Meta POST Webhook
-        app.MapPost("/api/whatsapp/webhook", async (
+        // Meta event delivery. Validate the signature over the exact raw request body.
+        app.MapPost("/webhook", async (
             HttpContext context, PlatformDbContext db, IWhatsAppTenantResolver tenantResolver, 
             ILoggerFactory loggerFactory, CancellationToken ct) =>
         {
@@ -71,7 +77,6 @@ public static class WhatsAppExtensions
                 return Results.StatusCode(503);
             }
 
-            // قراءة الـ Body والتحقق من التوقيع
             var body = await ReadLimitedBodyAsync(context.Request, MaxWebhookBodyBytes, ct);
             if (body == null) return Results.StatusCode(413);
 
@@ -82,7 +87,6 @@ public static class WhatsAppExtensions
                 return Results.Unauthorized();
             }
 
-            // معالجة البيانات
             try
             {
                 using var document = JsonDocument.Parse(body);
@@ -109,9 +113,7 @@ public static class WhatsAppExtensions
         return app;
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // منطق معالجة البيانات (مفصول لتقليل التعقيد)
-    // ══════════════════════════════════════════════════════════════
+    // Webhook payload processing is separated to keep the endpoint easy to audit.
     private static async Task<int> ProcessWebhookPayloadAsync(
         JsonElement root, PlatformDbContext db, IWhatsAppTenantResolver tenantResolver, ILogger logger, CancellationToken ct)
     {
@@ -140,7 +142,7 @@ public static class WhatsAppExtensions
                     continue;
                 }
 
-                // معالجة الرسائل الواردة
+                // Queue inbound messages for the hosted inbox worker.
                 if (value.TryGetProperty("messages", out var messages) && messages.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var msg in messages.EnumerateArray())
@@ -163,7 +165,7 @@ public static class WhatsAppExtensions
                     }
                 }
 
-                // معالجة حالات التسليم (Statuses)
+                // Persist delivery/read status events separately.
                 if (value.TryGetProperty("statuses", out var statuses) && statuses.ValueKind == JsonValueKind.Array)
                 {
                     foreach (var status in statuses.EnumerateArray())
@@ -194,9 +196,6 @@ public static class WhatsAppExtensions
         return savedCount;
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // دوال مساعدة (Helpers)
-    // ══════════════════════════════════════════════════════════════
     private static async Task<byte[]?> ReadLimitedBodyAsync(HttpRequest request, int maxBytes, CancellationToken ct)
     {
         if (request.ContentLength > maxBytes) return null;
@@ -239,9 +238,7 @@ public static class WhatsAppExtensions
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// Extension Methods لتبسيط قراءة الـ JSON
-// ══════════════════════════════════════════════════════════════
+// JSON helpers used by webhook parsing.
 public static class JsonElementExtensions
 {
     public static string? GetString(this JsonElement element, string property) =>
