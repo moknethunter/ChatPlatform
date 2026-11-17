@@ -1,172 +1,371 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>لوحة التحكم - ChatPlatform</title>
-  <style>
-    * { box-sizing: border-box; font-family: system-ui, 'Segoe UI', sans-serif; }
-    body { margin: 0; background: #f4f6f8; color: #222; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0A0F1E">
+    <title>ChatPlatform | لوحة التحكم</title>
+    <style>
+        :root {
+            --bg: #0A0F1E;
+            --sidebar: #0D1428;
+            --panel: #111A30;
+            --panel2: #16213D;
+            --panel-hover: #1A2745;
+            --border: #1E2D4D;
+            --border-light: #2A3B60;
+            --text: #F1F5FF;
+            --muted: #8B9BB8;
+            --muted2: #6B7C9D;
+            --primary: #25D366;
+            --primary-glow: rgba(37, 211, 102, 0.18);
+            --blue: #3B82F6;
+            --orange: #F59E0B;
+            --purple: #A855F7;
+            --success: #22C55E;
+            --success-bg: #0F2A1D;
+            --danger: #EF4444;
+            --danger-bg: #3A161C;
+            --warning: #F59E0B;
+            --warning-bg: #49391B;
+            --info-bg: #162A4D;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.18);
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, Arial, sans-serif; line-height: 1.6; }
+        button, input, textarea, select { font: inherit; }
 
-    /* ===== الشريط العلوي ===== */
-    nav.topbar {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 24px; background: #075e54; color: #fff;
-      box-shadow: 0 2px 6px rgba(0,0,0,.1);
-    }
-    nav.topbar .brand { font-weight: 800; font-size: 18px; margin-left: 24px; }
-    nav.topbar a {
-      color: #fff; text-decoration: none; padding: 8px 14px;
-      border-radius: 8px; font-weight: 600; font-size: 14px; transition: .2s;
-    }
-    nav.topbar a:hover { background: rgba(255,255,255,.15); }
-    nav.topbar a.active { background: #25d366; color: #063b33; }
+        /* ===== TOPBAR ===== */
+        .topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 24px; background: #0D1428; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
+        .topbar .brand { font-weight: 800; font-size: 20px; margin-left: 18px; display: flex; align-items: center; gap: 10px; }
+        .topbar .brand::before { content: ""; width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #25D366, #128C7E); display: inline-block; box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35); }
+        .topbar .brand span { color: var(--primary); }
+        .topbar a { color: #B8C6DD; text-decoration: none; padding: 9px 13px; border-radius: var(--radius-sm); font-weight: 600; font-size: 13.5px; transition: all .18s; border: 1px solid transparent; }
+        .topbar a:hover { background: var(--panel2); color: #fff; }
+        .topbar a.active { background: linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06)); color: #fff; border-color: rgba(37,211,102,0.25); }
+        .topbar .spacer { flex: 1; }
+        .connection { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+        .connection.online { color: #4ADE80; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.08); }
+        .connection.offline { color: #FCA5A5; border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.08); }
 
-    /* ===== الحاوية ===== */
-    .container { max-width: 1100px; margin: 0 auto; padding: 28px 20px; }
+        .layout { display: flex; min-height: calc(100vh - 61px); }
+        .sidebar { width: 260px; flex-shrink: 0; background: var(--sidebar); border-left: 1px solid var(--border); padding: 28px 16px; position: sticky; top: 61px; height: calc(100vh - 61px); }
+        .nav-title { color: var(--muted2); font-size: 11px; font-weight: 700; letter-spacing: 0.8px; padding: 10px 12px; }
+        .nav a { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #B8C6DD; padding: 12px 14px; border-radius: var(--radius-sm); margin: 4px 0; font-size: 14px; font-weight: 500; transition: all .18s; border: 1px solid transparent; }
+        .nav a:hover { background: var(--panel2); color: white; transform: translateX(-2px); }
+        .nav a.active { background: linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06)); color: #fff; border-color: rgba(37,211,102,0.25); border-right: 3px solid var(--primary); }
 
-    h1 { font-size: 26px; margin: 0 0 4px; }
-    .subtitle { color: #666; margin: 0 0 28px; }
+        .main { flex: 1; min-width: 0; padding: 28px 30px; max-width: 1280px; margin: 0 auto; width: 100%; }
+        h1 { font-size: 27px; font-weight: 800; letter-spacing: -0.4px; margin: 0 0 6px; }
+        .subtitle { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
 
-    /* ===== بطاقات الإحصاء ===== */
-    .stats {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px; margin-bottom: 28px;
-    }
-    .stat-card {
-      background: #fff; border-radius: 14px; padding: 20px;
-      box-shadow: 0 2px 8px rgba(0,0,0,.06);
-      border-right: 4px solid #25d366;
-    }
-    .stat-card h3 { margin: 0 0 6px; font-size: 13px; color: #777; font-weight: 500; }
-    .stat-card .value { font-size: 28px; font-weight: 800; color: #075e54; }
+        /* ===== STATS ===== */
+        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+        .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
+        .stat::before { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 3px; background: var(--primary); }
+        .stat:nth-child(2)::before { background: var(--blue); }
+        .stat:nth-child(3)::before { background: var(--orange); }
+        .stat:nth-child(4)::before { background: var(--purple); }
+        .stat-label { color: var(--muted); font-size: 13px; font-weight: 600; }
+        .stat-value { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-top: 8px; }
 
-    /* ===== أزرار التنقل الرئيسية ===== */
-    .section-title { font-size: 18px; margin: 0 0 16px; color: #333; }
+        /* ===== WHATSAPP BANNER - v26.0 ===== */
+        .wa-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: linear-gradient(90deg, rgba(37,211,102,0.12), rgba(37,211,102,0.03)); border: 1px solid rgba(37,211,102,0.25); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; }
+        .wa-banner.warn { background: var(--warning-bg); border-color: rgba(245,158,11,0.4); }
+        .wa-banner.fail { background: var(--danger-bg); border-color: rgba(239,68,68,0.4); }
+        .wa-title { font-weight: 800; font-size: 15px; }
+        .wa-desc { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
 
-    .actions {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-    }
-    .action-card {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 12px; padding: 28px 16px; background: #fff; border-radius: 14px;
-      text-decoration: none; color: #222; text-align: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,.06); transition: .2s;
-      border: 2px solid transparent;
-    }
-    .action-card:hover {
-      transform: translateY(-4px); border-color: #25d366;
-      box-shadow: 0 8px 20px rgba(0,0,0,.1);
-    }
-    .action-card .icon {
-      width: 56px; height: 56px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 26px; background: #e9f5f2; color: #075e54;
-    }
-    .action-card .label { font-weight: 700; font-size: 16px; }
-    .action-card .desc { font-size: 12px; color: #777; }
+        /* ===== QUICK ACCESS ===== */
+        .section-title { font-size: 18px; font-weight: 700; margin: 28px 0 16px; display: flex; align-items: center; gap: 9px; }
+        .section-title::before { content: ""; width: 4px; height: 20px; background: var(--primary); border-radius: 99px; display: inline-block; }
+        .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 8px; }
+        .action-card { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; color: var(--text); text-align: center; box-shadow: var(--shadow-sm); transition: all .18s; }
+        .action-card:hover { transform: translateY(-3px); border-color: rgba(37,211,102,0.35); }
+        .action-card .icon { width: 52px; height: 52px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+        .action-card.inbox .icon { background: rgba(59,130,246,0.14); }
+        .action-card.whatsapp .icon { background: rgba(37,211,102,0.14); }
+        .action-card.templates .icon { background: rgba(245,158,11,0.14); }
+        .action-card.test .icon { background: rgba(239,68,68,0.14); }
+        .action-card .label { font-weight: 700; font-size: 14.5px; }
+        .action-card .desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
 
-    /* لون مختلف لكل بطاقة */
-    .action-card.inbox   .icon { background: #e3f2fd; color: #1565c0; }
-    .action-card.whatsapp .icon { background: #e8f5e9; color: #2e7d32; }
-    .action-card.templates .icon { background: #fff3e0; color: #ef6c00; }
-    .action-card.settings  .icon { background: #f3e5f5; color: #6a1b9a; }
-  </style>
+        /* ===== CONTENT / INTEGRATIONS ===== */
+        .content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); gap: 20px; align-items: start; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow-sm); }
+        .card h2 { font-size: 17px; font-weight: 700; margin: 0 0 18px; display: flex; align-items: center; gap: 9px; }
+        .card h2::before { content: ""; width: 4px; height: 20px; background: var(--primary); border-radius: 99px; display: inline-block; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #CBD6EA; margin: 14px 0 7px; }
+        input, textarea, select { display: block; width: 100%; padding: 12px 14px; background: #0B1326; color: white; border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; font-size: 14px; transition: border-color .18s, box-shadow .18s; }
+        input:focus, textarea:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); background: #0D1730; }
+        input::placeholder, textarea::placeholder { color: #5A6B8A; }
+        textarea { resize: vertical; min-height: 108px; direction: ltr; text-align: left; font-family: Consolas, monospace; font-size: 13px; }
+        .hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.7; background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--border); }
+        .btn { border: 0; padding: 12px 20px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; font-size: 14px; color: #06130B; background: linear-gradient(135deg, #2EE56F, #1EB85A); box-shadow: 0 6px 16px rgba(37,211,102,0.28); transition: all .18s; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 9px 20px rgba(37,211,102,0.35); }
+        .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-secondary { background: var(--panel2); color: #E2EAFB; border: 1px solid var(--border-light); box-shadow: none; }
+        .btn-secondary:hover { background: var(--panel-hover); }
+        .btn-danger { background: #2A1216; color: #FCA5A5; border: 1px solid rgba(239,68,68,0.35); padding: 8px 14px; font-size: 12.5px; box-shadow: none; }
+        .btn-danger:hover { background: #3A161C; }
+        .form-actions { display: flex; gap: 10px; margin-top: 18px; }
+        .message { display: none; padding: 13px 15px; margin: 16px 0; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; font-weight: 500; border: 1px solid transparent; white-space: pre-wrap; word-break: break-word; }
+        .message.show { display: block; }
+        .message.error { background: var(--danger-bg); color: #FECACA; border-color: rgba(239,68,68,0.35); }
+        .message.success { background: var(--success-bg); color: #A7F3D0; border-color: rgba(34,197,94,0.35); }
+        .message.info { background: var(--info-bg); color: #BFDBFE; border-color: rgba(59,130,246,0.35); }
+        .connector { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 15px; margin-bottom: 10px; }
+        .connector-name { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+        .connector-url { color: var(--muted); font-size: 11.5px; margin-top: 5px; overflow-wrap: anywhere; direction: ltr; text-align: right; font-family: Consolas, monospace; }
+        .empty { text-align: center; color: var(--muted); padding: 32px 10px; font-size: 13px; background: rgba(255,255,255,0.015); border: 1px dashed var(--border); border-radius: var(--radius-sm); }
+        .footer { color: var(--muted2); text-align: center; font-size: 11.5px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
+        @media(max-width: 1000px) { .stats { grid-template-columns: 1fr 1fr; } .actions { grid-template-columns: 1fr 1fr; } .content { grid-template-columns: 1fr; } }
+        @media(max-width: 650px) { .sidebar { display: none; } .main { padding: 16px; } .stats, .actions { grid-template-columns: 1fr; } .topbar { padding: 12px 14px; } }
+    </style>
 </head>
 <body>
-  <!-- شريط علوي موحد (انسخه في كل الصفحات) -->
-  <nav class="topbar">
-    <span class="brand">💬 ChatPlatform</span>
-    <a href="index.html" class="active">لوحة التحكم</a>
-    <a href="inbox.html">الانبوكس</a>
-    <a href="whatsapp.html">WhatsApp</a>
-    <a href="templates.html">القوالب</a>
-    <a href="settings.html">الإعدادات</a>
-  </nav>
 
-  <div class="container">
-    <h1>مرحباً بك 👋</h1>
-    <p class="subtitle">نظرة عامة على منصتك</p>
+<!-- ===== TOPBAR - من لوحة التحكم ===== -->
+<nav class="topbar">
+    <span class="brand">Chat<span>Platform</span></span>
+    <a href="/index.html" class="active">لوحة التحكم</a>
+    <a href="/inbox.html">الانبوكس</a>
+    <a href="/whatsapp.html">WhatsApp</a>
+    <a href="/templates.html">القوالب</a>
+    <a href="/settings.html">الإعدادات</a>
+    <a href="/test-whatsapp.html">اختبار واتساب</a>
+    <span class="spacer"></span>
+    <span id="connection" class="connection">جاري فحص الاتصال...</span>
+</nav>
 
-    <!-- بطاقات الإحصاء -->
-    <div class="stats">
-      <div class="stat-card">
-        <h3>المحادثات</h3>
-        <div class="value" id="stat-convs">—</div>
-      </div>
-      <div class="stat-card" style="border-color:#1565c0">
-        <h3>الرسائل الواردة</h3>
-        <div class="value" id="stat-in">—</div>
-      </div>
-      <div class="stat-card" style="border-color:#ef6c00">
-        <h3>الرسائل الصادرة</h3>
-        <div class="value" id="stat-out">—</div>
-      </div>
-      <div class="stat-card" style="border-color:#6a1b9a">
-        <h3>حالة الاتصال</h3>
-        <div class="value" id="stat-status" style="font-size:18px">—</div>
-      </div>
-    </div>
+<div class="layout">
+    <!-- ===== SIDEBAR - من لوحة التكاملات ===== -->
+    <aside class="sidebar">
+        <div class="nav-title">القائمة الرئيسية</div>
+        <nav class="nav">
+            <a href="/index.html" class="active">لوحة التحكم</a>
+            <a href="/inbox.html">صندوق المحادثات</a>
+            <a href="/whatsapp.html">إدارة WhatsApp</a>
+            <a href="/autoreply.html">الردود الآلية</a>
+            <a href="/templates.html">قوالب الرسائل</a>
+            <a href="/settings.html">الإعدادات</a>
+            <a href="/privacy.html">الخصوصية</a>
+        </nav>
+        <div class="nav-title" style="margin-top:20px">أدوات سريعة</div>
+        <nav class="nav">
+            <a href="/test-whatsapp.html">🧪 اختبار واتساب v26.0</a>
+            <a href="/whatsapp.html">🔗 فحص Webhook</a>
+        </nav>
+    </aside>
 
-    <!-- أزرار الصفحات -->
-    <h2 class="section-title">الوصول السريع</h2>
-    <div class="actions">
-      <a href="inbox.html" class="action-card inbox">
-        <div class="icon">📥</div>
-        <div class="label">صندوق المحادثات</div>
-        <div class="desc">استعرض وأرسل الرسائل</div>
-      </a>
+    <main class="main">
+        <h1>مرحباً بك 👋</h1>
+        <div class="subtitle">نظرة عامة على منصتك - لوحة التحكم والتكاملات في مكان واحد - Graph API v26.0</div>
 
-      <a href="whatsapp.html" class="action-card whatsapp">
-        <div class="icon">💚</div>
-        <div class="label">إدارة WhatsApp</div>
-        <div class="desc">الربط وQR والإعدادات</div>
-      </a>
+        <!-- ===== STATS - من لوحة التحكم - ربط حقيقي ===== -->
+        <section class="stats">
+            <div class="stat"><div class="stat-label">المحادثات</div><div class="stat-value" id="statConvs">—</div></div>
+            <div class="stat"><div class="stat-label">الرسائل غير المقروءة</div><div class="stat-value" id="statUnread">—</div></div>
+            <div class="stat"><div class="stat-label">إجمالي التكاملات</div><div class="stat-value" id="totalCount">—</div></div>
+            <div class="stat"><div class="stat-label">حالة الخادم</div><div class="stat-value" id="serverStatus" style="font-size:19px">—</div></div>
+        </section>
 
-      <a href="templates.html" class="action-card templates">
-        <div class="icon">📝</div>
-        <div class="label">قوالب الرسائل</div>
-        <div class="desc">إدارة الردود الجاهزة</div>
-      </a>
+        <!-- ===== WHATSAPP STATUS - توافق v26.0 - ربط حقيقي ===== -->
+        <div class="wa-banner" id="waBanner">
+            <div>
+                <div class="wa-title" id="waTitle">جاري فحص واتساب...</div>
+                <div class="wa-desc" id="waDesc">فحص التوكن و Webhook وإصدار Graph API</div>
+            </div>
+            <a href="/whatsapp.html" class="btn btn-secondary" style="text-decoration:none">إدارة واتساب</a>
+        </div>
 
-      <a href="settings.html" class="action-card settings">
-        <div class="icon">⚙️</div>
-        <div class="label">الإعدادات</div>
-        <div class="desc">إعدادات الحساب والنظام</div>
-      </a>
-    </div>
-  </div>
+        <!-- ===== QUICK ACCESS - من لوحة التحكم ===== -->
+        <h2 class="section-title">الوصول السريع</h2>
+        <div class="actions">
+            <a href="/inbox.html" class="action-card inbox"><div class="icon">📥</div><div class="label">صندوق المحادثات</div><div class="desc">استعرض وأرسل الرسائل</div></a>
+            <a href="/whatsapp.html" class="action-card whatsapp"><div class="icon">💚</div><div class="label">إدارة WhatsApp</div><div class="desc">الربط و Webhook والإعدادات</div></a>
+            <a href="/templates.html" class="action-card templates"><div class="icon">📝</div><div class="label">قوالب الرسائل</div><div class="desc">إدارة الردود الجاهزة</div></a>
+            <a href="/test-whatsapp.html" class="action-card test"><div class="icon">🧪</div><div class="label">اختبار واتساب</div><div class="desc">فحص التوكن و Webhook و v26.0</div></a>
+        </div>
 
-  <script src="/api.js"></script>
-  <script>
-    // تحديث الإحصاءات من الـ API (إن كان متاحاً)
-    async function loadStats() {
-      try {
-        const convs = await api.getConversations();
-        const list = Array.isArray(convs) ? convs : (convs?.data || convs?.items || []);
-        document.getElementById('stat-convs').textContent = list.length ?? 0;
+        <div id="globalMessage" class="message"></div>
 
-        // عدّ الرسائل تقريبياً (إن وُجدت الحقول)
-        let inbound = 0, outbound = 0;
-        for (const c of list) {
-          if (typeof c.unreadCount === 'number') inbound += c.unreadCount;
-          if (typeof c.messageCount === 'number') outbound += c.messageCount;
-        }
-        document.getElementById('stat-in').textContent = inbound || '—';
-        document.getElementById('stat-out').textContent = outbound || '—';
-        document.getElementById('stat-status').textContent = 'متصل ✅';
-        document.getElementById('stat-status').style.color = '#2e7d32';
-      } catch (e) {
-        console.warn('API غير متاح:', e);
-        document.getElementById('stat-convs').textContent = '0';
-        document.getElementById('stat-in').textContent = '—';
-        document.getElementById('stat-out').textContent = '—';
-        document.getElementById('stat-status').textContent = 'غير متصل';
-        document.getElementById('stat-status').style.color = '#c62828';
-      }
+        <!-- ===== INTEGRATIONS - من لوحة التكاملات ===== -->
+        <h2 class="section-title">لوحة التكاملات المركزية</h2>
+        <section class="content">
+            <div class="card">
+                <h2>إضافة تكامل جديد</h2>
+                <form id="connectorForm">
+                    <label for="name">اسم التكامل</label>
+                    <input id="name" type="text" maxlength="100" placeholder="مثال: Telegram Sales" required>
+                    <label for="url">عنوان API</label>
+                    <input id="url" type="url" placeholder="https://api.example.com/endpoint" required>
+                    <label for="method">طريقة الاتصال</label>
+                    <select id="method"><option value="POST">POST</option><option value="GET">GET</option></select>
+                    <label for="authKey">اسم هيدر المصادقة</label>
+                    <input id="authKey" type="text" maxlength="100" value="Authorization">
+                    <label for="authToken">رمز المصادقة</label>
+                    <input id="authToken" type="password" autocomplete="new-password" maxlength="2000" placeholder="أدخل الرمز السري">
+                    <div class="hint">لا تعرض المنصة الرمز السري بعد حفظه. تأكد أن الخادم يخزنه بطريقة آمنة.</div>
+                    <label for="template">قالب البيانات JSON</label>
+                    <textarea id="template" placeholder='{"chat_id":"123","text":"{Message}"}'></textarea>
+                    <div class="hint">يجب أن يكون قالب البيانات بصيغة JSON صحيحة.</div>
+                    <div class="form-actions">
+                        <button type="submit" id="saveButton" class="btn">إضافة التكامل</button>
+                        <button type="reset" class="btn btn-secondary">مسح الحقول</button>
+                    </div>
+                </form>
+                <div id="formMessage" class="message"></div>
+            </div>
+
+            <div class="card">
+                <h2>التكاملات المسجلة</h2>
+                <button id="refreshButton" class="btn btn-secondary" type="button">تحديث القائمة</button>
+                <div id="connectorList" style="margin-top:18px"><div class="empty">جاري تحميل التكاملات...</div></div>
+            </div>
+        </section>
+
+        <footer class="footer">ChatPlatform · Unified Integration Management · WhatsApp Graph API v26.0</footer>
+    </main>
+</div>
+
+<script src="/api.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function showMessage(el, text, type="info"){ el.textContent=text; el.className="message show "+type; }
+function clearMessage(el){ el.textContent=""; el.className="message"; }
+function getArray(data){ if(Array.isArray(data)) return data; if(Array.isArray(data?.items)) return data.items; if(Array.isArray(data?.data)) return data.data; return null; }
+
+// ===== 1 - ربط الخادم + واتساب v26.0 - ربط حقيقي مع الباكيند =====
+async function checkServerAndWhatsApp(){
+    const badge = $("connection");
+    try{
+        await ChatPlatformAPI.getHealth();
+        badge.textContent = "● الخادم متصل";
+        badge.className = "connection online";
+        $("serverStatus").textContent = "متصل";
+        $("serverStatus").style.color = "#4ADE80";
+    }catch(e){
+        badge.textContent = "● تعذر الاتصال";
+        badge.className = "connection offline";
+        $("serverStatus").textContent = "غير متصل";
+        $("serverStatus").style.color = "#FCA5A5";
     }
-    loadStats();
-  </script>
+
+    // فحص واتساب v26.0 - هذا هو أهم ربط
+    const banner = $("waBanner");
+    try{
+        const w = await ChatPlatformAPI.getWebhookStatus(); // GET /api/whatsapp/webhook-status
+        const apiVersion = w.apiVersion || "غير معروف";
+        const configured = w.configured;
+        if(!configured){
+            banner.className = "wa-banner fail";
+            $("waTitle").textContent = "❌ واتساب غير مكون - أكمل الإعداد";
+            $("waDesc").textContent = "روح لصفحة إدارة WhatsApp وأدخل AccessToken و PhoneNumberId و VerifyToken.";
+            return;
+        }
+        if(apiVersion !== "v26.0"){
+            banner.className = "wa-banner warn";
+            $("waTitle").textContent = "⚠️ واتساب شغال لكن الإصدار " + apiVersion + " وليس v26.0";
+            $("waDesc").textContent = "غير ApiVersion في appsettings.json إلى v26.0، لأن Meta ستلغي الإصدارات القديمة. التوكن: " + (w.verifyTokenConfigured ? "موجود" : "مفقود") + " | AppSecret: " + (w.appSecretConfigured ? "موجود" : "مفقود ⚠️");
+            return;
+        }
+        banner.className = "wa-banner";
+        $("waTitle").textContent = "✅ واتساب متصل - Graph API v26.0";
+        $("waDesc").textContent = "PhoneId: " + (w.phoneNumberId || "-") + " | VerifyToken: " + (w.verifyTokenConfigured ? "موجود ✅" : "مفقود ❌") + " | AppSecret: " + (w.appSecretConfigured ? "موجود ✅" : "مفقود ⚠️");
+    }catch(e){
+        banner.className = "wa-banner fail";
+        $("waTitle").textContent = "❌ تعذر فحص واتساب - " + (e.message || "الباكيند لم يرجع حالة Webhook");
+        $("waDesc").textContent = "تأكد أن EndpointMapper.cs فيه GET /api/whatsapp/webhook-status. افتح test-whatsapp.html للتشخيص الكامل.";
+    }
+}
+
+// ===== 2 - ربط المحادثات - إحصاءات حقيقية =====
+async function loadConversationStats(){
+    try{
+        const convs = await ChatPlatformAPI.getConversations(); // GET /api/whatsapp/inbox - ربط حقيقي
+        const list = getArray(convs) || [];
+        $("statConvs").textContent = list.length;
+        let unread = 0;
+        for(const c of list){ if(typeof c.unreadCount === 'number') unread += c.unreadCount; }
+        $("statUnread").textContent = unread;
+    }catch(e){
+        $("statConvs").textContent = "—";
+        $("statUnread").textContent = "—";
+        console.warn("Conversations failed:", e);
+    }
+}
+
+// ===== 3 - ربط التكاملات =====
+function renderConnectors(items){
+    const list = $("connectorList");
+    list.replaceChildren();
+    $("totalCount").textContent = items.length;
+    if(items.length === 0){
+        const d = document.createElement("div"); d.className="empty"; d.textContent="لا توجد تكاملات مسجلة حتى الآن."; list.appendChild(d); return;
+    }
+    for(const item of items){
+        const row = document.createElement("div"); row.className="connector";
+        const info = document.createElement("div");
+        const name = document.createElement("div"); name.className="connector-name"; name.textContent = item.name || "تكامل بدون اسم";
+        const url = document.createElement("div"); url.className="connector-url"; url.textContent = item.targetUrl || "";
+        info.append(name, url);
+        const remove = document.createElement("button"); remove.type="button"; remove.className="btn btn-danger"; remove.textContent="حذف";
+        remove.addEventListener("click", ()=> deleteConnector(item.id, remove));
+        row.append(info, remove); list.appendChild(row);
+    }
+}
+async function loadConnectors(){
+    const list = $("connectorList");
+    list.textContent = "جاري تحميل التكاملات...";
+    try{
+        const result = await ChatPlatformAPI.getConnectors();
+        const items = getArray(result);
+        if(!items) throw new Error("تنسيق استجابة التكاملات غير معروف.");
+        renderConnectors(items);
+        clearMessage($("globalMessage"));
+    }catch(error){
+        list.textContent = "";
+        const m = document.createElement("div"); m.className="empty";
+        m.textContent = error.status===401||error.status===403 ? "الوصول إلى التكاملات يتطلب مصادقة من الخادم." : error.message || "تعذر تحميل التكاملات.";
+        list.appendChild(m);
+    }
+}
+async function addConnector(e){
+    e.preventDefault();
+    const button = $("saveButton"); const message = $("formMessage");
+    clearMessage(message);
+    const name = $("name").value.trim(); const rawUrl = $("url").value.trim(); const method = $("method").value;
+    const authKey = $("authKey").value.trim(); const authToken = $("authToken").value; const template = $("template").value.trim();
+    if(!name || !rawUrl){ showMessage(message, "اسم التكامل والرابط مطلوبان.", "error"); return; }
+    let target; try{ target = new URL(rawUrl); }catch{ showMessage(message, "رابط API غير صحيح.", "error"); return; }
+    if(target.protocol !== "https:" && target.hostname !== "localhost"){ showMessage(message, "يجب استخدام HTTPS مع الخدمات الخارجية.", "error"); return; }
+    if(template){ try{ JSON.parse(template); }catch{ showMessage(message, "قالب البيانات ليس JSON صالحاً.", "error"); return; } }
+    const data = { name, targetUrl: target.href, httpMethod: method, authHeaderKey: authKey, authToken, payloadTemplate: template };
+    button.disabled = true; button.textContent = "جاري الحفظ...";
+    try{ await ChatPlatformAPI.createConnector(data); showMessage(message, "تم إرسال طلب الإضافة بنجاح.", "success"); $("connectorForm").reset(); await loadConnectors(); }
+    catch(error){ showMessage(message, error.message || "تعذر إضافة التكامل.", "error"); }
+    finally{ button.disabled = false; button.textContent = "إضافة التكامل"; }
+}
+async function deleteConnector(id, button){
+    if(!id) return; if(!confirm("هل تريد حذف هذا التكامل؟")) return;
+    button.disabled = true;
+    try{ await ChatPlatformAPI.deleteConnector(id); showMessage($("globalMessage"), "تم تنفيذ طلب الحذف.", "success"); await loadConnectors(); }
+    catch(error){ showMessage($("globalMessage"), error.message || "تعذر حذف التكامل.", "error"); button.disabled = false; }
+}
+$("connectorForm").addEventListener("submit", addConnector);
+$("refreshButton").addEventListener("click", async ()=>{ await loadConnectors(); await checkServerAndWhatsApp(); await loadConversationStats(); });
+
+async function initialize(){
+    if(!window.ChatPlatformAPI){ showMessage($("globalMessage"), "ملف api.js غير موجود أو لم يتم تحميله.", "error"); return; }
+    await checkServerAndWhatsApp();
+    await loadConversationStats();
+    await loadConnectors();
+}
+initialize();
+</script>
 </body>
 </html>
