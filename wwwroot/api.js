@@ -32,6 +32,19 @@
         return META_ERRORS[code] || fallback;
     }
 
+    // =====================================
+    // META v26.0: تحويل اللغة للصيغة الكاملة
+    // v26.0 يرفض ar لوحدها، لازم ar_EG
+    // =====================================
+    function normalizeMetaLanguage(lang) {
+        const l = String(lang || "ar").trim();
+        if (l === "ar") return "ar_EG";
+        if (l === "en") return "en_US";
+        if (l === "ar_SA" || l === "ar_EG" || l === "ar_AE" || l === "ar_QA" || l === "ar_KW" || l === "en_US" || l === "en_GB") return l;
+        // إذا كانت اللغة مختصرة بدون _ ، نرجعها كما هي والسيرفر يتصرف
+        return l;
+    }
+
     class ApiError extends Error {
         constructor(message, status = 0, details = null, metaCode = null) {
             super(message);
@@ -160,7 +173,7 @@
                     type: "text",
                     text: { body: text.trim(), preview_url: !!options.previewUrl },
                     fallbackTemplateName: options.fallbackTemplateName || null,
-                    fallbackTemplateLanguage: options.fallbackTemplateLanguage || "ar",
+                    fallbackTemplateLanguage: normalizeMetaLanguage(options.fallbackTemplateLanguage || "ar"),
                     tenantId: options.tenantId || null,
                     whatsAppTenantId: options.whatsAppTenantId || null
                 }
@@ -171,7 +184,7 @@
             const cleanTo = validatePhone(to);
             const name = String(templateName || "").trim();
             if (!name) throw new ApiError("اسم القالب مطلوب.");
-            const langCode = String(language || "ar").trim();
+            const langCode = normalizeMetaLanguage(language);
             const components = [{
                 type: "body",
                 parameters: parameters.map(p => ({ type: "text", text: String(p) }))
@@ -230,7 +243,7 @@
             const name = String(data.name || "").trim().toLowerCase().replace(/\s+/g, "_");
             const body = String(data.body || "").trim();
             const category = String(data.category || "UTILITY").toUpperCase();
-            const language = String(data.language || "ar").trim();
+            const language = normalizeMetaLanguage(data.language || "ar");
             if (!name || !body) throw new ApiError("اسم القالب ونص القالب مطلوبان.");
             if (!/^[a-z0-9_]+$/.test(name)) {
                 throw new ApiError("اسم القالب في Meta يجب أن يكون حروف صغيرة وأرقام و _ فقط، بدون مسافات أو حروف عربية.");
@@ -288,7 +301,8 @@
         _helpers: Object.freeze({
             validatePhone,
             extractTemplateVariables,
-            getMetaErrorMessage
+            getMetaErrorMessage,
+            normalizeMetaLanguage
         })
     });
 
