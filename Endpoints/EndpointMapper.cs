@@ -4,6 +4,7 @@ using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Hubs;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp; // ⬅️ هذا السطر مهم جداً (كان مفقوداً أو به مشكلة)
 using Microsoft.EntityFrameworkCore;
 
 namespace ChatPlatform.Endpoints;
@@ -75,10 +76,10 @@ public static class EndpointMapper
         // 5. SignalR Hub
         app.MapHub<ChatHub>(ApiEndpoints.ChatHub);
 
-        // 6. WhatsApp Webhook (من ملف WhatsAppExtensions)
-        app.MapWhatsAppWebhook(configuration);
+        // 6. WhatsApp Webhook (تم إزالة configuration من هنا لتطابق التوقيع الجديد)
+        app.MapWhatsAppWebhook(); // ⬅️ تم تصحيح هذا السطر
 
-        // 7. Controllers (إذا كان لديك Controllers أخرى)
+        // 7. Controllers
         app.MapControllers();
 
         return app;
