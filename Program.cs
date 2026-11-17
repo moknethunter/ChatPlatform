@@ -15,31 +15,45 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Polly;
 using Polly.Extensions.Http;
-using Microsoft.AspNetCore.HttpOverrides; // ⬅️ تمت الإضافة
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ⬇️⬇️ تمت الإضافة: إعدادات Forwarded Headers للتعامل مع بروكسي SnapDeploy ⬇️⬇️
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders =
         ForwardedHeaders.XForwardedFor
         | ForwardedHeaders.XForwardedProto;
-
-    // السماح بعكس البروكسي الموجود في SnapDeploy.
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });
-// ⬆️⬆️ ------------------------------------------------------------- ⬆️⬆️
 
 // ============================================================
-// 1. WhatsApp Configuration
+// 1. WhatsApp Configuration - متوافق مع Meta فقط
 // ============================================================
+var whatsAppSection = builder.Configuration.GetSection("WhatsApp");
+var whatsAppToken = whatsAppSection["AccessToken"];
+var whatsAppPhoneId = whatsAppSection["PhoneNumberId"];
+var whatsAppVerifyToken = whatsAppSection["VerifyToken"];
+var whatsAppAppSecret = whatsAppSection["AppSecret"];
+var whatsAppApiVersion = whatsAppSection["ApiVersion"] ?? "v21.0";
+
+if (string.IsNullOrWhiteSpace(whatsAppToken) ||
+    string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
+    string.IsNullOrWhiteSpace(whatsAppVerifyToken))
+{
+    throw new InvalidOperationException(
+        "إعدادات واتساب ناقصة في appsettings.json: يجب تعيين WhatsApp:AccessToken و PhoneNumberId و VerifyToken.");
+}
+
+if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
+{
+    Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
+}
 
 // ============================================================
 // 2. Database
 // ============================================================
-
 builder.Services.AddDbContext<PlatformDbContext>(options =>
     options.UseSqlite(
         builder.Configuration.GetConnectionString("Default")
@@ -48,7 +62,6 @@ builder.Services.AddDbContext<PlatformDbContext>(options =>
 // ============================================================
 // 3. Configuration and Data Protection
 // ============================================================
-
 builder.Services.Configure<EngineOptions>(
     builder.Configuration.GetSection("EngineSettings"));
 
@@ -59,29 +72,21 @@ builder.Services.AddDataProtection()
 // ============================================================
 // 4. Event Bus and Core Engine
 // ============================================================
-
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-
 builder.Services.AddHostedService<CoreEngine>();
 
 // ============================================================
 // 5. Integration Adapters
 // ============================================================
-
 builder.Services.AddSingleton<IIntegrationAdapter, ConsoleAdapter>();
-
 builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
-
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
-
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
-
 builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 
 // ============================================================
 // 6. Controllers and HTTP Clients
 // ============================================================
-
 builder.Services.AddControllers();
 
 builder.Services.AddHttpClient("ResilientClient")
@@ -92,10 +97,18 @@ builder.Services.AddHttpClient("ResilientClient")
                 retryAttempt =>
                     TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
+// HttpClient الرسمي لواتساب - Meta Cloud API
+builder.Services.AddHttpClient("WhatsAppCloudApi", client =>
+{
+    client.BaseAddress = new Uri($"https://graph.facebook.com/{whatsAppApiVersion}/");
+    client.DefaultRequestHeaders.Authorization =
+        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", whatsAppToken);
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 // ============================================================
 // 7. SignalR and CORS
 // ============================================================
-
 var allowedOrigins =
     builder.Configuration
         .GetSection("Cors:AllowedOrigins")
@@ -130,17 +143,13 @@ builder.Services.AddCors(options =>
 // ============================================================
 // 8. Build Application
 // ============================================================
-
 var app = builder.Build();
 
-// ⬇️⬇️ تمت الإضافة: يجب أن يكون أول Middleware في خط الأنابيب ⬇️⬇️
 app.UseForwardedHeaders();
-// ⬆️⬆️ ------------------------------------------------------- ⬆️⬆️
 
 // ============================================================
 // 9. Database Initialization
 // ============================================================
-
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider
@@ -166,206 +175,20 @@ using (var scope = app.Services.CreateScope())
 // ============================================================
 // 10. Middleware Pipeline
 // ============================================================
-
 app.UseMiddleware<GlobalExceptionMiddleware>();
-
 app.UseCors();
-
 app.UseMiddleware<ApiKeyMiddleware>();
-
 app.UseDefaultFiles();
-
 app.UseStaticFiles();
 
 // ============================================================
-// 11. Platform Information
+// 11. All Endpoints - من EndpointMapper فقط، بدون تكرار في Program.cs
 // ============================================================
-
-app.MapGet(ApiEndpoints.PlatformInfo, (HttpRequest request) =>
-{
-    var baseUrl = $"{request.Scheme}://{request.Host}";
-
-    return Results.Ok(new
-    {
-        status = "Online",
-        version = "1.0.0",
-
-        endpoints = new
-        {
-            whatsappWebhook = $"{baseUrl}{ApiEndpoints.WhatsAppWebhook}",
-            events = $"{baseUrl}{ApiEndpoints.Events}",
-            connectors = $"{baseUrl}{ApiEndpoints.Connectors}",
-            whatsappOnboarding = $"{baseUrl}{ApiEndpoints.WhatsAppOnboarding}",
-            health = $"{baseUrl}{ApiEndpoints.Health}"
-        },
-
-        legal = new
-        {
-            privacy = $"{baseUrl}/privacy.html",
-            terms = $"{baseUrl}/terms.html",
-            dataDeletion = $"{baseUrl}/data-deletion.html"
-        }
-    });
-});
+app.MapAllEndpoints(builder.Configuration);
 
 // ============================================================
-// 12. Connectors API
+// 12. Run
 // ============================================================
-
-var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);
-
-connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
-{
-    var connectors = await db.Connectors
-        .AsNoTracking()
-        .ToListAsync();
-
-    return Results.Ok(connectors);
-});
-
-connectorsGroup.MapPost(
-    "/",
-    async (ConnectorEntity req, PlatformDbContext db) =>
-    {
-        req.Id = Guid.NewGuid().ToString();
-
-        db.Connectors.Add(req);
-
-        await db.SaveChangesAsync();
-
-        return Results.Ok(new
-        {
-            message = "تم الحفظ بنجاح",
-            id = req.Id
-        });
-    });
-
-// ============================================================
-// 13. Generic Inbound API
-// ============================================================
-
-app.MapPost(
-    ApiEndpoints.InboundByPlatform,
-    async (
-        string platform,
-        HttpRequest request,
-        IEventBus bus,
-        CancellationToken ct) =>
-    {
-        JsonDocument document;
-
-        try
-        {
-            document = await JsonDocument.ParseAsync(
-                request.Body,
-                cancellationToken: ct);
-        }
-        catch (JsonException)
-        {
-            return Results.BadRequest(
-                new { error = "Invalid JSON body" });
-        }
-
-        using (document)
-        {
-            await bus.PublishAsync(
-                new PlatformEvent
-                {
-                    Type = "message.created",
-                    Source = platform,
-                    Payload = document.RootElement.Clone()
-                },
-                ct);
-        }
-
-        return Results.Ok(new
-        {
-            status = "received"
-        });
-    });
-
-// ============================================================
-// 14. Events API
-// ============================================================
-
-app.MapPost(
-    ApiEndpoints.Events,
-    async (
-        HttpRequest request,
-        IEventBus bus,
-        CancellationToken ct) =>
-    {
-        JsonDocument document;
-
-        try
-        {
-            document = await JsonDocument.ParseAsync(
-                request.Body,
-                cancellationToken: ct);
-        }
-        catch (JsonException)
-        {
-            return Results.BadRequest(
-                new { error = "Invalid JSON body" });
-        }
-
-        using (document)
-        {
-            var json = document.RootElement;
-
-            var eventType =
-                json.TryGetProperty("type", out var type)
-                    ? type.GetString()
-                    : "unknown.event";
-
-            await bus.PublishAsync(
-                new PlatformEvent
-                {
-                    Type = eventType ?? "unknown.event",
-                    Source = "http-api",
-                    Payload = json.Clone()
-                },
-                ct);
-        }
-
-        return Results.Accepted();
-    });
-
-// ============================================================
-// 15. Health Check
-// ============================================================
-
-app.MapGet(ApiEndpoints.Health, () =>
-{
-    return Results.Ok(new
-    {
-        status = "Core is running",
-        timestamp = DateTimeOffset.UtcNow
-    });
-});
-
-// ============================================================
-// 16. SignalR Hub
-// ============================================================
-
-app.MapHub<ChatHub>(ApiEndpoints.ChatHub);
-
-// ============================================================
-// 17. WhatsApp Meta Webhook
-// ============================================================
-
-app.MapWhatsAppWebhook();
-
-// ============================================================
-// 18. Controllers
-// ============================================================
-
-app.MapControllers();
-
-// ============================================================
-// 19. Run
-// ============================================================
-
 app.Run();
 
 public partial class Program
