@@ -33,12 +33,14 @@ var whatsappEnvironmentSettings = new Dictionary<string, string?>
         Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN"),
 
     ["WhatsApp:AppSecret"] =
-        Environment.GetEnvironmentVariable("META_APP_SECRET")
-        ?? Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
-};
+        Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET"),
 
-builder.Configuration.AddInMemoryCollection(
-    whatsappEnvironmentSettings.Where(x => x.Value != null));
+    ["WhatsApp:BusinessAccountId"] =
+        Environment.GetEnvironmentVariable("WHATSAPP_BUSINESS_ACCOUNT_ID"),
+
+    ["WhatsApp:TestNumber"] =
+        Environment.GetEnvironmentVariable("Test_number"),
+};
 
 // ============================================================
 // 2. Database
