@@ -4,7 +4,7 @@ public sealed class WhatsAppOptions
 {
     public const string SectionName = "WhatsApp";
 
-    public string GraphApiVersion { get; set; } = "v21.0";
+    public string GraphApiVersion { get; set; } = "v26.0";
     public string PhoneNumberId { get; set; } = "";
     public string AccessToken { get; set; } = "";
     public string VerifyToken { get; set; } = "";
