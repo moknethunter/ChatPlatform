@@ -4,7 +4,7 @@ using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Hubs;
-using ChatPlatform.Infrastructure.Adapters.WhatsApp; // ⬅️ هذا السطر مهم جداً (كان مفقوداً أو به مشكلة)
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using Microsoft.EntityFrameworkCore;
 
 namespace ChatPlatform.Endpoints;
@@ -28,6 +28,12 @@ public static class EndpointMapper
                     connectors = $"{baseUrl}{ApiEndpoints.Connectors}",
                     whatsappOnboarding = $"{baseUrl}{ApiEndpoints.WhatsAppOnboarding}",
                     health = $"{baseUrl}{ApiEndpoints.Health}"
+                },
+                legal = new
+                {
+                    privacy = $"{baseUrl}/privacy.html",
+                    terms = $"{baseUrl}/terms.html",
+                    dataDeletion = $"{baseUrl}/data-deletion.html"
                 }
             });
         });
@@ -76,10 +82,76 @@ public static class EndpointMapper
         // 5. SignalR Hub
         app.MapHub<ChatHub>(ApiEndpoints.ChatHub);
 
-        // 6. WhatsApp Webhook (تم إزالة configuration من هنا لتطابق التوقيع الجديد)
-        app.MapWhatsAppWebhook(); // ⬅️ تم تصحيح هذا السطر
+        // 6. WhatsApp Webhook
+        app.MapWhatsAppWebhook();
 
-        // 7. Controllers
+        // 7. WhatsApp Meta - حالة Webhook - متوافق مع Meta فقط
+        app.MapGet(ApiEndpoints.WhatsAppWebhookStatus, () =>
+        {
+            var section = configuration.GetSection("WhatsApp");
+            return Results.Ok(new
+            {
+                configured = !string.IsNullOrWhiteSpace(section["AccessToken"]),
+                phoneNumberId = section["PhoneNumberId"],
+                apiVersion = section["ApiVersion"] ?? "v21.0",
+                webhookUrl = ApiEndpoints.WhatsAppWebhook,
+                verifyTokenConfigured = !string.IsNullOrWhiteSpace(section["VerifyToken"]),
+                appSecretConfigured = !string.IsNullOrWhiteSpace(section["AppSecret"])
+            });
+        });
+
+        // 8. WhatsApp Meta - إرسال قالب معتمد - متوافق مع Meta فقط
+        app.MapPost(ApiEndpoints.WhatsAppSendTemplate, async (
+            HttpRequest request,
+            IHttpClientFactory httpFactory,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("to", out var to) ||
+                    !root.TryGetProperty("template", out var template))
+                    return Results.BadRequest(new { error = "to و template مطلوبان." });
+
+                var cleanTo = to.GetString()?.Trim().TrimStart('+').Replace(" ", "").Replace("-", "");
+                if (string.IsNullOrWhiteSpace(cleanTo))
+                    return Results.BadRequest(new { error = "رقم المستلم غير صالح." });
+
+                var phoneId = configuration["WhatsApp:PhoneNumberId"];
+                if (string.IsNullOrWhiteSpace(phoneId))
+                    return Results.BadRequest(new { error = "WhatsApp:PhoneNumberId غير معين." });
+
+                var payload = new
+                {
+                    messaging_product = "whatsapp",
+                    to = cleanTo,
+                    type = "template",
+                    template = new
+                    {
+                        name = template.GetProperty("name").GetString(),
+                        language = new { code = template.TryGetProperty("language", out var lang) && lang.TryGetProperty("code", out var code) ? code.GetString() ?? "ar" : "ar" },
+                        components = template.TryGetProperty("components", out var comp) ? comp : (JsonElement?)null
+                    }
+                };
+
+                var client = httpFactory.CreateClient("WhatsAppCloudApi");
+                var response = await client.PostAsJsonAsync($"{phoneId}/messages", payload, ct);
+                var content = await response.Content.ReadAsStringAsync(ct);
+
+                if (!response.IsSuccessStatusCode)
+                    return Results.Json(new { error = JsonDocument.Parse(content).RootElement }, statusCode: (int)response.StatusCode);
+
+                return Results.Ok(JsonDocument.Parse(content).RootElement);
+            }
+            catch (JsonException)
+            {
+                return Results.BadRequest(new { error = "Invalid JSON body" });
+            }
+        });
+
+        // 9. Controllers
         app.MapControllers();
 
         return app;
