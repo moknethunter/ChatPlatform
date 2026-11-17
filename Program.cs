@@ -94,7 +94,7 @@ else
 {
     Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
 }
-
+}
 
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
