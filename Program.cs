@@ -36,7 +36,7 @@ var whatsAppToken = whatsAppSection["AccessToken"];
 var whatsAppPhoneId = whatsAppSection["PhoneNumberId"];
 var whatsAppVerifyToken = whatsAppSection["VerifyToken"];
 var whatsAppAppSecret = whatsAppSection["AppSecret"];
-var whatsAppApiVersion = whatsAppSection["ApiVersion"] ?? "v21.0";
+var whatsAppApiVersion = whatsAppSection["ApiVersion"] ?? "v26.0";
 
 if (string.IsNullOrWhiteSpace(whatsAppToken) ||
     string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
