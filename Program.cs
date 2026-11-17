@@ -42,8 +42,54 @@ if (string.IsNullOrWhiteSpace(whatsAppToken) ||
     string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
     string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 {
-    throw new InvalidOperationException(
-        "إعدادات واتساب ناقصة في appsettings.json: يجب تعيين WhatsApp:AccessToken و PhoneNumberId و VerifyToken.");
+    // ===== إعدادات واتساب - لا توقف البرنامج إذا ناقصة =====
+var whatsappSection = builder.Configuration.GetSection("WhatsApp");
+
+string whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
+    ?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
+    ?? whatsappSection["AccessToken"] ?? "";
+
+string phoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
+    ?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
+    ?? whatsappSection["PhoneNumberId"] ?? "";
+
+string verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
+    ?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
+    ?? whatsappSection["VerifyToken"] ?? "";
+
+string appSecret = Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
+    ?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
+    ?? whatsappSection["AppSecret"] ?? "";
+
+string apiVersion = Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
+    ?? whatsappSection["ApiVersion"] ?? "v26.0";
+
+if (string.IsNullOrWhiteSpace(whatsappToken) ||
+    string.IsNullOrWhiteSpace(phoneNumberId) ||
+    string.IsNullOrWhiteSpace(verifyToken))
+{
+    // ⚠️ لا ترمي Exception هنا - فقط حذر وكمل التشغيل
+    // عشان الواجهة تشتغل وتقدر تشوف رسالة الخطأ في /settings.html
+    Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
+    Console.WriteLine("المفقود: " +
+        (string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
+        (string.IsNullOrWhiteSpace(phoneNumberId) ? "[PhoneNumberId] " : "") +
+        (string.IsNullOrWhiteSpace(verifyToken) ? "[VerifyToken] " : ""));
+}
+else
+{
+    Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
+}
+
+// سجلها في DI عشان باقي الكود يستخدمها
+builder.Services.AddSingleton(new WhatsAppOptions
+{
+    AccessToken = whatsappToken,
+    PhoneNumberId = phoneNumberId,
+    VerifyToken = verifyToken,
+    AppSecret = appSecret,
+    ApiVersion = apiVersion
+});
 }
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
