@@ -10,20 +10,31 @@ using ChatPlatform.Infrastructure.Engine;
 using ChatPlatform.Infrastructure.Messaging;
 using ChatPlatform.Hubs;
 using ChatPlatform.Middleware;
-using ChatPlatform.Endpoints; // تمت الإضافة لاستخدام ApiEndpoints
+using ChatPlatform.Endpoints;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Polly;
 using Polly.Extensions.Http;
+using Microsoft.AspNetCore.HttpOverrides; // ⬅️ تمت الإضافة
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ⬇️⬇️ تمت الإضافة: إعدادات Forwarded Headers للتعامل مع بروكسي SnapDeploy ⬇️⬇️
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor
+        | ForwardedHeaders.XForwardedProto;
+
+    // السماح بعكس البروكسي الموجود في SnapDeploy.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+// ⬆️⬆️ ------------------------------------------------------------- ⬆️⬆️
 
 // ============================================================
 // 1. WhatsApp Configuration
 // ============================================================
-// تم حذف قاموس whatsappEnvironmentSettings بالكامل.
-// الربط يتم تلقائياً عبر [ConfigurationKeyName] في WhatsAppOptions.cs
-// وعبر AddWhatsAppAdapter أدناه.
 
 // ============================================================
 // 2. Database
@@ -63,8 +74,6 @@ builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 
-// WhatsApp services, HTTP client, resolver and workers
-// are registered inside AddWhatsAppAdapter.
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
 
 builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
@@ -124,6 +133,10 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// ⬇️⬇️ تمت الإضافة: يجب أن يكون أول Middleware في خط الأنابيب ⬇️⬇️
+app.UseForwardedHeaders();
+// ⬆️⬆️ ------------------------------------------------------- ⬆️⬆️
+
 // ============================================================
 // 9. Database Initialization
 // ============================================================
@@ -158,9 +171,6 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 
 app.UseCors();
 
-// Important:
-// ApiKeyMiddleware must allow Meta webhook requests
-// to reach WhatsApp signature validation.
 app.UseMiddleware<ApiKeyMiddleware>();
 
 app.UseDefaultFiles();
@@ -344,7 +354,6 @@ app.MapHub<ChatHub>(ApiEndpoints.ChatHub);
 // 17. WhatsApp Meta Webhook
 // ============================================================
 
-// تم إزالة builder.Configuration لأن الدالة أصبحت لا تحتاجه
 app.MapWhatsAppWebhook();
 
 // ============================================================
