@@ -15,9 +15,6 @@
         webhookStatus: "/api/whatsapp/webhook-status"
     });
 
-    // =====================================
-    // META WHATSAPP ERROR MAP - ترجمة أخطاء ميتا
-    // =====================================
     const META_ERRORS = Object.freeze({
         131030: "الرقم غير مسجل في واتساب. تأكد من الرقم.",
         131031: "تم حظر إرسال الرسائل لهذا الرقم من قبل واتساب.",
@@ -56,11 +53,6 @@
         return validateId(tenantId, "معرّف المؤسسة Tenant");
     }
 
-    // =====================================
-    // META: التحقق من رقم الهاتف بصيغة E.164
-    // Meta ترفض الأرقام التي فيها + أو مسافات أو 00
-    // الصحيح: 9677xxxxxxxx بدون +
-    // =====================================
     function validatePhone(to) {
         if (!to) throw new ApiError("رقم المستلم مطلوب.");
         let clean = String(to).trim().replace(/[\s\-()]/g, "");
@@ -72,9 +64,6 @@
         return clean;
     }
 
-    // =====================================
-    // META: التحقق من متغيرات القالب {{1}} {{2}}
-    // =====================================
     function extractTemplateVariables(body) {
         const matches = [...String(body || "").matchAll(/\{\{(\d+)\}\}/g)];
         return [...new Set(matches.map(m => Number(m[1])))].sort((a, b) => a - b);
@@ -86,7 +75,6 @@
         if (!Array.isArray(parameters) || parameters.length < vars.length) {
             throw new ApiError(`القالب يحتاج ${vars.length} متغير، وأنت أرسلت ${parameters ? parameters.length : 0}.`);
         }
-        // يجب أن تكون المتغيرات متسلسلة 1,2,3
         for (let i = 0; i < vars.length; i++) {
             if (vars[i] !== i + 1) throw new ApiError("متغيرات القالب يجب أن تكون متسلسلة: {{1}} {{2}} {{3}}");
         }
@@ -130,14 +118,10 @@
         }
 
         if (!response.ok) {
-            // محاولة قراءة خطأ Meta من داخل السيرفر
-            // الشكل المتوقع من Meta: { error: { code, message } }
             const metaError = data?.error?.error || data?.error || data?.metaError || null;
             const metaCode = metaError?.code || data?.metaCode || data?.code || null;
             const rawMessage = metaError?.message || (data && typeof data === "object" ? data.error || data.message || data.title : null);
-
             const message = getMetaErrorMessage(metaCode, rawMessage || `فشل الطلب: HTTP ${response.status}`);
-
             throw new ApiError(message, response.status, data, metaCode);
         }
 
@@ -150,7 +134,6 @@
         getPlatformInfo() { return request(API.platformInfo); },
         getWebhookStatus() { return request(API.webhookStatus); },
 
-        // CONVERSATIONS
         getConversations() { return request(API.conversations); },
 
         getConversationMessages(id, take = 100) {
@@ -160,11 +143,6 @@
             return request(`${API.conversations}/${encodeURIComponent(id)}/messages?${query}`);
         },
 
-        // =====================================
-        // SEND WHATSAPP MESSAGE - متوافق مع Meta
-        // =====================================
-        // يرسل: messaging_product + recipient_type + type
-        // ملاحظة: فحص نافذة 24 ساعة يتم في السيرفر، هنا نرسل isTemplateFallback للسماح بالتبديل
         sendMessage(to, text, options = {}) {
             const cleanTo = validatePhone(to);
             if (!text || typeof text !== "string" || !text.trim()) {
@@ -173,7 +151,6 @@
             if (text.trim().length > 4096) {
                 throw new ApiError("نص الرسالة تجاوز حد واتساب 4096 حرف.");
             }
-
             return request(API.sendMessage, {
                 method: "POST",
                 body: {
@@ -182,7 +159,6 @@
                     to: cleanTo,
                     type: "text",
                     text: { body: text.trim(), preview_url: !!options.previewUrl },
-                    // إذا انتهت نافذة 24 ساعة، السيرفر يحولها لقالب تلقائياً إذا أرسلت هذا
                     fallbackTemplateName: options.fallbackTemplateName || null,
                     fallbackTemplateLanguage: options.fallbackTemplateLanguage || "ar",
                     tenantId: options.tenantId || null,
@@ -191,64 +167,45 @@
             });
         },
 
-        // =====================================
-        // SEND TEMPLATE MESSAGE - إرسال قالب معتمد من Meta
-        // هذا هو الإرسال الصحيح بعد انتهاء 24 ساعة
-        // =====================================
         sendTemplateMessage(to, templateName, language = "ar", parameters = [], options = {}) {
             const cleanTo = validatePhone(to);
             const name = String(templateName || "").trim();
             if (!name) throw new ApiError("اسم القالب مطلوب.");
-
-            // لغة Meta تكون ar أو ar_EG أو en_US - نسمح بـ ar ونحولها لـ ar_EG في السيرفر إذا لزم
             const langCode = String(language || "ar").trim();
-
-            // تحويل المتغيرات لصيغة Meta: [{type:"text", text:"..."}]
             const components = [{
                 type: "body",
                 parameters: parameters.map(p => ({ type: "text", text: String(p) }))
             }];
-
-            // دعم Header إذا كان فيه صورة أو نص
             if (options.headerText) {
                 components.unshift({ type: "header", parameters: [{ type: "text", text: String(options.headerText) }] });
             }
             if (options.headerImageUrl) {
                 components.unshift({ type: "header", parameters: [{ type: "image", image: { link: options.headerImageUrl } }] });
             }
-
-            // دعم أزرار CTA / Quick Reply
             if (options.buttons && Array.isArray(options.buttons) && options.buttons.length > 0) {
                 options.buttons.forEach((btn, idx) => {
                     components.push({ type: "button", sub_type: btn.sub_type || "quick_reply", index: String(idx), parameters: btn.parameters || [] });
                 });
             }
-
             return request(API.sendTemplate, {
                 method: "POST",
                 body: {
                     messaging_product: "whatsapp",
                     to: cleanTo,
                     type: "template",
-                    template: {
-                        name,
-                        language: { code: langCode },
-                        components
-                    },
+                    template: { name, language: { code: langCode }, components },
                     tenantId: options.tenantId || null,
                     whatsAppTenantId: options.whatsAppTenantId || null
                 }
             });
         },
 
-        // TENANTS
         getTenants() { return request(API.tenants); },
         createTenant(data) {
             if (!data || typeof data !== "object") throw new ApiError("بيانات حساب واتساب غير صالحة.");
             return request(API.tenants, { method: "POST", body: data });
         },
 
-        // CONNECTORS
         getConnectors() { return request(API.connectors); },
         createConnector(data) {
             if (!data || typeof data !== "object") throw new ApiError("بيانات التكامل غير صالحة.");
@@ -259,9 +216,6 @@
             return request(`${API.connectors}/${encodeURIComponent(id)}`, { method: "DELETE" });
         },
 
-        // =====================================
-        // TEMPLATES - مطابق لمواصفات Meta
-        // =====================================
         getTemplates(tenantId, whatsAppTenantId = null) {
             tenantId = validateTenantId(tenantId);
             const query = new URLSearchParams({ tenantId });
@@ -271,18 +225,13 @@
 
         createTemplate(data) {
             if (!data || typeof data !== "object") throw new ApiError("بيانات القالب غير صالحة.");
-
             const tenantId = validateTenantId(data.tenantId);
             const whatsAppTenantId = validateId(data.whatsAppTenantId, "معرّف حساب واتساب");
             const name = String(data.name || "").trim().toLowerCase().replace(/\s+/g, "_");
             const body = String(data.body || "").trim();
             const category = String(data.category || "UTILITY").toUpperCase();
-            // Meta: ar يجب أن يكون ar_EG أو ar_SA أو ar ... نرسل ar و السيرفر يحوله
             const language = String(data.language || "ar").trim();
-
             if (!name || !body) throw new ApiError("اسم القالب ونص القالب مطلوبان.");
-
-            // اسم قالب Meta: حروف صغيرة وأرقام و _ فقط، بدون مسافات
             if (!/^[a-z0-9_]+$/.test(name)) {
                 throw new ApiError("اسم القالب في Meta يجب أن يكون حروف صغيرة وأرقام و _ فقط، بدون مسافات أو حروف عربية.");
             }
@@ -292,12 +241,8 @@
             if (!["UTILITY", "MARKETING", "AUTHENTICATION"].includes(category)) {
                 throw new ApiError("تصنيف القالب غير صالح.");
             }
-
-            // تحقق من المتغيرات
             const parameters = Array.isArray(data.exampleParameters) ? data.exampleParameters : [];
             validateTemplateVariables(body, parameters.length > 0 ? parameters : extractTemplateVariables(body).map(() => "مثال"));
-
-            // بناء مكونات Meta الحقيقية
             const components = [];
             if (data.headerText || data.headerImageUrl) {
                 components.push({
@@ -314,7 +259,6 @@
             });
             if (data.footerText) components.push({ type: "FOOTER", text: String(data.footerText).slice(0, 60) });
             if (data.buttons && Array.isArray(data.buttons)) components.push({ type: "BUTTONS", buttons: data.buttons });
-
             return request(API.templates, {
                 method: "POST",
                 body: { tenantId, whatsAppTenantId, name, category, language, body, components, headerText: data.headerText || null, footerText: data.footerText || null, buttons: data.buttons || [] }
@@ -335,14 +279,12 @@
             return request(`${API.templates}/${encodeURIComponent(id)}?${query.toString()}`, { method: "DELETE" });
         },
 
-        // AUTO REPLY
         getAutoReplyRules() { return request(API.autoReply); },
         createAutoReplyRule(data) {
             if (!data || typeof data !== "object") throw new ApiError("بيانات قاعدة الرد الآلي غير صالحة.");
             return request(API.autoReply, { method: "POST", body: data });
         },
 
-        // أدوات مساعدة للمطور
         _helpers: Object.freeze({
             validatePhone,
             extractTemplateVariables,
