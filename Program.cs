@@ -18,29 +18,11 @@ using Polly.Extensions.Http;
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================================
-// 1. WhatsApp Environment Configuration
+// 1. WhatsApp Configuration (Binding is handled in AddWhatsAppAdapter)
 // ============================================================
 
-var whatsappEnvironmentSettings = new Dictionary<string, string?>
-{
-    ["WhatsApp:AccessToken"] =
-        Environment.GetEnvironmentVariable("WHATSAPP_TOKEN"),
-
-    ["WhatsApp:PhoneNumberId"] =
-        Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID"),
-
-    ["WhatsApp:VerifyToken"] =
-        Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN"),
-
-    ["WhatsApp:AppSecret"] =
-        Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET"),
-
-    ["WhatsApp:BusinessAccountId"] =
-        Environment.GetEnvironmentVariable("WHATSAPP_BUSINESS_ACCOUNT_ID"),
-
-    ["WhatsApp:TestNumber"] =
-        Environment.GetEnvironmentVariable("Test_number"),
-};
+// تم حذف قاموس whatsappEnvironmentSettings لأن الربط يتم الآن تلقائياً
+// عبر [ConfigurationKeyName] في ملف WhatsAppOptions.cs
 
 // ============================================================
 // 2. Database
