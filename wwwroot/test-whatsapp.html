@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0A0F1E">
+    <title>ChatPlatform | اختبار واتساب v26.0</title>
+    <style>
+        :root {
+            --bg: #0A0F1E;
+            --sidebar: #0D1428;
+            --panel: #111A30;
+            --panel2: #16213D;
+            --panel-hover: #1A2745;
+            --border: #1E2D4D;
+            --border-light: #2A3B60;
+            --text: #F1F5FF;
+            --muted: #8B9BB8;
+            --muted2: #6B7C9D;
+            --primary: #25D366;
+            --primary-glow: rgba(37, 211, 102, 0.18);
+            --success: #22C55E;
+            --success-bg: #0F2A1D;
+            --danger: #EF4444;
+            --danger-bg: #3A161C;
+            --warning: #F59E0B;
+            --info-bg: #162A4D;
+            --radius: 14px;
+            --radius-sm: 10px;
+            --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.18);
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, Arial, sans-serif; line-height: 1.6; }
+        button, input, select { font: inherit; }
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 260px; flex-shrink: 0; background: var(--sidebar); border-left: 1px solid var(--border); padding: 28px 16px; position: sticky; top: 0; height: 100vh; }
+        .brand { font-size: 22px; font-weight: 800; margin-bottom: 38px; padding: 0 12px; display: flex; align-items: center; gap: 10px; }
+        .brand::before { content: ""; width: 36px; height: 36px; border-radius: 10px; background: linear-gradient(135deg, #25D366, #128C7E); display: inline-block; flex-shrink: 0; box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35); }
+        .brand span { color: #25D366; }
+        .nav-title { color: var(--muted2); font-size: 11px; font-weight: 700; letter-spacing: 0.8px; padding: 10px 12px; }
+        .nav a { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #B8C6DD; padding: 12px 14px; border-radius: var(--radius-sm); margin: 4px 0; font-size: 14px; font-weight: 500; transition: all .18s; border: 1px solid transparent; }
+        .nav a:hover { background: var(--panel2); color: white; transform: translateX(-2px); }
+        .nav a.active { background: linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06)); color: #fff; border-color: rgba(37,211,102,0.25); border-right: 3px solid var(--primary); }
+        .main { flex: 1; min-width: 0; padding: 30px 32px; max-width: 900px; margin: 0 auto; width: 100%; }
+        h1 { font-size: 27px; font-weight: 800; margin: 0 0 6px; }
+        .subtitle { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
+        h2 { font-size: 17px; font-weight: 700; margin: 0 0 16px; display: flex; align-items: center; gap: 9px; }
+        h2::before { content: ""; width: 4px; height: 20px; background: var(--primary); border-radius: 99px; display: inline-block; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow-sm); margin-bottom: 20px; }
+        label { display: block; margin: 14px 0 7px; font-size: 13px; font-weight: 600; color: #CBD6EA; }
+        input, select { width: 100%; padding: 12px 14px; background: #0B1326; color: #fff; border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; font-size: 14px; transition: border-color .18s, box-shadow .18s; }
+        input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+        input::placeholder { color: #5A6B8A; }
+        .btn { border: 0; border-radius: var(--radius-sm); padding: 13px 22px; background: linear-gradient(135deg, #2EE56F, #1EB85A); color: #06130B; cursor: pointer; font-weight: 700; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 6px 16px rgba(37,211,102,0.28); transition: all .18s; width: 100%; }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 9px 20px rgba(37,211,102,0.35); }
+        .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-secondary { background: var(--panel2); color: #E2EAFB; border: 1px solid var(--border-light); box-shadow: none; }
+        .btn-secondary:hover { background: var(--panel-hover); }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .test-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 15px; background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 10px; font-size: 14px; }
+        .test-item:last-child { margin-bottom: 0; }
+        .test-name { font-weight: 600; }
+        .test-desc { font-size: 12px; color: var(--muted); margin-top: 3px; }
+        .badge { font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 999px; white-space: nowrap; }
+        .badge.wait { background: rgba(255,255,255,0.06); color: var(--muted); border: 1px solid var(--border); }
+        .badge.ok { background: rgba(34,197,94,0.14); color: #4ADE80; border: 1px solid rgba(34,197,94,0.3); }
+        .badge.fail { background: rgba(239,68,68,0.12); color: #FCA5A5; border: 1px solid rgba(239,68,68,0.3); }
+        .badge.run { background: rgba(245,158,11,0.14); color: #FCD34D; border: 1px solid rgba(245,158,11,0.3); }
+        .message { display: none; padding: 13px 15px; border-radius: var(--radius-sm); margin-top: 14px; font-size: 13px; line-height: 1.8; font-weight: 500; border: 1px solid transparent; white-space: pre-wrap; word-break: break-word; }
+        .message.show { display: block; }
+        .message.error { background: var(--danger-bg); color: #FECACA; border-color: rgba(239,68,68,0.35); }
+        .message.success { background: var(--success-bg); color: #A7F3D0; border-color: rgba(34,197,94,0.35); }
+        .message.info { background: var(--info-bg); color: #BFDBFE; border-color: rgba(59,130,246,0.35); }
+        .log { background: #0B1326; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.8; direction: ltr; text-align: left; max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+        .hint { font-size: 12px; color: var(--muted); line-height: 1.8; background: rgba(255,255,255,0.02); padding: 10px 12px; border-radius: 8px; border: 1px dashed var(--border); margin-top: 12px; }
+        .hint code { background: rgba(37,211,102,0.12); color: #A7F3D0; padding: 2px 6px; border-radius: 5px; }
+        @media(max-width: 900px) { .sidebar { display: none; } .row { grid-template-columns: 1fr; } }
+        @media(max-width: 600px) { .main { padding: 16px; } }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="brand">Chat<span>Platform</span></div>
+        <div class="nav-title">القائمة الرئيسية</div>
+        <nav class="nav">
+            <a href="/">لوحة التكاملات</a>
+            <a href="/inbox.html">صندوق المحادثات</a>
+            <a href="/whatsapp.html">إدارة WhatsApp</a>
+            <a href="/templates.html">قوالب الرسائل</a>
+            <a href="/settings.html">الإعدادات</a>
+            <a href="/privacy.html">الخصوصية</a>
+            <a href="/test-whatsapp.html" class="active">اختبار واتساب</a>
+        </nav>
+    </aside>
+
+    <main class="main">
+        <h1>اختبار واتساب بيزنس - v26.0</h1>
+        <div class="subtitle">اضغط زر واحد، وبيختبر لك الخادم والـ Webhook والتوكن والإرسال كلها.</div>
+
+        <div class="card">
+            <h2>1 - الفحص التلقائي</h2>
+            <div class="test-item">
+                <div><div class="test-name">الخادم</div><div class="test-desc">GET /health</div></div>
+                <span class="badge wait" id="t-health">بانتظار</span>
+            </div>
+            <div class="test-item">
+                <div><div class="test-name">معلومات المنصة</div><div class="test-desc">GET /api/platform-info</div></div>
+                <span class="badge wait" id="t-platform">بانتظار</span>
+            </div>
+            <div class="test-item">
+                <div><div class="test-name">حالة Webhook</div><div class="test-desc">GET /api/whatsapp/webhook-status</div></div>
+                <span class="badge wait" id="t-webhook">بانتظار</span>
+            </div>
+            <div class="test-item">
+                <div><div class="test-name">إعدادات واتساب</div><div class="test-desc">AccessToken + PhoneNumberId + VerifyToken + AppSecret</div></div>
+                <span class="badge wait" id="t-config">بانتظار</span>
+            </div>
+
+            <button class="btn" id="runAutoBtn" type="button" style="margin-top:16px">▶ تشغيل الفحص التلقائي</button>
+            <div id="autoMsg" class="message"></div>
+        </div>
+
+        <div class="card">
+            <h2>2 - اختبار إرسال رسالة عادية (نافذة 24 ساعة)</h2>
+            <div class="hint">مهم: ارسل أولاً رسالة من جوالك لرقم البيزنس، بعدين جرب الإرسال من هنا. إذا ما ارسلت أولاً، Meta بترفض برسالة <code>131048</code>.</div>
+            <label for="phoneText">رقم المستلم - بصيغة دولية بدون +</label>
+            <input id="phoneText" placeholder="967770000000" inputmode="numeric">
+            <label for="textMsg">نص الرسالة</label>
+            <input id="textMsg" value="مرحبا، هذه رسالة اختبار من ChatPlatform v26.0 ✅">
+            <button class="btn btn-secondary" id="sendTextBtn" type="button" style="margin-top:14px">إرسال رسالة عادية</button>
+            <div id="textMsgResult" class="message"></div>
+        </div>
+
+        <div class="card">
+            <h2>3 - اختبار إرسال قالب (بعد 24 ساعة)</h2>
+            <div class="hint">القالب لازم يكون معتمد في Meta، ونفس اللغة <code>ar_EG</code>. إذا كان القالب بـ <code>ar</code> فقط، بيعطيك خطأ <code>132002</code>.</div>
+            <label for="phoneTpl">رقم المستلم</label>
+            <input id="phoneTpl" placeholder="967770000000" inputmode="numeric">
+            <div class="row">
+                <div>
+                    <label for="tplName">اسم القالب</label>
+                    <input id="tplName" placeholder="hello_world">
+                </div>
+                <div>
+                    <label for="tplLang">اللغة</label>
+                    <select id="tplLang">
+                        <option value="ar_EG" selected>ar_EG - عربي مصر</option>
+                        <option value="ar_SA">ar_SA - عربي سعودي</option>
+                        <option value="en_US">en_US - انجليزي</option>
+                    </select>
+                </div>
+            </div>
+            <label for="tplParam">متغير {{1}} - اختياري</label>
+            <input id="tplParam" placeholder="مثال: مختار">
+            <button class="btn btn-secondary" id="sendTplBtn" type="button" style="margin-top:14px">إرسال قالب</button>
+            <div id="tplMsgResult" class="message"></div>
+        </div>
+
+        <div class="card">
+            <h2>سجل الاختبار - انسخه وارسله لي إذا طلع خطأ</h2>
+            <div class="log" id="logBox">بانتظار بدء الاختبار...</div>
+            <button class="btn btn-secondary" id="copyLogBtn" type="button" style="margin-top:12px">نسخ السجل</button>
+        </div>
+    </main>
+</div>
+
+<script src="/api.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+function log(msg) {
+    const box = $("logBox");
+    const time = new Date().toLocaleTimeString("ar-EG");
+    box.textContent += `\n[${time}] ${msg}`;
+    box.scrollTop = box.scrollHeight;
+}
+function setBadge(id, state, text) {
+    const el = $(id);
+    el.className = "badge " + state;
+    el.textContent = text;
+}
+function show(el, text, type) {
+    el.textContent = text;
+    el.className = "message show " + type;
+}
+function explainError(e) {
+    if (e.metaCode === 131048) return "انتهت نافذة 24 ساعة. ارسل رسالة من جوالك للبيزنس أولاً، أو استخدم قالب.";
+    if (e.metaCode === 132002) return "لغة القالب غير مطابقة. تأكد أن القالب في Meta بنفس اللغة ar_EG.";
+    if (e.metaCode === 132000) return "القالب غير موجود أو غير معتمد في Meta.";
+    if (e.metaCode === 190) return "التوكن منتهي. جدد Access Token من Meta.";
+    if (e.metaCode === 131030) return "الرقم غير مسجل في واتساب.";
+    if (e.status === 404) return "الرابط غير موجود في السيرفر. تأكد أنك نسخت EndpointMapper الجديد.";
+    if (e.status === 401 || e.status === 403) return "مشكلة مصادقة. تأكد من ApiKey أو التوكن.";
+    return e.message || "خطأ غير معروف";
+}
+
+$("runAutoBtn").addEventListener("click", async () => {
+    const btn = $("runAutoBtn");
+    btn.disabled = true;
+    btn.textContent = "جاري الفحص...";
+    $("logBox").textContent = "بدء فحص واتساب v26.0...";
+    let allOk = true;
+
+    // 1 - Health
+    setBadge("t-health", "run", "جاري...");
+    try {
+        const h = await ChatPlatformAPI.getHealth();
+        setBadge("t-health", "ok", "✅ شغال");
+        log("Health: OK - " + JSON.stringify(h));
+    } catch (e) {
+        setBadge("t-health", "fail", "❌ فشل");
+        log("Health FAILED: " + explainError(e));
+        allOk = false;
+    }
+
+    // 2 - Platform Info
+    setBadge("t-platform", "run", "جاري...");
+    try {
+        const p = await ChatPlatformAPI.getPlatformInfo();
+        setBadge("t-platform", "ok", "✅ شغال");
+        log("PlatformInfo: OK - webhook=" + (p.endpoints?.whatsappWebhook || "-"));
+    } catch (e) {
+        setBadge("t-platform", "fail", "❌ فشل");
+        log("PlatformInfo FAILED: " + explainError(e));
+        allOk = false;
+    }
+
+    // 3 + 4 - Webhook Status + Config
+    setBadge("t-webhook", "run", "جاري...");
+    setBadge("t-config", "run", "جاري...");
+    try {
+        const w = await ChatPlatformAPI.getWebhookStatus();
+        log("WebhookStatus: " + JSON.stringify(w, null, 2));
+        if (w.configured) {
+            setBadge("t-webhook", "ok", "✅ مكون");
+            setBadge("t-config", "ok", "✅ مكتمل");
+            log("Config: AccessToken=" + (w.configured ? "موجود" : "مفقود") + " | PhoneId=" + (w.phoneNumberId || "-") + " | ApiVersion=" + (w.apiVersion || "-") + " | VerifyToken=" + (w.verifyTokenConfigured ? "موجود" : "مفقود") + " | AppSecret=" + (w.appSecretConfigured ? "موجود" : "مفقود ⚠️"));
+            if (w.apiVersion && w.apiVersion !== "v26.0") {
+                log("⚠️ تحذير: إصدارك " + w.apiVersion + " وليس v26.0. غير ApiVersion في appsettings.json إلى v26.0");
+            }
+            if (!w.appSecretConfigured) log("⚠️ تحذير: AppSecret غير مكون. لن يتم التحقق من توقيع Meta.");
+            if (!w.verifyTokenConfigured) { log("❌ خطأ: VerifyToken غير مكون. لن يقبل Meta الـ Webhook."); allOk = false; }
+        } else {
+            setBadge("t-webhook", "fail", "❌ غير مكون");
+            setBadge("t-config", "fail", "❌ ناقص");
+            log("❌ إعدادات واتساب ناقصة في appsettings.json");
+            allOk = false;
+        }
+    } catch (e) {
+        setBadge("t-webhook", "fail", "❌ فشل");
+        setBadge("t-config", "fail", "❌ فشل");
+        log("WebhookStatus FAILED: " + explainError(e));
+        allOk = false;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "▶ تشغيل الفحص التلقائي";
+    show($("autoMsg"), allOk ? "✅ الفحص التلقائي نجح. الآن جرب إرسال رسالة وقالب في الأسفل." : "⚠️ فيه مشكلة في الفحص. انسخ السجل من الأسفل وارسله لي.", allOk ? "success" : "error");
+});
+
+$("sendTextBtn").addEventListener("click", async () => {
+    const btn = $("sendTextBtn");
+    const to = $("phoneText").value.trim();
+    const text = $("textMsg").value.trim();
+    if (!to || !text) { show($("textMsgResult"), "ادخل الرقم والنص أولاً.", "error"); return; }
+    btn.disabled = true; btn.textContent = "جاري الإرسال...";
+    try {
+        const res = await ChatPlatformAPI.sendMessage(to, text);
+        log("SendText SUCCESS: " + JSON.stringify(res));
+        show($("textMsgResult"), "✅ وصلت الرسالة! ID: " + (res.messages?.[0]?.id || JSON.stringify(res)), "success");
+    } catch (e) {
+        log("SendText FAILED code=" + e.metaCode + " msg=" + e.message + " details=" + JSON.stringify(e.details));
+        show($("textMsgResult"), "❌ فشل: " + explainError(e) + "\n\nالتفاصيل: " + e.message + (e.metaCode ? " (كود Meta: " + e.metaCode + ")" : ""), "error");
+    } finally { btn.disabled = false; btn.textContent = "إرسال رسالة عادية"; }
+});
+
+$("sendTplBtn").addEventListener("click", async () => {
+    const btn = $("sendTplBtn");
+    const to = $("phoneTpl").value.trim();
+    const name = $("tplName").value.trim();
+    const lang = $("tplLang").value;
+    const param = $("tplParam").value.trim();
+    if (!to || !name) { show($("tplMsgResult"), "ادخل الرقم واسم القالب أولاً.", "error"); return; }
+    btn.disabled = true; btn.textContent = "جاري الإرسال...";
+    try {
+        const res = await ChatPlatformAPI.sendTemplateMessage(to, name, lang, param ? [param] : []);
+        log("SendTemplate SUCCESS: " + JSON.stringify(res));
+        show($("tplMsgResult"), "✅ وصل القالب! ID: " + (res.messages?.[0]?.id || JSON.stringify(res)), "success");
+    } catch (e) {
+        log("SendTemplate FAILED code=" + e.metaCode + " msg=" + e.message + " details=" + JSON.stringify(e.details));
+        show($("tplMsgResult"), "❌ فشل: " + explainError(e) + "\n\nالتفاصيل: " + e.message + (e.metaCode ? " (كود Meta: " + e.metaCode + ")" : ""), "error");
+    } finally { btn.disabled = false; btn.textContent = "إرسال قالب"; }
+});
+
+$("copyLogBtn").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("logBox").textContent); alert("تم نسخ السجل ✅"); }
+    catch { alert("تعذر النسخ، حدد النص يدوياً"); }
+});
+</script>
+</body>
+</html>
