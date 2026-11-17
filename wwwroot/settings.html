@@ -3,57 +3,85 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0A0F1E">
 <title>إعدادات المنصة | ChatPlatform</title>
 
 <style>
 :root {
-    --bg:#0b1120;
-    --panel:#111c30;
-    --border:#24334d;
-    --text:#e8eef8;
-    --muted:#91a3bd;
-    --primary:#477cf5;
-    --green:#16a879;
-    --red:#e05252;
+    --bg: #0A0F1E;
+    --sidebar: #0D1428;
+    --panel: #111A30;
+    --panel2: #16213D;
+    --panel-hover: #1A2745;
+    --border: #1E2D4D;
+    --border-light: #2A3B60;
+    --text: #F1F5FF;
+    --muted: #8B9BB8;
+    --muted2: #6B7C9D;
+    --primary: #25D366;
+    --primary-glow: rgba(37, 211, 102, 0.18);
+    --success: #22C55E;
+    --success-bg: #0F2A1D;
+    --danger: #EF4444;
+    --danger-bg: #3A161C;
+    --warning: #F59E0B;
+    --warning-bg: #49391B;
+    --info-bg: #162A4D;
+    --radius: 14px;
+    --radius-sm: 10px;
+    --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.18);
 }
 *{box-sizing:border-box}
 body{
     margin:0;
     background:var(--bg);
     color:var(--text);
-    font-family:Tahoma,Arial,sans-serif;
+    font-family:'Segoe UI', Tahoma, Arial, sans-serif;
+    line-height:1.6;
 }
+button, input, select, textarea { font: inherit; }
 .layout{display:flex;min-height:100vh}
 aside{
-    width:230px;
-    background:#0e192b;
+    width:260px;
+    background:var(--sidebar);
     border-left:1px solid var(--border);
-    padding:22px 14px;
+    padding:28px 16px;
     flex-shrink:0;
+    position:sticky;top:0;height:100vh;
 }
-.logo{font-size:21px;font-weight:bold;margin:5px 10px 30px}
+.logo{font-size:22px;font-weight:800;letter-spacing:-0.3px;margin:0 12px 38px;display:flex;align-items:center;gap:10px}
+.logo::before{content:"";width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#25D366,#128C7E);display:inline-block;flex-shrink:0;box-shadow:0 4px 14px rgba(37,211,102,0.35)}
+.logo span{color:var(--primary)}
+.nav-title{color:var(--muted2);font-size:11px;font-weight:700;letter-spacing:0.8px;padding:10px 12px}
 nav a{
-    display:block;
-    color:var(--muted);
+    display:flex;align-items:center;gap:10px;
+    color:#B8C6DD;
     text-decoration:none;
-    padding:13px;
-    border-radius:9px;
-    margin:5px 0;
+    padding:12px 14px;
+    border-radius:var(--radius-sm);
+    margin:4px 0;
+    font-size:14px;font-weight:500;
+    transition:all .18s ease;
+    border:1px solid transparent;
 }
-nav a:hover,nav a.active{
-    background:#1c3152;
-    color:white;
+nav a:hover{background:var(--panel2);color:white;transform:translateX(-2px)}
+nav a.active{
+    background:linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06));
+    color:#fff;border-color:rgba(37,211,102,0.25);border-right:3px solid var(--primary);
 }
-main{flex:1;padding:28px;min-width:0}
-h1{font-size:25px;margin:0 0 8px}
-.subtitle{color:var(--muted);margin-bottom:25px}
+main{flex:1;padding:30px 32px;min-width:0;max-width:1280px;margin:0 auto;width:100%}
+h1{font-size:27px;font-weight:800;letter-spacing:-0.4px;margin:0 0 6px}
+.subtitle{color:var(--muted);margin-bottom:26px;font-size:13.5px}
 .card{
     background:var(--panel);
     border:1px solid var(--border);
-    border-radius:13px;
-    padding:20px;
+    border-radius:var(--radius);
+    padding:22px;
     margin-bottom:20px;
+    box-shadow:var(--shadow-sm);
 }
+.card h3{font-size:17px;font-weight:700;margin:0 0 18px;display:flex;align-items:center;gap:9px}
+.card h3::before{content:"";width:4px;height:20px;background:var(--primary);border-radius:99px;display:inline-block}
 .grid{
     display:grid;
     grid-template-columns:repeat(2,minmax(0,1fr));
@@ -62,50 +90,62 @@ h1{font-size:25px;margin:0 0 8px}
 label{
     display:block;
     font-size:13px;
-    color:var(--muted);
+    font-weight:600;
+    color:#CBD6EA;
     margin-bottom:7px;
 }
 input,select,textarea{
     width:100%;
-    padding:12px;
-    background:#0b1527;
+    padding:12px 14px;
+    background:#0B1326;
     color:white;
     border:1px solid var(--border);
-    border-radius:8px;
+    border-radius:var(--radius-sm);
     outline:none;
+    font-size:14px;
+    transition:border-color .18s, box-shadow .18s;
 }
-input:disabled{
-    opacity:.65;
-    cursor:not-allowed;
-}
+input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-glow);background:#0D1730}
+input:disabled{opacity:.65;cursor:not-allowed}
+input[readonly]{background:#0B1326;color:#CBD6EA}
 button{
     border:0;
-    border-radius:8px;
-    padding:11px 18px;
-    background:var(--primary);
-    color:white;
+    border-radius:var(--radius-sm);
+    padding:12px 20px;
+    background:linear-gradient(135deg,#2EE56F,#1EB85A);
+    color:#06130B;
     cursor:pointer;
-    font-weight:bold;
+    font-weight:700;
+    font-size:14px;
+    box-shadow:0 6px 16px rgba(37,211,102,0.28);
+    transition:all .18s ease;
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;
 }
-button:disabled{opacity:.5;cursor:not-allowed}
-.secondary{background:#263750}
-.actions{display:flex;gap:10px;margin-top:15px;flex-wrap:wrap}
+button:hover{transform:translateY(-1px)}
+button:disabled{opacity:.55;cursor:not-allowed;transform:none;box-shadow:none}
+.secondary{background:var(--panel2);color:#E2EAFB;border:1px solid var(--border-light);box-shadow:none}
+.secondary:hover{background:var(--panel-hover)}
+.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
 .status{
-    display:inline-block;
-    padding:6px 10px;
-    border-radius:20px;
-    background:#124a3c;
-    color:#8af0c9;
-    font-size:12px;
+    display:inline-flex;align-items:center;gap:6px;
+    padding:7px 13px;
+    border-radius:999px;
+    background:rgba(34,197,94,0.14);
+    color:#4ADE80;
+    border:1px solid rgba(34,197,94,0.25);
+    font-size:12px;font-weight:700;
+    white-space:nowrap;
 }
+.status.warn{background:var(--warning-bg);color:#FCD34D;border-color:rgba(245,158,11,0.3)}
+.status.fail{background:var(--danger-bg);color:#FCA5A5;border-color:rgba(239,68,68,0.3)}
 .warning{
-    background:#49391b;
-    color:#ffe09a;
-    border:1px solid #715726;
-    border-radius:9px;
-    padding:13px;
+    background:var(--warning-bg);
+    color:#FDE68A;
+    border:1px solid rgba(245,158,11,0.3);
+    border-radius:var(--radius-sm);
+    padding:14px 16px;
     line-height:1.8;
-    font-size:13px;
+    font-size:12.5px;
 }
 .info{
     color:var(--muted);
@@ -113,32 +153,34 @@ button:disabled{opacity:.5;cursor:not-allowed}
     line-height:1.9;
 }
 #message{
-    margin-top:12px;
-    color:#9ec0ff;
+    margin-top:14px;
     font-size:13px;
+    line-height:1.7;
+    font-weight:500;
 }
+#message:not(:empty){padding:12px 14px;border-radius:var(--radius-sm);background:var(--panel2);border:1px solid var(--border);color:#BFDBFE}
 .item{
     display:flex;
     justify-content:space-between;
     align-items:center;
     gap:12px;
-    padding:13px 0;
+    padding:14px 0;
     border-bottom:1px solid var(--border);
 }
 .item:last-child{border-bottom:0}
-.item-title{font-size:14px}
-.item-desc{font-size:12px;color:var(--muted);margin-top:5px}
+.item-title{font-size:14px;font-weight:600}
+.item-desc{font-size:12px;color:var(--muted);margin-top:4px}
 code{
-    color:#a7c5ff;
+    color:#93C5FD;
+    background:rgba(59,130,246,0.1);
+    padding:2px 6px;border-radius:5px;
     word-break:break-all;
+    font-size:12px;
 }
+.hint{font-size:11.5px;color:var(--muted);line-height:1.8;background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:8px;border:1px dashed var(--border);margin-top:8px}
 @media(max-width:800px){
     .layout{display:block}
-    aside{
-        width:100%;
-        border-left:0;
-        border-bottom:1px solid var(--border);
-    }
+    aside{width:100%;height:auto;position:static;border-left:0;border-bottom:1px solid var(--border)}
     nav{display:flex;overflow-x:auto;gap:5px}
     nav a{white-space:nowrap}
     main{padding:16px}
@@ -152,10 +194,10 @@ code{
 <div class="layout">
 
 <aside>
-    <div class="logo">ChatPlatform</div>
-
+    <div class="logo">Chat<span>Platform</span></div>
+    <div class="nav-title">القائمة الرئيسية</div>
     <nav>
-        <a href="/">لوحة التحكم</a>
+        <a href="/index.html">لوحة التحكم</a>
         <a href="/inbox.html">صندوق المحادثات</a>
         <a href="/whatsapp.html">حسابات واتساب</a>
         <a href="/autoreply.html">الرد الآلي</a>
@@ -170,7 +212,7 @@ code{
     <h1>إعدادات المنصة</h1>
 
     <div class="subtitle">
-        معلومات النظام وحالة الخدمات وإعدادات الاتصال والأمان.
+        معلومات النظام وحالة الخدمات وإعدادات الاتصال والأمان - Graph API v26.0
     </div>
 
     <!-- Platform Status -->
@@ -182,7 +224,7 @@ code{
         <div class="item">
             <div>
                 <div class="item-title">حالة الخادم</div>
-                <div class="item-desc">الاتصال بخادم ChatPlatform</div>
+                <div class="item-desc">الاتصال بخادم ChatPlatform - GET /health</div>
             </div>
             <span id="serverStatus" class="status">جارٍ الفحص...</span>
         </div>
@@ -190,21 +232,31 @@ code{
         <div class="item">
             <div>
                 <div class="item-title">معلومات المنصة</div>
-                <div class="item-desc">إصدار النظام وبيانات التشغيل</div>
+                <div class="item-desc">إصدار النظام وبيانات التشغيل - GET /api/platform-info</div>
             </div>
             <span id="platformStatus" class="status">جارٍ الفحص...</span>
+        </div>
+
+        <div class="item">
+            <div>
+                <div class="item-title">حالة واتساب - v26.0</div>
+                <div class="item-desc" id="waDesc">فحص التوكن و Webhook والإصدار من الباكيند</div>
+            </div>
+            <span id="waStatus" class="status">جارٍ الفحص...</span>
         </div>
 
         <div class="actions">
             <button class="secondary" onclick="loadSystemStatus()">
                 تحديث الحالة
             </button>
+            <button class="secondary" onclick="window.location.href='/test-whatsapp.html'">
+                🧪 فتح صفحة الاختبار
+            </button>
         </div>
 
     </section>
 
-
-    <!-- Organization -->
+    <!-- Organization - ربط حقيقي الآن -->
 
     <section class="card">
 
@@ -213,26 +265,23 @@ code{
         <div class="grid">
 
             <div>
-                <label>معرّف المؤسسة Tenant ID</label>
-                <input id="tenantId" placeholder="أدخل معرّف المؤسسة">
+                <label>المؤسسة - من قاعدة البيانات</label>
+                <select id="tenantId">
+                    <option value="">جاري تحميل المؤسسات...</option>
+                </select>
+                <div class="hint">يتم جلب المؤسسات من الباكيند <code>GET /api/whatsapp/tenants</code>، وليست مكتوبة يدوياً.</div>
             </div>
 
             <div>
-                <label>اسم المؤسسة</label>
-                <input id="tenantName" placeholder="اسم المؤسسة">
+                <label>اسم المؤسسة المختارة</label>
+                <input id="tenantName" readonly placeholder="اختر مؤسسة من القائمة">
             </div>
 
-        </div>
-
-        <div class="warning" style="margin-top:15px">
-            هذه الصفحة لا تعدّل بيانات المؤسسة في قاعدة البيانات.
-            يجب ربطها لاحقاً بواجهة إدارة المؤسسات في Backend.
         </div>
 
     </section>
 
-
-    <!-- WhatsApp -->
+    <!-- WhatsApp - ربط حقيقي مع الباكيند + v26.0 -->
 
     <section class="card">
 
@@ -241,8 +290,9 @@ code{
         <div class="grid">
 
             <div>
-                <label>رابط Webhook</label>
-                <input id="webhookUrl" readonly>
+                <label>رابط Webhook - من الباكيند</label>
+                <input id="webhookUrl" readonly placeholder="جاري الجلب من الباكيند...">
+                <div class="hint">هذا الرابط يأتي من الباكيند، وليس من <code>window.location.origin</code>، عشان يشتغل صح وراء Proxy.</div>
             </div>
 
             <div>
@@ -252,12 +302,22 @@ code{
 
             <div>
                 <label>حالة تكامل واتساب</label>
-                <input value="تعتمد على إعداد الخادم وحساب Meta" readonly>
+                <input id="waConfigured" value="جاري الفحص..." readonly>
             </div>
 
             <div>
-                <label>إصدار Meta Graph API</label>
-                <input value="v21.0" readonly>
+                <label>إصدار Meta Graph API - من الباكيند</label>
+                <input id="apiVersion" value="جاري الفحص..." readonly>
+            </div>
+
+            <div>
+                <label>Phone Number ID</label>
+                <input id="phoneId" value="—" readonly>
+            </div>
+
+            <div>
+                <label>Verify Token / App Secret</label>
+                <input id="secretsStatus" value="جاري الفحص..." readonly>
             </div>
 
         </div>
@@ -265,10 +325,10 @@ code{
         <p class="info">
             يتم ضبط Verify Token وApp Secret ورموز الوصول في إعدادات
             الخادم ومتغيرات البيئة، وليس داخل هذه الصفحة.
+            إذا كان الإصدار ليس <code>v26.0</code>، غير <code>ApiVersion</code> في <code>appsettings.json</code>.
         </p>
 
     </section>
-
 
     <!-- Security -->
 
@@ -293,7 +353,7 @@ code{
                     يجب تفعيل نظام تسجيل الدخول والصلاحيات.
                 </div>
             </div>
-            <span id="authStatus" class="status">يتطلب التحقق</span>
+            <span id="authStatus" class="status warn">يتطلب التحقق</span>
         </div>
 
         <div class="item">
@@ -303,11 +363,10 @@ code{
                     يجب التحقق من Tenant لكل عملية API.
                 </div>
             </div>
-            <span class="status">يتطلب تحققاً خادمياً</span>
+            <span class="status warn">يتطلب تحققاً خادمياً</span>
         </div>
 
     </section>
-
 
     <!-- API Information -->
 
@@ -340,14 +399,21 @@ code{
             </div>
         </div>
 
-    </section>
+        <div class="item">
+            <div>
+                <div class="item-title">Webhook - المسار الصحيح</div>
+                <div class="item-desc">
+                    <code>/webhook</code> - وليس <code>/api/webhook</code>
+                </div>
+            </div>
+        </div>
 
+    </section>
 
     <div id="message"></div>
 
 </main>
 </div>
-
 
 <script src="/api.js"></script>
 
@@ -355,108 +421,114 @@ code{
 
 const $ = id => document.getElementById(id);
 
-function setStatus(id,text,success){
-    const element = $(id);
-
-    element.textContent = text;
-
-    element.style.background = success
-        ? "#124a3c"
-        : "#49391b";
-
-    element.style.color = success
-        ? "#8af0c9"
-        : "#ffe09a";
+function setStatus(id,text,state){
+    const el = $(id);
+    el.textContent = text;
+    el.className = "status " + (state || "");
 }
 
-
 // =====================================
-// PLATFORM STATUS
+// PLATFORM STATUS - ربط حقيقي
 // =====================================
 
 async function loadSystemStatus(){
+    setStatus("serverStatus","جارٍ الفحص...","warn");
+    setStatus("platformStatus","جارٍ الفحص...","warn");
+    setStatus("waStatus","جارٍ الفحص...","warn");
 
-    $("serverStatus").textContent = "جارٍ الفحص...";
-    $("platformStatus").textContent = "جارٍ الفحص...";
-
+    // 1 - Health
     try{
-
-        const health = await ChatPlatformAPI.getHealth();
-
-        setStatus(
-            "serverStatus",
-            "متصل",
-            true
-        );
-
-    }catch(error){
-
-        setStatus(
-            "serverStatus",
-            "غير متصل",
-            false
-        );
+        await ChatPlatformAPI.getHealth();
+        setStatus("serverStatus","متصل ✅","");
+    }catch(e){
+        setStatus("serverStatus","غير متصل ❌","fail");
     }
 
+    // 2 - Platform Info
     try{
-
         const info = await ChatPlatformAPI.getPlatformInfo();
-
-        setStatus(
-            "platformStatus",
-            "تم الاتصال",
-            true
-        );
-
+        setStatus("platformStatus","تم الاتصال ✅","");
         if(info && typeof info === "object"){
-
             if(info.version){
-                $("message").textContent =
-                    "إصدار المنصة: " + info.version;
+                $("message").textContent = "إصدار المنصة: " + info.version + (info.apiVersion ? " | واتساب API: " + info.apiVersion : "");
             }
-
             if(info.name){
                 document.title = info.name + " | الإعدادات";
             }
         }
+    }catch(e){
+        setStatus("platformStatus","غير متاح ❌","fail");
+    }
 
-    }catch(error){
+    // 3 - WhatsApp v26.0 - ربط حقيقي مع الباكيند - هذا هو الأهم
+    await loadWhatsAppSettings();
+}
 
-        setStatus(
-            "platformStatus",
-            "غير متاح",
-            false
-        );
+// =====================================
+// TENANTS - ربط حقيقي بدل input وهمي
+// =====================================
+async function loadTenants(){
+    const select = $("tenantId");
+    try{
+        const result = await ChatPlatformAPI.getTenants();
+        const items = Array.isArray(result) ? result : result.items || [];
+        select.replaceChildren(new Option("اختر المؤسسة...",""));
+        items.forEach(item=>{
+            const id = item.id || item.tenantId;
+            const name = item.name || item.phoneNumberId || id;
+            if(id) select.add(new Option(name, id));
+        });
+        // حفظ الأسماء للعرض
+        select._items = items;
+    }catch(e){
+        select.replaceChildren(new Option("فشل تحميل المؤسسات",""));
     }
 }
-
+$("tenantId").addEventListener("change", ()=>{
+    const select = $("tenantId");
+    const found = (select._items || []).find(x => (x.id || x.tenantId) === select.value);
+    $("tenantName").value = found ? (found.name || found.phoneNumberId || found.id) : "";
+});
 
 // =====================================
-// WEBHOOK URL
+// WHATSAPP SETTINGS - من الباكيند + v26.0
 // =====================================
+async function loadWhatsAppSettings(){
+    try{
+        const w = await ChatPlatformAPI.getWebhookStatus(); // GET /api/whatsapp/webhook-status
+        const apiVersion = w.apiVersion || "غير معروف";
+        $("apiVersion").value = apiVersion;
+        $("phoneId").value = w.phoneNumberId || "—";
+        $("webhookUrl").value = w.webhookUrl || (window.location.origin + "/webhook");
+        $("waConfigured").value = w.configured ? "مكون ✅" : "غير مكون ❌";
+        $("secretsStatus").value = "VerifyToken: " + (w.verifyTokenConfigured ? "موجود ✅" : "مفقود ❌") + " | AppSecret: " + (w.appSecretConfigured ? "موجود ✅" : "مفقود ⚠️");
 
-function loadWebhookUrl(){
-
-    $("webhookUrl").value =
-        window.location.origin + "/webhook";
-
+        if(!w.configured){
+            setStatus("waStatus","غير مكون ❌","fail");
+            $("waDesc").textContent = "أكمل إعداد واتساب من صفحة إدارة WhatsApp.";
+        } else if(apiVersion !== "v26.0"){
+            setStatus("waStatus","تحذير: " + apiVersion + " ⚠️","warn");
+            $("waDesc").textContent = "إصدارك " + apiVersion + " وليس v26.0 - غير ApiVersion في appsettings.json.";
+        } else {
+            setStatus("waStatus","متصل - v26.0 ✅","");
+            $("waDesc").textContent = "واتساب متوافق مع Graph API v26.0";
+        }
+    }catch(e){
+        $("apiVersion").value = "تعذر الجلب من الباكيند";
+        $("webhookUrl").value = window.location.origin + "/webhook";
+        setStatus("waStatus","تعذر الفحص ❌","fail");
+        $("waDesc").textContent = "تأكد أن EndpointMapper.cs فيه GET /api/whatsapp/webhook-status";
+    }
 }
-
 
 // =====================================
 // INITIALIZATION
 // =====================================
-
 document.addEventListener("DOMContentLoaded",()=>{
-
     $("origin").textContent = window.location.origin;
-
-    loadWebhookUrl();
-
+    loadTenants();
     loadSystemStatus();
-
 });
-
 </script>
 
 </body>
