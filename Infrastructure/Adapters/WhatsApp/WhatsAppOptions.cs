@@ -7,7 +7,7 @@ public sealed class WhatsAppOptions
     public const string SectionName = "WhatsApp";
 
     // هذا المتغير سيُقرأ من appsettings.json أو من متغير البيئة WHATSAPP_GRAPH_API_VERSION
-    public string GraphApiVersion { get; set; } = "v21.0";
+    public string GraphApiVersion { get; set; } = "v26.0";
 
     // يربط الخاصية بالمتغير: WHATSAPP_PHONE_NUMBER_ID
     [ConfigurationKeyName("WHATSAPP_PHONE_NUMBER_ID")]
