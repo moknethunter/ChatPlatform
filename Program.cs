@@ -10,6 +10,7 @@ using ChatPlatform.Infrastructure.Engine;
 using ChatPlatform.Infrastructure.Messaging;
 using ChatPlatform.Hubs;
 using ChatPlatform.Middleware;
+using ChatPlatform.Endpoints; // تمت الإضافة لاستخدام ApiEndpoints
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Polly;
@@ -18,11 +19,11 @@ using Polly.Extensions.Http;
 var builder = WebApplication.CreateBuilder(args);
 
 // ============================================================
-// 1. WhatsApp Configuration (Binding is handled in AddWhatsAppAdapter)
+// 1. WhatsApp Configuration
 // ============================================================
-
-// تم حذف قاموس whatsappEnvironmentSettings لأن الربط يتم الآن تلقائياً
-// عبر [ConfigurationKeyName] في ملف WhatsAppOptions.cs
+// تم حذف قاموس whatsappEnvironmentSettings بالكامل.
+// الربط يتم تلقائياً عبر [ConfigurationKeyName] في WhatsAppOptions.cs
+// وعبر AddWhatsAppAdapter أدناه.
 
 // ============================================================
 // 2. Database
@@ -170,10 +171,9 @@ app.UseStaticFiles();
 // 11. Platform Information
 // ============================================================
 
-app.MapGet("/api/platform-info", (HttpRequest request) =>
+app.MapGet(ApiEndpoints.PlatformInfo, (HttpRequest request) =>
 {
-    var baseUrl =
-        $"{request.Scheme}://{request.Host}";
+    var baseUrl = $"{request.Scheme}://{request.Host}";
 
     return Results.Ok(new
     {
@@ -182,11 +182,11 @@ app.MapGet("/api/platform-info", (HttpRequest request) =>
 
         endpoints = new
         {
-            whatsappWebhook = $"{baseUrl}/webhook",
-            events = $"{baseUrl}/api/events",
-            connectors = $"{baseUrl}/api/connectors",
-            whatsappOnboarding = $"{baseUrl}/api/whatsapp/exchange-code",
-            health = $"{baseUrl}/health"
+            whatsappWebhook = $"{baseUrl}{ApiEndpoints.WhatsAppWebhook}",
+            events = $"{baseUrl}{ApiEndpoints.Events}",
+            connectors = $"{baseUrl}{ApiEndpoints.Connectors}",
+            whatsappOnboarding = $"{baseUrl}{ApiEndpoints.WhatsAppOnboarding}",
+            health = $"{baseUrl}{ApiEndpoints.Health}"
         },
 
         legal = new
@@ -202,7 +202,7 @@ app.MapGet("/api/platform-info", (HttpRequest request) =>
 // 12. Connectors API
 // ============================================================
 
-var connectorsGroup = app.MapGroup("/api/connectors");
+var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);
 
 connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
 {
@@ -235,7 +235,7 @@ connectorsGroup.MapPost(
 // ============================================================
 
 app.MapPost(
-    "/api/inbound/{platform}",
+    ApiEndpoints.InboundByPlatform,
     async (
         string platform,
         HttpRequest request,
@@ -279,7 +279,7 @@ app.MapPost(
 // ============================================================
 
 app.MapPost(
-    "/api/events",
+    ApiEndpoints.Events,
     async (
         HttpRequest request,
         IEventBus bus,
@@ -325,7 +325,7 @@ app.MapPost(
 // 15. Health Check
 // ============================================================
 
-app.MapGet("/health", () =>
+app.MapGet(ApiEndpoints.Health, () =>
 {
     return Results.Ok(new
     {
@@ -338,15 +338,14 @@ app.MapGet("/health", () =>
 // 16. SignalR Hub
 // ============================================================
 
-app.MapHub<ChatHub>("/hub/chat");
+app.MapHub<ChatHub>(ApiEndpoints.ChatHub);
 
 // ============================================================
 // 17. WhatsApp Meta Webhook
 // ============================================================
 
-// GET  /webhook : Meta verification
-// POST /webhook : Incoming messages and statuses
-app.MapWhatsAppWebhook(builder.Configuration);
+// تم إزالة builder.Configuration لأن الدالة أصبحت لا تحتاجه
+app.MapWhatsAppWebhook();
 
 // ============================================================
 // 18. Controllers
