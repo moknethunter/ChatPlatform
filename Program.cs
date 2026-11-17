@@ -80,17 +80,22 @@ else
 {
     Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
 }
+// لا تنشئ new WhatsAppOptions يدوي - اقرأه من Configuration عشان يطبق [ConfigurationKeyName]
+var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
 
-// سجلها في DI عشان باقي الكود يستخدمها
-builder.Services.AddSingleton(new WhatsAppOptions
+// إذا البيئة فيها متغيرات، هي أولى - Configuration يجيبها تلقائياً
+builder.Services.AddSingleton(whatsappOptions);
+
+if (!whatsappOptions.IsConfigured)
 {
-    AccessToken = whatsappToken,
-    PhoneNumberId = phoneNumberId,
-    VerifyToken = verifyToken,
-    AppSecret = appSecret,
-    ApiVersion = apiVersion
-});
+    Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
 }
+else
+{
+    Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
+}
+
+
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
