@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options; // تمت الإضافة لاستخدام IOptions
 
 namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 
@@ -54,22 +55,16 @@ public static class WhatsAppExtensions
 
     public static IEndpointRouteBuilder MapWhatsAppWebhook(
         this IEndpointRouteBuilder app,
-        IConfiguration configuration)
+        IConfiguration configuration) // يمكنك إزالة هذا المعامل لاحقاً من Program.cs إذا أردت
     {
-        var verifyToken =
-            Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
-            ?? Environment.GetEnvironmentVariable("VERIFY_TOKEN")
-            ?? configuration["WhatsApp:VerifyToken"];
-
-        var appSecret =
-            Environment.GetEnvironmentVariable("META_APP_SECRET")
-            ?? Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
-            ?? configuration["WhatsApp:AppSecret"];
+        // تم حذف قراءة Environment.GetEnvironmentVariable لأننا سنستخدم IOptions
 
         // GET /webhook
         // Meta verification handshake.
-        app.MapGet("/webhook", (HttpContext context) =>
+        app.MapGet("/webhook", (HttpContext context, IOptions<WhatsAppOptions> options) =>
         {
+            var verifyToken = options.Value.VerifyToken;
+
             if (string.IsNullOrWhiteSpace(verifyToken))
                 return Results.StatusCode(503);
 
@@ -104,11 +99,14 @@ public static class WhatsAppExtensions
                 HttpContext context,
                 PlatformDbContext db,
                 IWhatsAppTenantResolver tenantResolver,
+                IOptions<WhatsAppOptions> options, // تمت الإضافة هنا
                 ILoggerFactory loggerFactory,
                 CancellationToken ct) =>
             {
                 var logger =
                     loggerFactory.CreateLogger("WhatsApp.Webhook");
+
+                var appSecret = options.Value.AppSecret;
 
                 if (string.IsNullOrWhiteSpace(appSecret))
                 {
