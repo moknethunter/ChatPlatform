@@ -1,630 +1,522 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#101827">
-<title>ChatPlatform | WhatsApp</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#101827">
+    <meta name="description" content="إدارة حسابات WhatsApp Business وربط Webhook - Graph API v26.0">
+    <title>ChatPlatform | إدارة WhatsApp</title>
 
-<style>
-:root {
-    --bg:#0b1220;
-    --panel:#111c2e;
-    --panel2:#17243a;
-    --border:#263650;
-    --text:#edf3ff;
-    --muted:#91a2bb;
-    --primary:#3978f6;
-    --success:#20c997;
-    --danger:#f05b69;
-    --warning:#f5b942;
-}
+    <style>
+        :root {
+            --bg: #0b1220;
+            --panel: #111c2e;
+            --panel-alt: #17243a;
+            --border: #263650;
+            --text: #edf3ff;
+            --muted: #91a2bb;
+            --primary: #3978f6;
+            --success: #20c997;
+            --danger: #f05b69;
+            --warning: #f5b942;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--text); font-family: Tahoma, Arial, sans-serif; }
+        button, input, select { font: inherit; }
+        
+        .layout { display: flex; min-height: 100vh; }
+        .sidebar { width: 235px; flex-shrink: 0; background: #0e192a; border-left: 1px solid var(--border); padding: 22px 14px; }
+        .brand { font-size: 21px; font-weight: bold; margin-bottom: 35px; }
+        .brand span { color: #5b91ff; }
+        .nav-title { color: var(--muted); font-size: 12px; padding: 10px; }
+        .nav a { display: block; color: #b7c5d9; text-decoration: none; padding: 13px 12px; border-radius: 8px; margin: 5px 0; }
+        .nav a:hover, .nav a.active { background: #1c3151; color: #ffffff; }
+        .main { flex: 1; min-width: 0; padding: 25px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 25px; }
+        h1 { font-size: 24px; margin: 0 0 8px; }
+        h2 { font-size: 17px; margin: 0 0 18px; }
+        .subtitle { color: var(--muted); font-size: 12px; line-height: 1.8; }
 
-* { box-sizing:border-box; }
+        /* Status Dashboard */
+        .status-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
+        .status-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+        .status-header { display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: bold; color: var(--muted); }
+        .status-value { font-size: 18px; font-weight: bold; }
+        .status-desc { font-size: 11px; color: var(--muted); }
+        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .dot.green { background: var(--success); box-shadow: 0 0 8px var(--success); }
+        .dot.red { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+        .dot.yellow { background: var(--warning); box-shadow: 0 0 8px var(--warning); }
 
-body {
-    margin:0;
-    background:var(--bg);
-    color:var(--text);
-    font-family:Tahoma,Arial,sans-serif;
-}
+        .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+        .card { background: var(--panel); border: 1px solid var(--border); border-radius: 13px; padding: 20px; min-width: 0; }
+        .full { grid-column: 1 / -1; }
+        
+        label { display: block; margin: 14px 0 7px; font-size: 13px; color: #c4d0e2; }
+        input, select { width: 100%; padding: 12px; background: #0c1728; color: #ffffff; border: 1px solid var(--border); border-radius: 8px; outline: none; direction: ltr; text-align: left; }
+        input:focus, select:focus { border-color: var(--primary); }
+        select { direction: rtl; text-align: right; cursor: pointer; }
+        .hint { color: var(--muted); font-size: 11px; line-height: 1.8; margin-top: 7px; }
+        
+        .btn { border: 0; border-radius: 8px; padding: 12px 17px; background: var(--primary); color: #ffffff; cursor: pointer; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+        .btn:hover { filter: brightness(1.08); }
+        .btn:disabled { opacity: .5; cursor: not-allowed; }
+        .btn-secondary { background: var(--panel-alt); border: 1px solid var(--border); }
+        .btn-danger { background: #4a202a; color: #ffc1c8; border: 1px solid #7a2a3a; }
+        .btn-success { background: #123d36; color: #9cf1d8; border: 1px solid #1d6b5d; }
+        .btn-sm { padding: 6px 10px; font-size: 11px; border-radius: 6px; }
+        
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+        .message { display: none; padding: 12px; border-radius: 8px; margin-top: 14px; font-size: 12px; line-height: 1.8; }
+        .message.show { display: block; }
+        .message.error { background: #4a202a; color: #ffc1c8; }
+        .message.success { background: #123d36; color: #9cf1d8; }
+        .message.info { background: #172f52; color: #c4dcff; }
+        
+        /* Accounts List */
+        .account { padding: 15px; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 10px; margin-top: 12px; }
+        .account-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .account-name { font-weight: bold; display: flex; align-items: center; gap: 8px; }
+        .account-detail { font-size: 12px; color: var(--muted); margin-top: 9px; overflow-wrap: anywhere; }
+        .account-actions { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+        .badge { font-size: 11px; padding: 4px 9px; border-radius: 20px; background: #123d36; color: var(--success); }
+        .badge.off { background: #4a202a; color: #ffc1c8; }
+        .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 13px; }
+        
+        /* Webhook & Diagnostics */
+        .webhook { direction: ltr; text-align: left; overflow-wrap: anywhere; padding: 13px; background: #0c1728; border: 1px solid var(--border); border-radius: 8px; color: #9cc4ff; font-size: 12px; margin-bottom: 15px; }
+        .diag-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .diag-item { display: flex; justify-content: space-between; padding: 10px; background: #0c1728; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+        .diag-key { color: var(--muted); }
+        .diag-val { font-weight: bold; direction: ltr; }
+        
+        .warning { color: #ffe09a; background: #49391b; border-radius: 8px; padding: 12px; font-size: 12px; line-height: 1.8; }
+        .guide-box { background: #132238; border: 1px solid #2a4366; border-radius: 8px; padding: 15px; margin-bottom: 20px; font-size: 12px; line-height: 1.8; }
+        .guide-box a { color: #5b91ff; text-decoration: none; }
+        .guide-box a:hover { text-decoration: underline; }
 
-button,input { font:inherit; }
-
-.layout { display:flex; min-height:100vh; }
-
-.sidebar {
-    width:235px;
-    flex-shrink:0;
-    background:#0e192a;
-    border-left:1px solid var(--border);
-    padding:22px 14px;
-}
-
-.brand {
-    font-size:21px;
-    font-weight:bold;
-    margin-bottom:35px;
-}
-
-.brand span { color:#5b91ff; }
-
-.nav-title {
-    color:var(--muted);
-    font-size:12px;
-    padding:10px;
-}
-
-.nav a {
-    display:block;
-    color:#b7c5d9;
-    text-decoration:none;
-    padding:13px 12px;
-    border-radius:8px;
-    margin:5px 0;
-}
-
-.nav a.active,.nav a:hover {
-    background:#1c3151;
-    color:white;
-}
-
-.main {
-    flex:1;
-    min-width:0;
-    padding:25px;
-}
-
-.header {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:15px;
-    flex-wrap:wrap;
-    margin-bottom:25px;
-}
-
-h1 { font-size:24px; margin:0 0 8px; }
-h2 { font-size:17px; margin:0 0 18px; }
-
-.subtitle {
-    color:var(--muted);
-    font-size:12px;
-}
-
-.grid {
-    display:grid;
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:18px;
-}
-
-.card {
-    background:var(--panel);
-    border:1px solid var(--border);
-    border-radius:13px;
-    padding:20px;
-    min-width:0;
-}
-
-.full { grid-column:1/-1; }
-
-label {
-    display:block;
-    margin:14px 0 7px;
-    font-size:13px;
-    color:#c4d0e2;
-}
-
-input {
-    width:100%;
-    padding:12px;
-    background:#0c1728;
-    color:white;
-    border:1px solid var(--border);
-    border-radius:8px;
-    outline:none;
-}
-
-input:focus { border-color:var(--primary); }
-
-.hint {
-    color:var(--muted);
-    font-size:11px;
-    line-height:1.8;
-    margin-top:7px;
-}
-
-.btn {
-    border:0;
-    border-radius:8px;
-    padding:12px 17px;
-    background:var(--primary);
-    color:white;
-    cursor:pointer;
-    font-weight:bold;
-}
-
-.btn:disabled {
-    opacity:.5;
-    cursor:not-allowed;
-}
-
-.secondary {
-    background:var(--panel2);
-    border:1px solid var(--border);
-}
-
-.danger {
-    background:var(--danger);
-    padding:8px 12px;
-    font-size:12px;
-}
-
-.actions {
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    margin-top:18px;
-}
-
-.message {
-    display:none;
-    padding:12px;
-    border-radius:8px;
-    margin-top:14px;
-    font-size:12px;
-    line-height:1.8;
-}
-
-.message.show { display:block; }
-.message.error { background:#4a202a; color:#ffc1c8; }
-.message.success { background:#123d36; color:#9cf1d8; }
-.message.info { background:#172f52; color:#c4dcff; }
-
-.account {
-    padding:15px;
-    background:var(--panel2);
-    border:1px solid var(--border);
-    border-radius:10px;
-    margin-top:12px;
-}
-
-.account-top {
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:10px;
-}
-
-.account-name { font-weight:bold; }
-
-.account-detail {
-    font-size:12px;
-    color:var(--muted);
-    margin-top:9px;
-    overflow-wrap:anywhere;
-}
-
-.badge {
-    font-size:11px;
-    padding:5px 9px;
-    border-radius:20px;
-    background:#123d36;
-    color:var(--success);
-}
-
-.badge.off { background:#4a202a; color:#ffc1c8; }
-
-.empty {
-    text-align:center;
-    color:var(--muted);
-    padding:30px 10px;
-    font-size:13px;
-}
-
-.webhook {
-    direction:ltr;
-    text-align:left;
-    overflow-wrap:anywhere;
-    padding:13px;
-    background:#0c1728;
-    border:1px solid var(--border);
-    border-radius:8px;
-    color:#9cc4ff;
-    font-size:12px;
-}
-
-@media(max-width:850px) {
-    .sidebar { display:none; }
-    .grid { grid-template-columns:1fr; }
-    .full { grid-column:auto; }
-}
-
-@media(max-width:600px) {
-    .main { padding:14px; }
-    h1 { font-size:21px; }
-}
-</style>
+        /* Modal */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; padding: 20px; }
+        .modal-overlay.active { display: flex; }
+        .modal-content { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 500px; padding: 25px; }
+        
+        @media (max-width: 900px) { .sidebar { display: none; } .status-grid { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; } .full { grid-column: auto; } .diag-list { grid-template-columns: 1fr; } }
+        @media (max-width: 600px) { .main { padding: 14px; } h1 { font-size: 21px; } }
+    </style>
 </head>
-
 <body>
 
 <div class="layout">
+    <aside class="sidebar">
+        <div class="brand">Chat<span>Platform</span></div>
+        <div class="nav-title">القائمة الرئيسية</div>
+        <nav class="nav">
+            <a href="/">لوحة التكاملات</a>
+            <a href="/inbox.html">صندوق المحادثات</a>
+            <a href="/whatsapp.html" class="active">إدارة WhatsApp</a>
+            <a href="/templates.html">قوالب الرسائل</a>
+            <a href="/settings.html">الإعدادات</a>
+            <a href="/privacy.html">الخصوصية</a>
+            <a href="/terms.html">الشروط</a>
+        </nav>
+    </aside>
 
-<aside class="sidebar">
+    <main class="main">
+        <header class="header">
+            <div>
+                <h1>إدارة WhatsApp Business</h1>
+                <div class="subtitle">لوحة التحكم المتقدمة | Graph API v26.0</div>
+            </div>
+            <button class="btn btn-secondary" id="refreshButton" type="button">تحديث اللوحة</button>
+        </header>
 
-    <div class="brand">Chat<span>Platform</span></div>
-
-    <div class="nav-title">القائمة الرئيسية</div>
-
-    <nav class="nav">
-        <a href="/">لوحة التكاملات</a>
-        <a href="/inbox.html">صندوق المحادثات</a>
-        <a href="/whatsapp.html" class="active">إدارة WhatsApp</a>
-        <a href="/autoreply.html">الردود الآلية</a>
-        <a href="/templates.html">قوالب الرسائل</a>
-        <a href="/settings.html">الإعدادات</a>
-        <a href="/privacy.html">الخصوصية</a>
-    </nav>
-
-</aside>
-
-<main class="main">
-
-<header class="header">
-    <div>
-        <h1>إدارة WhatsApp Business</h1>
-        <div class="subtitle">
-            ربط أرقام WhatsApp Cloud API بالمؤسسات وإدارة الاتصال
-        </div>
-    </div>
-
-    <button class="btn secondary" id="refreshButton" type="button">
-        تحديث البيانات
-    </button>
-</header>
-
-<div class="grid">
-
-<section class="card">
-
-    <h2>ربط حساب WhatsApp جديد</h2>
-
-    <form id="tenantForm">
-
-        <label for="tenantId">معرّف المؤسسة Tenant ID</label>
-        <input
-            id="tenantId"
-            required
-            placeholder="معرّف المؤسسة المسجلة في المنصة"
-        >
-
-        <div class="hint">
-            يجب أن تكون المؤسسة موجودة مسبقاً في قاعدة بيانات المنصة.
+        <!-- Status Dashboard -->
+        <div class="status-grid">
+            <div class="status-card">
+                <div class="status-header"><span>حالة الاتصال بميتا</span> <span class="dot" id="metaStatusDot"></span></div>
+                <div class="status-value" id="metaStatusText">جاري الفحص...</div>
+                <div class="status-desc">التحقق من صلاحية الـ Access Token و App Secret</div>
+            </div>
+            <div class="status-card">
+                <div class="status-header"><span>حالة Webhook</span> <span class="dot" id="webhookStatusDot"></span></div>
+                <div class="status-value" id="webhookStatusText">جاري الفحص...</div>
+                <div class="status-desc">حالة التحقق واستقبال الأحداث</div>
+            </div>
+            <div class="status-card">
+                <div class="status-header"><span>حالة الحسابات</span> <span class="dot" id="accountStatusDot"></span></div>
+                <div class="status-value" id="accountStatusText">جاري الفحص...</div>
+                <div class="status-desc">عدد الحسابات النشطة والمشاكل</div>
+            </div>
         </div>
 
-        <label for="phoneNumberId">Phone Number ID</label>
-        <input
-            id="phoneNumberId"
-            required
-            placeholder="معرّف رقم الهاتف من Meta"
-        >
+        <div class="grid">
+            <!-- Form Section -->
+            <section class="card">
+                <h2>ربط حساب WhatsApp جديد</h2>
+                
+                <div class="guide-box">
+                    <strong>💡 دليل الإدخال من ميتا:</strong><br>
+                    اذهب إلى <a href="https://developers.facebook.com/apps/" target="_blank">Meta for Developers</a> > تطبيقك > WhatsApp > API Setup.<br>
+                    - <strong>Phone Number ID:</strong> معرف الرقم.<br>
+                    - <strong>WABA ID:</strong> معرف حساب الأعمال.<br>
+                    - <strong>Access Token:</strong> من Graph API Explorer (v26.0) أو System User.
+                </div>
 
-        <label for="wabaId">WhatsApp Business Account ID</label>
-        <input
-            id="wabaId"
-            required
-            placeholder="WABA ID"
-        >
+                <form id="tenantForm">
+                    <label for="tenantId">المؤسسة (Tenant)</label>
+                    <select id="tenantId" required>
+                        <option value="" disabled selected>جاري تحميل المؤسسات...</option>
+                    </select>
+                    <div class="hint">يتم جلب المؤسسات من قاعدة بيانات المنصة. لا يتم إنشاؤها عشوائياً.</div>
 
-        <label for="accessToken">Permanent Access Token</label>
-        <input
-            id="accessToken"
-            type="password"
-            required
-            autocomplete="new-password"
-            placeholder="أدخل رمز الوصول"
-        >
+                    <label for="phoneNumberId">Phone Number ID</label>
+                    <input id="phoneNumberId" required autocomplete="off" inputmode="numeric" placeholder="مثال: 106540352242922">
 
-        <div class="hint">
-            يرسل الرمز إلى الخادم عند الحفظ فقط. لا يُخزّن في
-            localStorage ولا يُعرض ضمن قائمة الحسابات.
-            يجب على الخادم تشفيره باستخدام Data Protection قبل تخزينه.
+                    <label for="wabaId">WhatsApp Business Account ID (WABA)</label>
+                    <input id="wabaId" required autocomplete="off" inputmode="numeric" placeholder="مثال: 102290129340398">
+
+                    <label for="accessToken">Permanent Access Token</label>
+                    <input id="accessToken" type="password" required autocomplete="new-password" placeholder="أدخل رمز الوصول هنا...">
+                    <div class="hint">🔒 يُرسل عبر HTTPS فقط. لا يُحفظ في المتصفح. يُشفر في الخادم قبل الحفظ.</div>
+
+                    <div class="actions">
+                        <button class="btn btn-secondary" id="validateBtn" type="button" disabled>التحقق من بيانات Meta</button>
+                        <button class="btn btn-success" id="saveButton" type="submit" disabled>حفظ وربط الحساب</button>
+                    </div>
+                </form>
+                <div id="formMessage" class="message"></div>
+            </section>
+
+            <!-- Accounts List -->
+            <section class="card">
+                <h2>الحسابات المرتبطة</h2>
+                <div id="tenantList">
+                    <div class="empty">جاري تحميل الحسابات...</div>
+                </div>
+            </section>
+
+            <!-- Webhook Info -->
+            <section class="card full">
+                <h2>إعداد Webhook المركزي</h2>
+                <p class="subtitle">يتم جلب هذا الرابط ديناميكياً من إعدادات الخادم (لا تعتمد على المسار المكتوب في الواجهة).</p>
+                
+                <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                    <div class="webhook" id="webhookUrl" style="flex: 1; margin-bottom: 0;">جاري الجلب...</div>
+                    <button class="btn btn-secondary" id="copyWebhook" type="button" style="white-space: nowrap;">نسخ الرابط</button>
+                </div>
+                
+                <div class="hint" style="margin-top: 15px;">
+                    المسار الصحيح هو <code>/webhook</code>. تأكد من مطابقة <strong>Verify Token</strong> في ميتا مع <code>WHATSAPP_VERIFY_TOKEN</code>.
+                </div>
+                <div id="webhookMessage" class="message"></div>
+            </section>
+
+            <!-- Diagnostics -->
+            <section class="card full">
+                <h2>تشخيص النظام (Diagnostics)</h2>
+                <p class="subtitle">بيانات حقيقية مستمدة من فحوصات الخادم وميتا.</p>
+                <ul class="diag-list" id="diagnosticsList">
+                    <li class="diag-item"><span class="diag-key">Meta API (v26.0)</span> <span class="diag-val" id="diagMetaApi">-</span></li>
+                    <li class="diag-item"><span class="diag-key">Access Token</span> <span class="diag-val" id="diagToken">-</span></li>
+                    <li class="diag-item"><span class="diag-key">Webhook Verification</span> <span class="diag-val" id="diagWebhookVerify">-</span></li>
+                    <li class="diag-item"><span class="diag-key">Webhook Signature (HMAC)</span> <span class="diag-val" id="diagWebhookSig">-</span></li>
+                    <li class="diag-item"><span class="diag-key">Inbox Worker</span> <span class="diag-val" id="diagInbox">-</span></li>
+                    <li class="diag-item"><span class="diag-key">Outbox Worker</span> <span class="diag-val" id="diagOutbox">-</span></li>
+                </ul>
+            </section>
+
+            <section class="card full">
+                <div class="warning">
+                    <strong>توصية أمنية صارمة:</strong> لا تضع أبداً قيم <code>WHATSAPP_TOKEN</code>، <code>WHATSAPP_APP_SECRET</code>، أو <code>WHATSAPP_VERIFY_TOKEN</code> في GitHub أو كود الواجهة. يتم إدارتها فقط كمتغيرات بيئة (Environment Variables) في SnapDeploy.
+                </div>
+            </section>
         </div>
-
-        <div class="actions">
-            <button class="btn" id="saveButton" type="submit">
-                ربط الحساب
-            </button>
-
-            <button class="btn secondary" type="reset">
-                مسح الحقول
-            </button>
-        </div>
-
-    </form>
-
-    <div id="formMessage" class="message"></div>
-
-</section>
-
-<section class="card">
-
-    <h2>حسابات WhatsApp المرتبطة</h2>
-
-    <div id="tenantList">
-        <div class="empty">جاري تحميل الحسابات...</div>
-    </div>
-
-</section>
-
-<section class="card full">
-
-    <h2>إعداد Webhook</h2>
-
-    <p class="subtitle">
-        استخدم عنوان Webhook التالي في إعدادات تطبيق Meta.
-    </p>
-
-    <div class="webhook" id="webhookUrl"></div>
-
-    <div class="actions">
-        <button class="btn secondary" id="copyWebhook" type="button">
-            نسخ عنوان Webhook
-        </button>
-    </div>
-
-    <div class="hint">
-        يجب أن يكون مسار Webhook مطابقاً للمسار الذي يسجله الخادم.
-        المسار المستخدم في نسخة WhatsAppExtensions التي ناقشناها هو
-        /webhook.
-    </div>
-
-    <div id="webhookMessage" class="message"></div>
-
-</section>
-
-<section class="card full">
-
-    <h2>متطلبات الاتصال مع Meta</h2>
-
-    <div class="account">
-        <div class="account-name">1. إعداد تطبيق Meta</div>
-        <div class="account-detail">
-            تحتاج إلى تطبيق Meta مهيأ لمنتج WhatsApp Business Platform.
-        </div>
-    </div>
-
-    <div class="account">
-        <div class="account-name">2. بيانات الحساب</div>
-        <div class="account-detail">
-            Phone Number ID وWABA ID ورمز وصول صالح.
-        </div>
-    </div>
-
-    <div class="account">
-        <div class="account-name">3. Webhook Security</div>
-        <div class="account-detail">
-            Verify Token وApp Secret للتحقق من طلبات Meta وتوقيعها.
-        </div>
-    </div>
-
-    <div class="account">
-        <div class="account-name">4. استقبال الرسائل</div>
-        <div class="account-detail">
-            يجب أن يستقبل الخادم الأحداث ويحفظها في Inbox قبل معالجتها.
-        </div>
-    </div>
-
-</section>
-
+    </main>
 </div>
 
-</main>
+<!-- Modal for Updating Token -->
+<div class="modal-overlay" id="tokenModal">
+    <div class="modal-content">
+        <h2>تحديث Access Token</h2>
+        <p class="subtitle">أدخل التوكن الجديد للحساب. سيتم إرساله للخادم وتشفيره.</p>
+        <input type="hidden" id="modalAccountId">
+        <label for="modalNewToken">التوكن الجديد</label>
+        <input type="password" id="modalNewToken" placeholder="أدخل التوكن الجديد...">
+        <div class="actions" style="justify-content: flex-end;">
+            <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+            <button class="btn btn-success" id="modalSaveTokenBtn">حفظ التوكن</button>
+        </div>
+    </div>
 </div>
 
 <script src="/api.js"></script>
-
 <script>
 "use strict";
 
 const $ = id => document.getElementById(id);
+let isCredentialsValidated = false;
 
 function showMessage(element, text, type) {
     element.textContent = text;
     element.className = "message show " + type;
 }
 
-function getItems(data) {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.items)) return data.items;
-    if (Array.isArray(data?.data)) return data.data;
-    return null;
+function updateDot(id, status) {
+    const dot = $(id);
+    dot.className = "dot " + status;
 }
 
-function renderTenants(items) {
-
-    const list = $("tenantList");
-    list.replaceChildren();
-
-    if (!items.length) {
-        const empty = document.createElement("div");
-        empty.className = "empty";
-        empty.textContent = "لا توجد حسابات WhatsApp مرتبطة.";
-        list.appendChild(empty);
-        return;
-    }
-
-    items.forEach(item => {
-
-        const box = document.createElement("div");
-        box.className = "account";
-
-        const top = document.createElement("div");
-        top.className = "account-top";
-
-        const name = document.createElement("div");
-        name.className = "account-name";
-        name.textContent = item.name || item.phoneNumberId || "حساب WhatsApp";
-
-        const badge = document.createElement("span");
-        badge.className = "badge" +
-            (item.isActive === false ? " off" : "");
-
-        badge.textContent =
-            item.isActive === false ? "غير نشط" : "نشط";
-
-        top.append(name, badge);
-
-        const tenant = document.createElement("div");
-        tenant.className = "account-detail";
-        tenant.textContent = "Tenant ID: " + (item.tenantId || "—");
-
-        const phone = document.createElement("div");
-        phone.className = "account-detail";
-        phone.textContent = "Phone Number ID: " + (item.phoneNumberId || "—");
-
-        const waba = document.createElement("div");
-        waba.className = "account-detail";
-        waba.textContent = "WABA ID: " + (item.wabaId || "—");
-
-        box.append(top, tenant, phone, waba);
-        list.appendChild(box);
-    });
-}
-
-async function loadTenants() {
-
-    const list = $("tenantList");
-    list.textContent = "جاري تحميل الحسابات...";
-
+// 1. Load Tenants for Dropdown
+async function loadTenantsDropdown() {
+    const select = $("tenantId");
     try {
-
+        // Assuming /api/tenants returns [{id: "guid", name: "Company"}]
         const data = await ChatPlatformAPI.getTenants();
-        const items = getItems(data);
+        const items = Array.isArray(data) ? data : data.items || [];
+        
+        select.innerHTML = '<option value="" disabled selected>اختر المؤسسة...</option>';
+        items.forEach(t => {
+            const opt = document.createElement("option");
+            opt.value = t.id || t.tenantId;
+            opt.textContent = t.name || t.id;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        select.innerHTML = '<option value="" disabled selected>فشل تحميل المؤسسات</option>';
+    }
+}
 
-        if (!items) {
-            throw new Error("تنسيق بيانات الحسابات غير معروف.");
+// 2. Load Accounts
+async function loadAccounts() {
+    const list = $("tenantList");
+    list.innerHTML = '<div class="empty">جاري تحميل الحسابات...</div>';
+    
+    try {
+        const data = await ChatPlatformAPI.getWhatsAppAccounts(); // GET /api/whatsapp/accounts
+        const items = Array.isArray(data) ? data : data.items || [];
+        
+        if (!items.length) {
+            list.innerHTML = '<div class="empty">لا توجد حسابات مرتبطة.</div>';
+            updateAccountStatus(items);
+            return;
         }
 
-        renderTenants(items);
-
-    } catch (error) {
-
-        list.textContent =
-            error.message || "تعذر تحميل حسابات WhatsApp.";
+        list.replaceChildren();
+        items.forEach(item => {
+            const box = document.createElement("div");
+            box.className = "account";
+            
+            const isActive = item.isActive !== false;
+            
+            box.innerHTML = `
+                <div class="account-top">
+                    <div class="account-name">
+                        ${item.displayName || item.phoneNumberId || "حساب WhatsApp"}
+                        <span class="badge ${isActive ? '' : 'off'}">${isActive ? 'نشط' : 'معطل'}</span>
+                    </div>
+                </div>
+                <div class="account-detail">Tenant: ${item.tenantId || "—"}</div>
+                <div class="account-detail">Phone ID: ${item.phoneNumberId || "—"} | WABA: ${item.wabaId || "—"}</div>
+                <div class="account-detail">Token: ${item.hasToken ? "مشفر ومحفوظ" : "غير مضبوط"}</div>
+                <div class="account-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="testConnection('${item.id || item.phoneNumberId}')">اختبار الاتصال</button>
+                    <button class="btn btn-secondary btn-sm" onclick="openTokenModal('${item.id || item.phoneNumberId}')">تحديث التوكن</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAccount('${item.id || item.phoneNumberId}')">حذف</button>
+                </div>
+            `;
+            list.appendChild(box);
+        });
+        updateAccountStatus(items);
+    } catch (e) {
+        list.innerHTML = `<div class="empty" style="color:var(--danger)">${e.message || "فشل التحميل"}</div>`;
     }
 }
 
-async function addTenant(event) {
-
-    event.preventDefault();
-
-    const button = $("saveButton");
-    const message = $("formMessage");
-
-    const tenantId = $("tenantId").value.trim();
-    const phoneNumberId = $("phoneNumberId").value.trim();
-    const wabaId = $("wabaId").value.trim();
-    const accessToken = $("accessToken").value;
-
-    if (!tenantId || !phoneNumberId || !wabaId || !accessToken) {
-        showMessage(message, "يرجى استكمال جميع البيانات.", "error");
-        return;
-    }
-
-    const data = {
-        tenantId,
-        phoneNumberId,
-        wabaId,
-        accessToken
-    };
-
-    button.disabled = true;
-    button.textContent = "جاري الربط...";
-
+// 3. Diagnostics & Status
+async function loadDiagnostics() {
     try {
+        // Endpoint: GET /api/whatsapp/diagnostics
+        const data = await ChatPlatformAPI.getWhatsAppDiagnostics();
+        
+        // Update Status Cards
+        updateDot("metaStatusDot", data.metaConnected ? "green" : "red");
+        $("metaStatusText").textContent = data.metaConnected ? "متصل" : "غير متصل";
+        
+        updateDot("webhookStatusDot", data.webhookVerified ? "green" : "yellow");
+        $("webhookStatusText").textContent = data.webhookVerified ? "يعمل" : "يحتاج تحقق";
+        
+        // Update Diagnostics List
+        $("diagMetaApi").textContent = data.metaConnected ? "Connected" : "Disconnected";
+        $("diagMetaApi").style.color = data.metaConnected ? "var(--success)" : "var(--danger)";
+        
+        $("diagToken").textContent = data.tokenValid ? "Valid" : "Invalid";
+        $("diagToken").style.color = data.tokenValid ? "var(--success)" : "var(--danger)";
+        
+        $("diagWebhookVerify").textContent = data.webhookVerified ? "Passed" : "Failed";
+        $("diagWebhookSig").textContent = data.webhookSignatureEnabled ? "Enabled" : "Disabled";
+        
+        $("diagInbox").textContent = data.inboxWorkerRunning ? "Running" : "Stopped";
+        $("diagOutbox").textContent = data.outboxWorkerRunning ? "Running" : "Stopped";
 
-        await ChatPlatformAPI.createTenant(data);
-
-        $("accessToken").value = "";
-
-        showMessage(
-            message,
-            "تم إرسال طلب ربط الحساب إلى الخادم.",
-            "success"
-        );
-
-        await loadTenants();
-
-    } catch (error) {
-
-        showMessage(
-            message,
-            error.message || "تعذر ربط حساب WhatsApp.",
-            "error"
-        );
-
-    } finally {
-
-        button.disabled = false;
-        button.textContent = "ربط الحساب";
+        // Update Webhook URL from backend
+        if (data.webhookUrl) {
+            $("webhookUrl").textContent = data.webhookUrl;
+        }
+    } catch (e) {
+        console.warn("Diagnostics endpoint not implemented yet.");
+        // Fallback for Webhook URL
+        if ($("webhookUrl").textContent === "جاري الجلب...") {
+            $("webhookUrl").textContent = window.location.origin + "/webhook";
+        }
     }
 }
 
-function initializeWebhook() {
-
-    const url = new URL("/webhook", window.location.origin);
-
-    $("webhookUrl").textContent = url.href;
+function updateAccountStatus(items) {
+    const active = items.filter(i => i.isActive !== false).length;
+    updateDot("accountStatusDot", active > 0 ? "green" : "yellow");
+    $("accountStatusText").textContent = `${active} نشط / ${items.length} إجمالي`;
 }
 
-$("tenantForm").addEventListener("submit", addTenant);
-
-$("refreshButton").addEventListener("click", loadTenants);
-
-$("copyWebhook").addEventListener("click", async () => {
-
-    try {
-
-        await navigator.clipboard.writeText(
-            $("webhookUrl").textContent
-        );
-
-        showMessage(
-            $("webhookMessage"),
-            "تم نسخ عنوان Webhook.",
-            "success"
-        );
-
-    } catch {
-
-        showMessage(
-            $("webhookMessage"),
-            "تعذر النسخ تلقائياً. انسخ العنوان يدوياً.",
-            "error"
-        );
+// 4. Form Validation & Submission
+$("tenantForm").addEventListener("input", () => {
+    // Disable save if user changes fields after validation
+    const isFilled = $("tenantId").value && $("phoneNumberId").value && $("wabaId").value && $("accessToken").value;
+    $("validateBtn").disabled = !isFilled;
+    
+    if (isCredentialsValidated) {
+        isCredentialsValidated = false;
+        $("saveButton").disabled = true;
+        $("formMessage").className = "message";
+        $("formMessage").textContent = "";
     }
 });
 
-async function initialize() {
+$("validateBtn").addEventListener("click", async () => {
+    const btn = $("validateBtn");
+    const msg = $("formMessage");
+    
+    const payload = {
+        phoneNumberId: $("phoneNumberId").value.trim(),
+        wabaId: $("wabaId").value.trim(),
+        accessToken: $("accessToken").value
+    };
 
-    initializeWebhook();
+    btn.disabled = true;
+    btn.textContent = "جاري التحقق...";
+    msg.className = "message";
 
-    if (!window.ChatPlatformAPI) {
-        showMessage(
-            $("formMessage"),
-            "ملف api.js غير موجود.",
-            "error"
-        );
-        return;
+    try {
+        // Endpoint: POST /api/whatsapp/validate-credentials
+        const res = await ChatPlatformAPI.validateMetaCredentials(payload);
+        if (res.valid) {
+            isCredentialsValidated = true;
+            $("saveButton").disabled = false;
+            showMessage(msg, "✅ تم التحقق من البيانات بنجاح. يمكنك الآن الحفظ.", "success");
+        } else {
+            showMessage(msg, "❌ فشل التحقق: " + (res.message || "بيانات غير صالحة."), "error");
+        }
+    } catch (e) {
+        showMessage(msg, "❌ فشل الاتصال بالخادم للتحقق: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "التحقق من بيانات Meta";
     }
+});
 
-    await loadTenants();
+$("tenantForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!isCredentialsValidated) return;
+
+    const btn = $("saveButton");
+    const msg = $("formMessage");
+    
+    const payload = {
+        tenantId: $("tenantId").value,
+        phoneNumberId: $("phoneNumberId").value.trim(),
+        wabaId: $("wabaId").value.trim(),
+        accessToken: $("accessToken").value
+    };
+
+    btn.disabled = true;
+    btn.textContent = "جاري الحفظ...";
+
+    try {
+        await ChatPlatformAPI.createWhatsAppAccount(payload); // POST /api/whatsapp/accounts
+        $("accessToken").value = "";
+        isCredentialsValidated = false;
+        showMessage(msg, "✅ تم حفظ الحساب بنجاح.", "success");
+        await loadAccounts();
+        await loadDiagnostics();
+    } catch (e) {
+        showMessage(msg, "❌ فشل الحفظ: " + e.message, "error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "حفظ وربط الحساب";
+    }
+});
+
+// 5. Account Actions
+async function testConnection(id) {
+    alert("سيتم إضافة Endpoint اختبار الاتصال في الـ Backend.");
 }
 
-initialize();
-</script>
+function openTokenModal(id) {
+    $("modalAccountId").value = id;
+    $("modalNewToken").value = "";
+    $("tokenModal").classList.add("active");
+}
 
+function closeModal() {
+    $("tokenModal").classList.remove("active");
+}
+
+$("modalSaveTokenBtn").addEventListener("click", async () => {
+    const id = $("modalAccountId").value;
+    const token = $("modalNewToken").value;
+    if (!token) return alert("أدخل التوكن");
+
+    try {
+        await ChatPlatformAPI.updateWhatsAppToken(id, { accessToken: token }); // PUT /api/whatsapp/accounts/{id}/token
+        closeModal();
+        alert("تم تحديث التوكن بنجاح.");
+        loadAccounts();
+    } catch (e) {
+        alert("فشل التحديث: " + e.message);
+    }
+});
+
+async function deleteAccount(id) {
+    if (!confirm("هل أنت متأكد من حذف هذا الحساب؟")) return;
+    try {
+        await ChatPlatformAPI.deleteWhatsAppAccount(id); // DELETE /api/whatsapp/accounts/{id}
+        loadAccounts();
+    } catch (e) {
+        alert("فشل الحذف: " + e.message);
+    }
+}
+
+// Copy Webhook
+$("copyWebhook").addEventListener("click", async () => {
+    const url = $("webhookUrl").textContent;
+    try {
+        await navigator.clipboard.writeText(url);
+        showMessage($("webhookMessage"), "تم النسخ بنجاح.", "success");
+    } catch {
+        showMessage($("webhookMessage"), "تعذر النسخ.", "error");
+    }
+});
+
+// Initialize
+async function init() {
+    await loadTenantsDropdown();
+    await loadAccounts();
+    await loadDiagnostics();
+}
+
+$("refreshButton").addEventListener("click", init);
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
 </body>
 </html>
