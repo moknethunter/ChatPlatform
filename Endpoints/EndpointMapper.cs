@@ -93,7 +93,7 @@ public static class EndpointMapper
             {
                 configured = !string.IsNullOrWhiteSpace(section["AccessToken"]),
                 phoneNumberId = section["PhoneNumberId"],
-                apiVersion = section["ApiVersion"] ?? "v21.0",
+                apiVersion = section["ApiVersion"] ?? "v26.0",
                 webhookUrl = ApiEndpoints.WhatsAppWebhook,
                 verifyTokenConfigured = !string.IsNullOrWhiteSpace(section["VerifyToken"]),
                 appSecretConfigured = !string.IsNullOrWhiteSpace(section["AppSecret"])
