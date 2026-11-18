@@ -6,6 +6,7 @@ using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Hubs;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ChatPlatform.Endpoints;
 
@@ -86,17 +87,89 @@ public static class EndpointMapper
         app.MapWhatsAppWebhook();
 
         // 7. WhatsApp Meta - حالة Webhook - متوافق مع Meta فقط
-        app.MapGet(ApiEndpoints.WhatsAppWebhookStatus, () =>
+        app.MapGet(
+            ApiEndpoints.WhatsAppWebhookStatus,
+            (IOptions<WhatsAppOptions> options,
+             HttpRequest request) =>
         {
-            var section = configuration.GetSection("WhatsApp");
+            var whatsapp =
+                options.Value;
+
+            var token =
+                whatsapp.AccessToken;
+
+            var phoneNumberId =
+                whatsapp.PhoneNumberId;
+
+            var verifyToken =
+                whatsapp.VerifyToken;
+
+            var appSecret =
+                whatsapp.AppSecret;
+
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                token =
+                    Environment.GetEnvironmentVariable(
+                        "WHATSAPP_TOKEN");
+            }
+
+            if (string.IsNullOrWhiteSpace(phoneNumberId))
+            {
+                phoneNumberId =
+                    Environment.GetEnvironmentVariable(
+                        "WHATSAPP_PHONE_NUMBER_ID");
+            }
+
+            if (string.IsNullOrWhiteSpace(verifyToken))
+            {
+                verifyToken =
+                    Environment.GetEnvironmentVariable(
+                        "WHATSAPP_VERIFY_TOKEN");
+            }
+
+            if (string.IsNullOrWhiteSpace(appSecret))
+            {
+                appSecret =
+                    Environment.GetEnvironmentVariable(
+                        "WHATSAPP_APP_SECRET");
+            }
+
+            var forwardedProto =
+                request.Headers["X-Forwarded-Proto"]
+                    .FirstOrDefault();
+
+            var scheme =
+                string.Equals(
+                    forwardedProto,
+                    "https",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "https"
+                    : request.Scheme;
+
+            var baseUrl =
+                $"{scheme}://{request.Host}";
+
             return Results.Ok(new
             {
-                configured = !string.IsNullOrWhiteSpace(section["AccessToken"]),
-                phoneNumberId = section["PhoneNumberId"],
-                apiVersion = section["ApiVersion"] ?? "v26.0",
-                webhookUrl = ApiEndpoints.WhatsAppWebhook,
-                verifyTokenConfigured = !string.IsNullOrWhiteSpace(section["VerifyToken"]),
-                appSecretConfigured = !string.IsNullOrWhiteSpace(section["AppSecret"])
+                configured =
+                    !string.IsNullOrWhiteSpace(token) &&
+                    !string.IsNullOrWhiteSpace(phoneNumberId) &&
+                    !string.IsNullOrWhiteSpace(verifyToken),
+
+                phoneNumberId,
+
+                apiVersion =
+                    whatsapp.ApiVersion,
+
+                webhookUrl =
+                    $"{baseUrl}{ApiEndpoints.WhatsAppWebhook}",
+
+                verifyTokenConfigured =
+                    !string.IsNullOrWhiteSpace(verifyToken),
+
+                appSecretConfigured =
+                    !string.IsNullOrWhiteSpace(appSecret)
             });
         });
 
