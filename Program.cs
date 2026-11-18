@@ -21,11 +21,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
-    options.ForwardedHeaders =
-        ForwardedHeaders.XForwardedFor
-        | ForwardedHeaders.XForwardedProto;
-    options.KnownNetworks.Clear();
-    options.KnownProxies.Clear();
+options.ForwardedHeaders =
+ForwardedHeaders.XForwardedFor
+| ForwardedHeaders.XForwardedProto;
+options.KnownNetworks.Clear();
+options.KnownProxies.Clear();
 });
 
 // ============================================================
@@ -39,10 +39,10 @@ var whatsAppAppSecret = whatsAppSection["AppSecret"];
 var whatsAppApiVersion = whatsAppSection["ApiVersion"] ?? "v26.0";
 
 if (string.IsNullOrWhiteSpace(whatsAppToken) ||
-    string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
-    string.IsNullOrWhiteSpace(whatsAppVerifyToken))
+string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
+string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 {
-    // ===== إعدادات واتساب - لا توقف البرنامج إذا ناقصة =====
+// ===== إعدادات واتساب - لا توقف البرنامج إذا ناقصة =====
 var whatsappSection = builder.Configuration.GetSection("WhatsApp");
 
 string whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
@@ -68,8 +68,6 @@ if (string.IsNullOrWhiteSpace(whatsappToken) ||
     string.IsNullOrWhiteSpace(phoneNumberId) ||
     string.IsNullOrWhiteSpace(verifyToken))
 {
-    // ⚠️ لا ترمي Exception هنا - فقط حذر وكمل التشغيل
-    // عشان الواجهة تشتغل وتقدر تشوف رسالة الخطأ في /settings.html
     Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
     Console.WriteLine("المفقود: " +
         (string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
@@ -80,10 +78,12 @@ else
 {
     Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
 }
-// لا تنشئ new WhatsAppOptions يدوي - اقرأه من Configuration عشان يطبق [ConfigurationKeyName]
-var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
 
-// إذا البيئة فيها متغيرات، هي أولى - Configuration يجيبها تلقائياً
+// اقرأ الإعدادات من Configuration
+var whatsappOptions = builder.Configuration
+    .GetSection(WhatsAppOptions.SectionName)
+    .Get<WhatsAppOptions>() ?? new WhatsAppOptions();
+
 builder.Services.AddSingleton(whatsappOptions);
 
 if (!whatsappOptions.IsConfigured)
@@ -94,31 +94,31 @@ else
 {
     Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
 }
-}
 
+}
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
-    Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
+Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
 }
 
 // ============================================================
 // 2. Database
 // ============================================================
 builder.Services.AddDbContext<PlatformDbContext>(options =>
-    options.UseSqlite(
-        builder.Configuration.GetConnectionString("Default")
-        ?? "Data Source=chatplatform.db"));
+options.UseSqlite(
+builder.Configuration.GetConnectionString("Default")
+?? "Data Source=chatplatform.db"));
 
 // ============================================================
 // 3. Configuration and Data Protection
 // ============================================================
 builder.Services.Configure<EngineOptions>(
-    builder.Configuration.GetSection("EngineSettings"));
+builder.Configuration.GetSection("EngineSettings"));
 
 builder.Services.AddDataProtection()
-    .PersistKeysToDbContext<PlatformDbContext>()
-    .SetApplicationName("ChatPlatform");
+.PersistKeysToDbContext<PlatformDbContext>()
+.SetApplicationName("ChatPlatform");
 
 // ============================================================
 // 4. Event Bus and Core Engine
@@ -139,56 +139,58 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddHttpClient("ResilientClient")
-    .AddPolicyHandler(
-        HttpPolicyExtensions.HandleTransientHttpError()
-            .WaitAndRetryAsync(
-                3,
-                retryAttempt =>
-                    TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
+.AddPolicyHandler(
+HttpPolicyExtensions.HandleTransientHttpError()
+.WaitAndRetryAsync(
+3,
+retryAttempt =>
+TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
 // HttpClient الرسمي لواتساب - Meta Cloud API
 builder.Services.AddHttpClient("WhatsAppCloudApi", client =>
 {
-    client.BaseAddress = new Uri($"https://graph.facebook.com/{whatsAppApiVersion}/");
-    client.DefaultRequestHeaders.Authorization =
-        new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", whatsAppToken);
-    client.Timeout = TimeSpan.FromSeconds(30);
+client.BaseAddress = new Uri($"https://graph.facebook.com/{whatsAppApiVersion}/");
+client.DefaultRequestHeaders.Authorization =
+new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", whatsAppToken);
+client.Timeout = TimeSpan.FromSeconds(30);
 });
 
 // ============================================================
 // 7. SignalR and CORS
 // ============================================================
 var allowedOrigins =
-    builder.Configuration
-        .GetSection("Cors:AllowedOrigins")
-        .Get<string[]>()
-    ?? Array.Empty<string>();
+builder.Configuration
+.GetSection("Cors:AllowedOrigins")
+.Get<string[]>()
+?? Array.Empty<string>();
 
 builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
-    {
-        policy
-            .SetIsOriginAllowed(origin =>
-            {
-                if (!Uri.TryCreate(
-                    origin,
-                    UriKind.Absolute,
-                    out var uri))
-                    return false;
+options.AddDefaultPolicy(policy =>
+{
+policy
+.SetIsOriginAllowed(origin =>
+{
+if (!Uri.TryCreate(
+origin,
+UriKind.Absolute,
+out var uri))
+return false;
 
-                return allowedOrigins.Contains(
-                    uri.GetLeftPart(UriPartial.Authority),
-                    StringComparer.OrdinalIgnoreCase);
-            })
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials();
-    });
+            return allowedOrigins.Contains(
+                uri.GetLeftPart(UriPartial.Authority),
+                StringComparer.OrdinalIgnoreCase);
+        })
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
+});
+
 });
 
 // ============================================================
@@ -203,24 +205,25 @@ app.UseForwardedHeaders();
 // ============================================================
 using (var scope = app.Services.CreateScope())
 {
-    var db = scope.ServiceProvider
-        .GetRequiredService<PlatformDbContext>();
+var db = scope.ServiceProvider
+.GetRequiredService<PlatformDbContext>();
 
-    try
-    {
-        db.Database.EnsureCreated();
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider
-            .GetRequiredService<ILogger<Program>>();
+try
+{
+    db.Database.EnsureCreated();
+}
+catch (Exception ex)
+{
+    var logger = scope.ServiceProvider
+        .GetRequiredService<ILogger<Program>>();
 
-        logger.LogError(
-            ex,
-            "Failed to initialize ChatPlatform database.");
+    logger.LogError(
+        ex,
+        "Failed to initialize ChatPlatform database.");
 
-        throw;
-    }
+    throw;
+}
+
 }
 
 // ============================================================
@@ -233,9 +236,12 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ============================================================
-// 11. All Endpoints - من EndpointMapper فقط، بدون تكرار في Program.cs
+// 11. All Endpoints - Centralized Endpoint Mapping
 // ============================================================
 app.MapAllEndpoints(builder.Configuration);
+
+// تفعيل جميع Controllers المسجلة في المشروع
+app.MapControllers();
 
 // ============================================================
 // 12. Run
