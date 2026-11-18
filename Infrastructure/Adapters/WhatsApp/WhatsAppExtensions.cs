@@ -62,10 +62,21 @@ public static class WhatsAppExtensions
         // Meta verification handshake.
         app.MapGet(ApiEndpoints.WhatsAppWebhook, (HttpContext context, IOptions<WhatsAppOptions> options) =>
         {
-            var verifyToken = options.Value.VerifyToken;
+            var verifyToken =
+                options.Value.VerifyToken;
 
             if (string.IsNullOrWhiteSpace(verifyToken))
+            {
+                verifyToken =
+                    Environment.GetEnvironmentVariable(
+                        "WHATSAPP_VERIFY_TOKEN")
+                    ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(verifyToken))
+            {
                 return Results.StatusCode(503);
+            }
 
             var query = context.Request.Query;
 
@@ -103,7 +114,16 @@ public static class WhatsAppExtensions
                 CancellationToken ct) =>
             {
                 var logger = loggerFactory.CreateLogger("WhatsApp.Webhook");
-                var appSecret = options.Value.AppSecret;
+                var appSecret =
+                    options.Value.AppSecret;
+
+                if (string.IsNullOrWhiteSpace(appSecret))
+                {
+                    appSecret =
+                        Environment.GetEnvironmentVariable(
+                            "WHATSAPP_APP_SECRET")
+                        ?? string.Empty;
+                }
 
                 if (string.IsNullOrWhiteSpace(appSecret))
                 {
