@@ -1,3 +1,4 @@
+
 using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
@@ -46,55 +47,54 @@ string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 var whatsappSection = builder.Configuration.GetSection("WhatsApp");
 
 string whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
-    ?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
-    ?? whatsappSection["AccessToken"] ?? "";
+?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
+?? whatsappSection["AccessToken"] ?? "";
 
 string phoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
-    ?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
-    ?? whatsappSection["PhoneNumberId"] ?? "";
+?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
+?? whatsappSection["PhoneNumberId"] ?? "";
 
 string verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
-    ?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
-    ?? whatsappSection["VerifyToken"] ?? "";
+?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
+?? whatsappSection["VerifyToken"] ?? "";
 
 string appSecret = Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
-    ?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
-    ?? whatsappSection["AppSecret"] ?? "";
+?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
+?? whatsappSection["AppSecret"] ?? "";
 
 string apiVersion = Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
-    ?? whatsappSection["ApiVersion"] ?? "v26.0";
+?? whatsappSection["ApiVersion"] ?? "v26.0";
 
 if (string.IsNullOrWhiteSpace(whatsappToken) ||
-    string.IsNullOrWhiteSpace(phoneNumberId) ||
-    string.IsNullOrWhiteSpace(verifyToken))
+string.IsNullOrWhiteSpace(phoneNumberId) ||
+string.IsNullOrWhiteSpace(verifyToken))
 {
-    Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
-    Console.WriteLine("المفقود: " +
-        (string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
-        (string.IsNullOrWhiteSpace(phoneNumberId) ? "[PhoneNumberId] " : "") +
-        (string.IsNullOrWhiteSpace(verifyToken) ? "[VerifyToken] " : ""));
+// ⚠️ لا ترمي Exception هنا - فقط حذر وكمل التشغيل
+// عشان الواجهة تشتغل وتقدر تشوف رسالة الخطأ في /settings.html
+Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
+Console.WriteLine("المفقود: " +
+(string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
+(string.IsNullOrWhiteSpace(phoneNumberId) ? "[PhoneNumberId] " : "") +
+(string.IsNullOrWhiteSpace(verifyToken) ? "[VerifyToken] " : ""));
 }
 else
 {
-    Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
+Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
 }
+// لا تنشئ new WhatsAppOptions يدوي - اقرأه من Configuration عشان يطبق [ConfigurationKeyName]
+var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
 
-// اقرأ الإعدادات من Configuration
-var whatsappOptions = builder.Configuration
-    .GetSection(WhatsAppOptions.SectionName)
-    .Get<WhatsAppOptions>() ?? new WhatsAppOptions();
-
+// إذا البيئة فيها متغيرات، هي أولى - Configuration يجيبها تلقائياً
 builder.Services.AddSingleton(whatsappOptions);
 
 if (!whatsappOptions.IsConfigured)
 {
-    Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
+Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
 }
 else
 {
-    Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
+Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
 }
-
 }
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
@@ -139,7 +139,6 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
 
 builder.Services.AddHttpClient("ResilientClient")
 .AddPolicyHandler(
@@ -182,13 +181,13 @@ UriKind.Absolute,
 out var uri))
 return false;
 
-            return allowedOrigins.Contains(
-                uri.GetLeftPart(UriPartial.Authority),
-                StringComparer.OrdinalIgnoreCase);
-        })
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials();
+return allowedOrigins.Contains(  
+                uri.GetLeftPart(UriPartial.Authority),  
+                StringComparer.OrdinalIgnoreCase);  
+        })  
+        .AllowAnyHeader()  
+        .AllowAnyMethod()  
+        .AllowCredentials();  
 });
 
 });
@@ -208,20 +207,20 @@ using (var scope = app.Services.CreateScope())
 var db = scope.ServiceProvider
 .GetRequiredService<PlatformDbContext>();
 
-try
-{
-    db.Database.EnsureCreated();
-}
-catch (Exception ex)
-{
-    var logger = scope.ServiceProvider
-        .GetRequiredService<ILogger<Program>>();
+try  
+{  
+    db.Database.EnsureCreated();  
+}  
+catch (Exception ex)  
+{  
+    var logger = scope.ServiceProvider  
+        .GetRequiredService<ILogger<Program>>();  
 
-    logger.LogError(
-        ex,
-        "Failed to initialize ChatPlatform database.");
+    logger.LogError(  
+        ex,  
+        "Failed to initialize ChatPlatform database.");  
 
-    throw;
+    throw;  
 }
 
 }
@@ -236,12 +235,9 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ============================================================
-// 11. All Endpoints - Centralized Endpoint Mapping
+// 11. All Endpoints - من EndpointMapper فقط، بدون تكرار في Program.cs
 // ============================================================
 app.MapAllEndpoints(builder.Configuration);
-
-// تفعيل جميع Controllers المسجلة في المشروع
-app.MapControllers();
 
 // ============================================================
 // 12. Run
