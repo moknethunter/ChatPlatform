@@ -292,10 +292,90 @@
             return request(`${API.templates}/${encodeURIComponent(id)}?${query.toString()}`, { method: "DELETE" });
         },
 
-        getAutoReplyRules() { return request(API.autoReply); },
+        getAutoReplyRules(tenantId = "default") {
+            const query = new URLSearchParams({
+                tenantId: validateTenantId(tenantId)
+            });
+
+            return request(
+                `${API.autoReply}?${query.toString()}`
+            );
+        },
+
         createAutoReplyRule(data) {
-            if (!data || typeof data !== "object") throw new ApiError("بيانات قاعدة الرد الآلي غير صالحة.");
-            return request(API.autoReply, { method: "POST", body: data });
+            if (!data || typeof data !== "object") {
+                throw new ApiError(
+                    "بيانات قاعدة الرد الآلي غير صالحة."
+                );
+            }
+
+            return request(API.autoReply, {
+                method: "POST",
+                body: data
+            });
+        },
+
+        updateAutoReplyRule(id, data) {
+            id = validateId(
+                id,
+                "معرّف قاعدة الرد الآلي"
+            );
+
+            if (!data || typeof data !== "object") {
+                throw new ApiError(
+                    "بيانات قاعدة الرد الآلي غير صالحة."
+                );
+            }
+
+            return request(
+                `${API.autoReply}/${encodeURIComponent(id)}`,
+                {
+                    method: "PUT",
+                    body: data
+                }
+            );
+        },
+
+        toggleAutoReplyRule(
+            id,
+            tenantId = "default"
+        ) {
+            id = validateId(
+                id,
+                "معرّف قاعدة الرد الآلي"
+            );
+
+            const query = new URLSearchParams({
+                tenantId: validateTenantId(tenantId)
+            });
+
+            return request(
+                `${API.autoReply}/${encodeURIComponent(id)}/toggle?${query.toString()}`,
+                {
+                    method: "PATCH"
+                }
+            );
+        },
+
+        deleteAutoReplyRule(
+            id,
+            tenantId = "default"
+        ) {
+            id = validateId(
+                id,
+                "معرّف قاعدة الرد الآلي"
+            );
+
+            const query = new URLSearchParams({
+                tenantId: validateTenantId(tenantId)
+            });
+
+            return request(
+                `${API.autoReply}/${encodeURIComponent(id)}?${query.toString()}`,
+                {
+                    method: "DELETE"
+                }
+            );
         },
 
         _helpers: Object.freeze({
