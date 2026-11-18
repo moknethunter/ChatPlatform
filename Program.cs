@@ -1,4 +1,3 @@
-
 using System.Text.Json;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
@@ -33,11 +32,27 @@ options.KnownProxies.Clear();
 // 1. WhatsApp Configuration - متوافق مع Meta فقط
 // ============================================================
 var whatsAppSection = builder.Configuration.GetSection("WhatsApp");
-var whatsAppToken = whatsAppSection["AccessToken"];
-var whatsAppPhoneId = whatsAppSection["PhoneNumberId"];
-var whatsAppVerifyToken = whatsAppSection["VerifyToken"];
-var whatsAppAppSecret = whatsAppSection["AppSecret"];
-var whatsAppApiVersion = whatsAppSection["ApiVersion"] ?? "v26.0";
+var whatsAppToken =
+    Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
+    ?? whatsAppSection["AccessToken"]
+    ?? string.Empty;
+var whatsAppPhoneId =
+    Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
+    ?? whatsAppSection["PhoneNumberId"]
+    ?? string.Empty;
+var whatsAppVerifyToken =
+    Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
+    ?? whatsAppSection["VerifyToken"]
+    ?? string.Empty;
+var whatsAppAppSecret =
+    Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
+    ?? whatsAppSection["AppSecret"]
+    ?? string.Empty;
+var whatsAppApiVersion =
+    Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
+    ?? whatsAppSection["GraphApiVersion"]
+    ?? whatsAppSection["ApiVersion"]
+    ?? "v26.0";
 
 if (string.IsNullOrWhiteSpace(whatsAppToken) ||
 string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
