@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ChatPlatform | الرد الآلي</title>
+
+    <style>
+        :root {
+            --bg: #0a0f1e;
+            --panel: #111a30;
+            --panel2: #16213d;
+            --border: #263b60;
+            --text: #f1f5ff;
+            --muted: #8b9bb8;
+            --green: #25d366;
+            --red: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Tahoma, Arial, sans-serif;
+        }
+
+        .top {
+            padding: 15px 24px;
+            background: #0d1428;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .brand {
+            font-size: 20px;
+            font-weight: bold;
+            margin-left: 15px;
+        }
+
+        .brand span {
+            color: var(--green);
+        }
+
+        .top a {
+            color: #b8c6dd;
+            text-decoration: none;
+            padding: 8px 11px;
+            border-radius: 8px;
+        }
+
+        .top a:hover,
+        .top a.active {
+            background: var(--panel2);
+            color: #ffffff;
+        }
+
+        .main {
+            max-width: 1100px;
+            margin: auto;
+            padding: 28px 18px;
+        }
+
+        h1 {
+            margin: 0 0 7px;
+            font-size: 26px;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .sub {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.8;
+            margin-bottom: 22px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 18px;
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 20px;
+        }
+
+        label {
+            display: block;
+            color: #cbd6ea;
+            font-size: 13px;
+            margin: 13px 0 6px;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 11px;
+            background: #0b1326;
+            color: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font: inherit;
+        }
+
+        textarea {
+            min-height: 130px;
+            resize: vertical;
+        }
+
+        .hint {
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.8;
+            margin-top: 6px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 16px;
+        }
+
+        .btn {
+            border: 0;
+            border-radius: 8px;
+            padding: 10px 14px;
+            background: var(--green);
+            color: #06130b;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .btn.secondary {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            color: #ffffff;
+        }
+
+        .btn.danger {
+            background: #32151c;
+            border: 1px solid #74313d;
+            color: #fecaca;
+        }
+
+        .btn:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .message {
+            display: none;
+            margin-top: 13px;
+            padding: 11px;
+            border-radius: 8px;
+            font-size: 12px;
+            line-height: 1.7;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .message.error {
+            background: #3a161c;
+            color: #fecaca;
+        }
+
+        .message.success {
+            background: #0f2a1d;
+            color: #a7f3d0;
+        }
+
+        .rule {
+            background: var(--panel2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 11px;
+        }
+
+        .rule-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .rule-name {
+            font-weight: bold;
+        }
+
+        .badge {
+            font-size: 11px;
+            padding: 4px 8px;
+            border-radius: 20px;
+            background: #0f2a1d;
+            color: #86efac;
+        }
+
+        .badge.off {
+            background: #3a161c;
+            color: #fecaca;
+        }
+
+        .detail {
+            color: var(--muted);
+            font-size: 12px;
+            margin-top: 7px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .rule-actions {
+            display: flex;
+            gap: 7px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .empty {
+            padding: 35px;
+            text-align: center;
+            color: var(--muted);
+            border: 1px dashed var(--border);
+            border-radius: 9px;
+        }
+
+        @media (max-width: 800px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            .top {
+                padding: 12px 14px;
+            }
+
+            .main {
+                padding: 18px 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+<nav class="top">
+    <div class="brand">
+        Chat<span>Platform</span>
+    </div>
+
+    <a href="/">الرئيسية</a>
+    <a href="/inbox.html">الصندوق</a>
+    <a href="/whatsapp.html">WhatsApp</a>
+    <a href="/autoreply.html" class="active">الرد الآلي</a>
+    <a href="/templates.html">القوالب</a>
+    <a href="/settings.html">الإعدادات</a>
+</nav>
+
+<main class="main">
+
+    <h1>قواعد الرد الآلي</h1>
+
+    <div class="sub">
+        يحفظ الخادم رسالة Webhook أولًا، ثم ينشئها في الصندوق،
+        وبعد ذلك يتم تطبيق قاعدة الرد وإرسال الرد عبر Outbox.
+    </div>
+
+    <div class="grid">
+
+        <section class="card">
+            <h2>إضافة قاعدة</h2>
+
+            <form id="ruleForm">
+
+                <label for="tenantId">
+                    Tenant ID
+                </label>
+
+                <input
+                    id="tenantId"
+                    value="default"
+                    required
+                    autocomplete="off">
+
+                <div class="hint">
+                    يجب أن يطابق Tenant ID المرتبط بحساب WhatsApp.
+                </div>
+
+                <label for="name">
+                    اسم القاعدة
+                </label>
+
+                <input
+                    id="name"
+                    maxlength="100"
+                    required
+                    placeholder="ترحيب العملاء">
+
+                <label for="matchType">
+                    نوع المطابقة
+                </label>
+
+                <select id="matchType">
+                    <option value="contains">
+                        يحتوي على
+                    </option>
+
+                    <option value="exact">
+                        مطابقة كاملة
+                    </option>
+
+                    <option value="starts_with">
+                        يبدأ بـ
+                    </option>
+
+                    <option value="any">
+                        كل الرسائل النصية
+                    </option>
+
+                    <option value="regex">
+                        Regex
+                    </option>
+                </select>
+
+                <label for="keywordPattern">
+                    الكلمة أو النمط
+                </label>
+
+                <input
+                    id="keywordPattern"
+                    maxlength="500"
+                    placeholder="مثال: مرحبا">
+
+                <label for="replyText">
+                    نص الرد
+                </label>
+
+                <textarea
+                    id="replyText"
+                    maxlength="4096"
+                    required
+                    placeholder="أهلًا بك، كيف يمكننا مساعدتك؟"></textarea>
+
+                <div class="hint">
+                    يمكنك استخدام {message} أو {text}
+                    لإدراج نص العميل داخل الرد.
+                </div>
+
+                <label for="priority">
+                    الأولوية
+                </label>
+
+                <input
+                    id="priority"
+                    type="number"
+                    min="0"
+                    max="100000"
+                    value="100">
+
+                <label for="cooldown">
+                    فترة الانتظار للرقم بالثواني
+                </label>
+
+                <input
+                    id="cooldown"
+                    type="number"
+                    min="0"
+                    max="86400"
+                    value="60">
+
+                <label>
+                    <input
+                        id="isActive"
+                        type="checkbox"
+                        checked
+                        style="width:auto">
+
+                    القاعدة مفعّلة
+                </label>
+
+                <div class="actions">
+                    <button
+                        class="btn"
+                        id="saveButton"
+                        type="submit">
+                        حفظ القاعدة
+                    </button>
+
+                    <button
+                        class="btn secondary"
+                        id="clearButton"
+                        type="reset">
+                        مسح
+                    </button>
+                </div>
+            </form>
+
+            <div id="formMessage" class="message"></div>
+        </section>
+
+        <section class="card">
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                gap:10px;
+                align-items:center;
+                flex-wrap:wrap">
+
+                <h2 style="margin:0">
+                    القواعد المحفوظة
+                </h2>
+
+                <button
+                    class="btn secondary"
+                    id="refreshButton"
+                    type="button">
+                    تحديث
+                </button>
+            </div>
+
+            <div
+                id="rulesList"
+                style="margin-top:12px">
+
+                <div class="empty">
+                    جاري التحميل...
+                </div>
+            </div>
+
+            <div
+                id="listMessage"
+                class="message">
+            </div>
+        </section>
+    </div>
+</main>
+
+<script src="/api.js"></script>
+
+<script>
+"use strict";
+
+const $ = id =>
+    document.getElementById(id);
+
+let editingId = null;
+
+function show(element, text, type) {
+    element.textContent = text;
+    element.className =
+        "message show " + type;
+}
+
+function getTenantId() {
+    return $("tenantId").value.trim() || "default";
+}
+
+function getFormData() {
+    const matchType =
+        $("matchType").value;
+
+    return {
+        tenantId: getTenantId(),
+        name: $("name").value.trim(),
+        matchType,
+        keywordPattern:
+            matchType === "any"
+                ? null
+                : $("keywordPattern").value.trim(),
+        replyText:
+            $("replyText").value.trim(),
+        priority:
+            Number($("priority").value || 100),
+        cooldownSeconds:
+            Number($("cooldown").value || 60),
+        isActive:
+            $("isActive").checked
+    };
+}
+
+function resetForm() {
+    editingId = null;
+
+    $("ruleForm").reset();
+    $("tenantId").value = "default";
+    $("priority").value = "100";
+    $("cooldown").value = "60";
+    $("isActive").checked = true;
+    $("saveButton").textContent = "حفظ القاعدة";
+    $("formMessage").className = "message";
+}
+
+function renderRules(rules) {
+    const list =
+        $("rulesList");
+
+    list.replaceChildren();
+
+    if (!rules.length) {
+        const empty =
+            document.createElement("div");
+
+        empty.className = "empty";
+        empty.textContent =
+            "لا توجد قواعد لهذا الـ Tenant.";
+
+        list.appendChild(empty);
+        return;
+    }
+
+    for (const rule of rules) {
+        const box =
+            document.createElement("div");
+
+        box.className = "rule";
+
+        const head =
+            document.createElement("div");
+
+        head.className = "rule-head";
+
+        const name =
+            document.createElement("div");
+
+        name.className = "rule-name";
+        name.textContent = rule.name;
+
+        const badge =
+            document.createElement("span");
+
+        badge.className =
+            "badge" +
+            (rule.isActive ? "" : " off");
+
+        badge.textContent =
+            rule.isActive
+                ? "مفعّلة"
+                : "متوقفة";
+
+        head.append(name, badge);
+
+        const detail =
+            document.createElement("div");
+
+        detail.className = "detail";
+
+        detail.textContent =
+            "المطابقة: " +
+            rule.matchType +
+            " | النمط: " +
+            (rule.keywordPattern || "كل الرسائل") +
+            "\nTenant: " +
+            rule.tenantId +
+            " | الأولوية: " +
+            rule.priority +
+            " | الانتظار: " +
+            rule.cooldownSeconds +
+            " ثانية" +
+            "\nالرد: " +
+            rule.replyText;
+
+        const actions =
+            document.createElement("div");
+
+        actions.className = "rule-actions";
+
+        const toggle =
+            document.createElement("button");
+
+        toggle.className =
+            "btn secondary";
+
+        toggle.type = "button";
+
+        toggle.textContent =
+            rule.isActive
+                ? "إيقاف"
+                : "تفعيل";
+
+        toggle.onclick = async () => {
+            try {
+                await ChatPlatformAPI
+                    .toggleAutoReplyRule(
+                        rule.id,
+                        rule.tenantId);
+
+                await loadRules();
+            }
+            catch (error) {
+                show(
+                    $("listMessage"),
+                    error.message ||
+                        "تعذر تغيير حالة القاعدة.",
+                    "error");
+            }
+        };
+
+        const edit =
+            document.createElement("button");
+
+        edit.className =
+            "btn secondary";
+
+        edit.type = "button";
+        edit.textContent = "تعديل";
+
+        edit.onclick = () => {
+            editingId = rule.id;
+
+            $("tenantId").value =
+                rule.tenantId;
+
+            $("name").value =
+                rule.name;
+
+            $("matchType").value =
+                rule.matchType;
+
+            $("keywordPattern").value =
+                rule.keywordPattern || "";
+
+            $("replyText").value =
+                rule.replyText;
+
+            $("priority").value =
+                rule.priority;
+
+            $("cooldown").value =
+                rule.cooldownSeconds;
+
+            $("isActive").checked =
+                rule.isActive;
+
+            $("saveButton").textContent =
+                "تحديث القاعدة";
+
+            window.scrollTo({
+                top: 0,
+                behavior: "smooth"
+            });
+        };
+
+        const remove =
+            document.createElement("button");
+
+        remove.className =
+            "btn danger";
+
+        remove.type = "button";
+        remove.textContent = "حذف";
+
+        remove.onclick = async () => {
+            if (!confirm(
+                "هل تريد حذف هذه القاعدة؟"))
+            {
+                return;
+            }
+
+            try {
+                await ChatPlatformAPI
+                    .deleteAutoReplyRule(
+                        rule.id,
+                        rule.tenantId);
+
+                await loadRules();
+            }
+            catch (error) {
+                show(
+                    $("listMessage"),
+                    error.message ||
+                        "تعذر حذف القاعدة.",
+                    "error");
+            }
+        };
+
+        actions.append(
+            toggle,
+            edit,
+            remove);
+
+        box.append(
+            head,
+            detail,
+            actions);
+
+        list.appendChild(box);
+    }
+}
+
+async function loadRules() {
+    $("rulesList").textContent =
+        "جاري التحميل...";
+
+    try {
+        const data =
+            await ChatPlatformAPI
+                .getAutoReplyRules(
+                    getTenantId());
+
+        renderRules(
+            Array.isArray(data)
+                ? data
+                : []);
+    }
+    catch (error) {
+        $("rulesList").textContent =
+            "تعذر تحميل القواعد.";
+
+        show(
+            $("listMessage"),
+            error.message ||
+                "خطأ في الخادم.",
+            "error");
+    }
+}
+
+$("ruleForm").addEventListener(
+    "submit",
+    async event => {
+        event.preventDefault();
+
+        const button =
+            $("saveButton");
+
+        button.disabled = true;
+
+        try {
+            const data =
+                getFormData();
+
+            if (editingId) {
+                await ChatPlatformAPI
+                    .updateAutoReplyRule(
+                        editingId,
+                        data);
+            }
+            else {
+                await ChatPlatformAPI
+                    .createAutoReplyRule(data);
+            }
+
+            show(
+                $("formMessage"),
+                "تم حفظ قاعدة الرد الآلي.",
+                "success");
+
+            resetForm();
+
+            await loadRules();
+        }
+        catch (error) {
+            show(
+                $("formMessage"),
+                error.message ||
+                    "تعذر حفظ القاعدة.",
+                "error");
+        }
+        finally {
+            button.disabled = false;
+        }
+    });
+
+$("refreshButton").onclick =
+    loadRules;
+
+$("tenantId").addEventListener(
+    "change",
+    loadRules);
+
+$("clearButton").onclick =
+    resetForm;
+
+loadRules();
+</script>
+
+</body>
+</html>
