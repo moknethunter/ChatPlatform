@@ -11,13 +11,19 @@ using ChatPlatform.Infrastructure.Messaging;
 using ChatPlatform.Hubs;
 using ChatPlatform.Middleware;
 using ChatPlatform.Endpoints;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Polly;
 using Polly.Extensions.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.Configure(options =>
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
 options.ForwardedHeaders =
 ForwardedHeaders.XForwardedFor
@@ -113,16 +119,16 @@ options.UseSqlite(connectionString));
 // ============================================================
 // 3. Configuration and Data Protection
 // ============================================================
-builder.Services.Configure(
+builder.Services.Configure<EngineSettings>(
 builder.Configuration.GetSection("EngineSettings"));
 builder.Services.AddDataProtection()
-.PersistKeysToDbContext()
+.PersistKeysToDbContext<PlatformDbContext>()
 .SetApplicationName("ChatPlatform");
 // ============================================================
 // 4. Event Bus and Core Engine
 // ============================================================
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-builder.Services.AddHostedService();
+builder.Services.AddHostedService<EngineHostedService>();
 // ============================================================
 // 5. Integration Adapters
 // ============================================================
@@ -156,7 +162,7 @@ var allowedOrigins =
 builder.Configuration
 .GetSection("Cors:AllowedOrigins")
 .Get<string[]>()
-?? Array.Empty();
+?? Array.Empty<string>();
 builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
 {
@@ -207,9 +213,9 @@ throw;
 // ============================================================
 // 10. Middleware Pipeline
 // ============================================================
-app.UseMiddleware();
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseCors();
-app.UseMiddleware();
+app.UseMiddleware<TenantResolutionMiddleware>();
 app.UseDefaultFiles();
 app.UseStaticFiles();
 // ============================================================
