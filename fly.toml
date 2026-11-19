@@ -11,7 +11,11 @@ primary_region = 'ams'
 
 [[mounts]]
   source = 'data'
-  destination = '/app/data'
+  destination = '/data'
+
+[env]
+  CHATPLATFORM_DATA_DIR = '/data'
+  ConnectionStrings__DefaultConnection = 'Data Source=/data/platform.db'
 
 [http_service]
   internal_port = 8080
