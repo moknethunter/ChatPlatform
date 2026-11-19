@@ -1,31 +1,108 @@
+using System;
+using System.IO;
 using Microsoft.Data.Sqlite;
 
 namespace ChatPlatform.Infrastructure.Data;
 
 public static class DbInitializer
 {
+    private const string DefaultDatabaseFile = "chatplatform.db";
+    private const string ContainerDataDirectory = "/data";
+
     public static void EnsureCreated(string connectionString)
     {
-        // طلع مسار الملف من ConnectionString
-        var dbPath = connectionString.Replace("Data Source=", "").Trim();
-        var dir = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new ArgumentException(
+                "Database connection string is missing.",
+                nameof(connectionString));
 
+        var builder = new SqliteConnectionStringBuilder(connectionString);
+
+        var dbPath = builder.DataSource;
+
+        if (string.IsNullOrWhiteSpace(dbPath))
+            throw new InvalidOperationException(
+                "SQLite Data Source is not configured.");
+
+        // دعم قواعد البيانات الموجودة في الذاكرة
+        if (dbPath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+        {
+            InitializeDatabase(connectionString, dbPath);
+            return;
+        }
+
+        // تحديد مجلد البيانات
+        var configuredDirectory =
+            Environment.GetEnvironmentVariable("CHATPLATFORM_DATA_DIR");
+
+        var dataDirectory = !string.IsNullOrWhiteSpace(configuredDirectory)
+            ? configuredDirectory
+            : ContainerDataDirectory;
+
+        // معالجة المسار القديم /app
+        var normalizedPath = dbPath.Replace('\\', '/');
+
+        if (normalizedPath.Equals("/app", StringComparison.OrdinalIgnoreCase) ||
+            normalizedPath.Equals("/app/", StringComparison.OrdinalIgnoreCase))
+        {
+            dbPath = Path.Combine(dataDirectory, DefaultDatabaseFile);
+        }
+        else if (normalizedPath.StartsWith(
+                     "/app/",
+                     StringComparison.OrdinalIgnoreCase))
+        {
+            // نقل قاعدة البيانات من مجلد التطبيق إلى مجلد البيانات
+            var fileName = Path.GetFileName(dbPath);
+
+            dbPath = Path.Combine(dataDirectory, fileName);
+        }
+
+        // تحويل المسار إلى مسار مطلق
+        dbPath = Path.GetFullPath(dbPath);
+
+        var directory = Path.GetDirectoryName(dbPath);
+
+        if (string.IsNullOrWhiteSpace(directory))
+            throw new InvalidOperationException(
+                "Could not determine SQLite database directory.");
+
+        // إنشاء مجلد البيانات إذا لم يكن موجوداً
+        Directory.CreateDirectory(directory);
+
+        // تحديث Connection String
+        builder.DataSource = dbPath;
+
+        InitializeDatabase(builder.ToString(), dbPath);
+    }
+
+    private static void InitializeDatabase(
+        string connectionString,
+        string dbPath)
+    {
         using var conn = new SqliteConnection(connectionString);
+
         conn.Open();
+
         using var cmd = conn.CreateCommand();
+
         cmd.CommandText = @"
 PRAGMA foreign_keys = ON;
 
--- 1. Tenants - المؤسسات
+-- 1. Tenants
 CREATE TABLE IF NOT EXISTS Tenants (
     Id TEXT NOT NULL PRIMARY KEY,
     Name TEXT NOT NULL,
     IsActive INTEGER NOT NULL,
     CreatedAtUtc TEXT NOT NULL
 );
+
 INSERT OR IGNORE INTO Tenants (Id, Name, IsActive, CreatedAtUtc)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Default Tenant', 1, '2026-01-01 00:00:00');
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'Default Tenant',
+    1,
+    '2026-01-01 00:00:00'
+);
 
 -- 2. Connectors
 CREATE TABLE IF NOT EXISTS Connectors (
@@ -50,7 +127,9 @@ CREATE TABLE IF NOT EXISTS WhatsAppTenants (
     IsActive INTEGER NOT NULL,
     CreatedAtUtc TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTenants_PhoneNumberId ON WhatsAppTenants (PhoneNumberId);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTenants_PhoneNumberId
+ON WhatsAppTenants (PhoneNumberId);
 
 -- 4. DataProtectionKeys
 CREATE TABLE IF NOT EXISTS DataProtectionKeys (
@@ -62,63 +141,135 @@ CREATE TABLE IF NOT EXISTS DataProtectionKeys (
 -- 5. WhatsAppWebhookInbox
 CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL, EventKey TEXT NOT NULL, PhoneNumberId TEXT NOT NULL,
-    PayloadJson TEXT NOT NULL, Status TEXT NOT NULL, Attempts INTEGER NOT NULL,
-    MaxAttempts INTEGER NOT NULL, ReceivedAtUtc TEXT NOT NULL, NextAttemptAtUtc TEXT NOT NULL,
-    LeaseUntilUtc TEXT NULL, LeaseOwner TEXT NULL, ProcessedAtUtc TEXT NULL, LastError TEXT NULL
+    TenantId TEXT NOT NULL,
+    EventKey TEXT NOT NULL,
+    PhoneNumberId TEXT NOT NULL,
+    PayloadJson TEXT NOT NULL,
+    Status TEXT NOT NULL,
+    Attempts INTEGER NOT NULL,
+    MaxAttempts INTEGER NOT NULL,
+    ReceivedAtUtc TEXT NOT NULL,
+    NextAttemptAtUtc TEXT NOT NULL,
+    LeaseUntilUtc TEXT NULL,
+    LeaseOwner TEXT NULL,
+    ProcessedAtUtc TEXT NULL,
+    LastError TEXT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_EventKey ON WhatsAppWebhookInbox (EventKey);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc ON WhatsAppWebhookInbox (Status, NextAttemptAtUtc);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_EventKey
+ON WhatsAppWebhookInbox (EventKey);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
+ON WhatsAppWebhookInbox (Status, NextAttemptAtUtc);
 
 -- 6. WhatsAppStatusInbox
 CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL, EventKey TEXT NOT NULL, PhoneNumberId TEXT NOT NULL,
-    ContactPhone TEXT NOT NULL, Wamid TEXT NOT NULL, Status TEXT NOT NULL,
-    StatusTimestamp INTEGER NOT NULL, PayloadJson TEXT NOT NULL, Processed INTEGER NOT NULL,
-    ReceivedAtUtc TEXT NOT NULL, ProcessedAtUtc TEXT NULL
+    TenantId TEXT NOT NULL,
+    EventKey TEXT NOT NULL,
+    PhoneNumberId TEXT NOT NULL,
+    ContactPhone TEXT NOT NULL,
+    Wamid TEXT NOT NULL,
+    Status TEXT NOT NULL,
+    StatusTimestamp INTEGER NOT NULL,
+    PayloadJson TEXT NOT NULL,
+    Processed INTEGER NOT NULL,
+    ReceivedAtUtc TEXT NOT NULL,
+    ProcessedAtUtc TEXT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_EventKey ON WhatsAppStatusInbox (EventKey);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Wamid_Processed ON WhatsAppStatusInbox (Wamid, Processed);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_EventKey
+ON WhatsAppStatusInbox (EventKey);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Wamid_Processed
+ON WhatsAppStatusInbox (Wamid, Processed);
 
 -- 7. WhatsAppConversations
 CREATE TABLE IF NOT EXISTS WhatsAppConversations (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, ContactPhone TEXT NOT NULL,
-    ContactName TEXT NULL, LastInboundAtUtc TEXT NULL, LastOutboundAtUtc TEXT NULL,
-    WindowExpiresAtUtc TEXT NULL, Status TEXT NOT NULL, AssignedToUserId TEXT NULL,
-    UnreadCount INTEGER NOT NULL, Tags TEXT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL
+    TenantId TEXT NOT NULL,
+    PhoneNumberId TEXT NOT NULL,
+    ContactPhone TEXT NOT NULL,
+    ContactName TEXT NULL,
+    LastInboundAtUtc TEXT NULL,
+    LastOutboundAtUtc TEXT NULL,
+    WindowExpiresAtUtc TEXT NULL,
+    Status TEXT NOT NULL,
+    AssignedToUserId TEXT NULL,
+    UnreadCount INTEGER NOT NULL,
+    Tags TEXT NULL,
+    CreatedAtUtc TEXT NOT NULL,
+    UpdatedAtUtc TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppConversations_Unique ON WhatsAppConversations (TenantId, PhoneNumberId, ContactPhone);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_TenantId_Status ON WhatsAppConversations (TenantId, Status);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_WindowExpiresAtUtc ON WhatsAppConversations (WindowExpiresAtUtc);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppConversations_Unique
+ON WhatsAppConversations (TenantId, PhoneNumberId, ContactPhone);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_TenantId_Status
+ON WhatsAppConversations (TenantId, Status);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_WindowExpiresAtUtc
+ON WhatsAppConversations (WindowExpiresAtUtc);
 
 -- 8. WhatsAppMessages
 CREATE TABLE IF NOT EXISTS WhatsAppMessages (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL, ConversationId TEXT NOT NULL, Wamid TEXT NULL,
-    Direction TEXT NOT NULL, MessageType TEXT NOT NULL, ContentJson TEXT NOT NULL,
-    TextPreview TEXT NULL, MediaMimeType TEXT NULL, MediaUrl TEXT NULL,
-    Status TEXT NOT NULL, TimestampUtc TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL,
-    FOREIGN KEY (ConversationId) REFERENCES WhatsAppConversations (Id) ON DELETE CASCADE
+    TenantId TEXT NOT NULL,
+    ConversationId TEXT NOT NULL,
+    Wamid TEXT NULL,
+    Direction TEXT NOT NULL,
+    MessageType TEXT NOT NULL,
+    ContentJson TEXT NOT NULL,
+    TextPreview TEXT NULL,
+    MediaMimeType TEXT NULL,
+    MediaUrl TEXT NULL,
+    Status TEXT NOT NULL,
+    TimestampUtc TEXT NOT NULL,
+    CreatedAtUtc TEXT NOT NULL,
+    FOREIGN KEY (ConversationId)
+        REFERENCES WhatsAppConversations (Id)
+        ON DELETE CASCADE
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppMessages_Wamid ON WhatsAppMessages (Wamid);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc ON WhatsAppMessages (TenantId, ConversationId, TimestampUtc);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppMessages_Wamid
+ON WhatsAppMessages (Wamid);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc
+ON WhatsAppMessages (TenantId, ConversationId, TimestampUtc);
 
 -- 9. WhatsAppOutbox
 CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL, CorrelationId TEXT NOT NULL, IdempotencyKey TEXT NOT NULL,
-    MessageId TEXT NULL, PhoneNumberId TEXT NOT NULL, RecipientPhone TEXT NOT NULL,
-    MessageType TEXT NOT NULL, PayloadJson TEXT NOT NULL, Status TEXT NOT NULL,
-    Attempts INTEGER NOT NULL, MaxAttempts INTEGER NOT NULL, CreatedAtUtc TEXT NOT NULL,
-    NextAttemptAtUtc TEXT NOT NULL, ScheduledForUtc TEXT NULL, LeaseUntilUtc TEXT NULL,
-    LeaseOwner TEXT NULL, SentAtUtc TEXT NULL, MetaMessageId TEXT NULL,
-    LastError TEXT NULL, UpdatedAtUtc TEXT NOT NULL
+    TenantId TEXT NOT NULL,
+    CorrelationId TEXT NOT NULL,
+    IdempotencyKey TEXT NOT NULL,
+    MessageId TEXT NULL,
+    PhoneNumberId TEXT NOT NULL,
+    RecipientPhone TEXT NOT NULL,
+    MessageType TEXT NOT NULL,
+    PayloadJson TEXT NOT NULL,
+    Status TEXT NOT NULL,
+    Attempts INTEGER NOT NULL,
+    MaxAttempts INTEGER NOT NULL,
+    CreatedAtUtc TEXT NOT NULL,
+    NextAttemptAtUtc TEXT NOT NULL,
+    ScheduledForUtc TEXT NULL,
+    LeaseUntilUtc TEXT NULL,
+    LeaseOwner TEXT NULL,
+    SentAtUtc TEXT NULL,
+    MetaMessageId TEXT NULL,
+    LastError TEXT NULL,
+    UpdatedAtUtc TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_TenantId_IdempotencyKey ON WhatsAppOutbox (TenantId, IdempotencyKey);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Status_NextAttemptAtUtc ON WhatsAppOutbox (Status, NextAttemptAtUtc);
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_MetaMessageId ON WhatsAppOutbox (MetaMessageId);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_TenantId_IdempotencyKey
+ON WhatsAppOutbox (TenantId, IdempotencyKey);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Status_NextAttemptAtUtc
+ON WhatsAppOutbox (Status, NextAttemptAtUtc);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_MetaMessageId
+ON WhatsAppOutbox (MetaMessageId);
 
 -- 10. WhatsAppTemplates
 CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
@@ -133,8 +284,12 @@ CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
     IsActive INTEGER NOT NULL DEFAULT 1,
     CreatedAtUtc TEXT NOT NULL
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Unique ON WhatsAppTemplates (TenantId, WhatsAppTenantId, Name);
-CREATE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Tenant ON WhatsAppTemplates (TenantId, WhatsAppTenantId, IsActive);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Unique
+ON WhatsAppTemplates (TenantId, WhatsAppTenantId, Name);
+
+CREATE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Tenant
+ON WhatsAppTemplates (TenantId, WhatsAppTenantId, IsActive);
 
 -- 11. AutoReplyRules
 CREATE TABLE IF NOT EXISTS AutoReplyRules (
@@ -148,9 +303,11 @@ CREATE TABLE IF NOT EXISTS AutoReplyRules (
     IsActive INTEGER NOT NULL DEFAULT 1,
     CreatedAtUtc TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS IX_AutoReplyRules_Tenant ON AutoReplyRules (TenantId, IsActive, Priority);
 
--- 12. Users - جدول المستخدمين
+CREATE INDEX IF NOT EXISTS IX_AutoReplyRules_Tenant
+ON AutoReplyRules (TenantId, IsActive, Priority);
+
+-- 12. Users
 CREATE TABLE IF NOT EXISTS Users (
     Id TEXT NOT NULL PRIMARY KEY,
     TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
@@ -164,25 +321,18 @@ CREATE TABLE IF NOT EXISTS Users (
     LastLoginAtUtc TEXT NULL,
     FOREIGN KEY (TenantId) REFERENCES Tenants (Id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Phone ON Users (TenantId, Phone);
-CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Email ON Users (TenantId, Email);
 
--- 13. المستخدم الأول: مختار الحوباني - Admin - رقم دولي حسب شروط Meta
--- اليمن 967 + رقمك 774821733 = 967774821733 بدون + وبدون صفر
-INSERT OR IGNORE INTO Users (Id, TenantId, FullName, Phone, Email, PasswordHash, Role, IsActive, CreatedAtUtc)
-VALUES (
-  '00000000-0000-0000-0000-000000000101',
-  '00000000-0000-0000-0000-000000000001',
-  'مختار الحوباني',
-  '967774821733',
-  'mokhtar@chatplatform.com',
-  'TEMP-HASH-CHANGE-ME',
-  'admin',
-  1,
-  '2026-11-19 00:00:00'
-);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Phone
+ON Users (TenantId, Phone);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Email
+ON Users (TenantId, Email);
+
 ";
+
         cmd.ExecuteNonQuery();
-        Console.WriteLine($">>> DB Initialized at {dbPath}");
+
+        Console.WriteLine(
+            $">>> DB Initialized successfully at: {dbPath}");
     }
 }
