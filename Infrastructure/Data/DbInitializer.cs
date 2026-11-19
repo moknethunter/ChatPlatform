@@ -17,7 +17,7 @@ public static class DbInitializer
         cmd.CommandText = @"
 PRAGMA foreign_keys = ON;
 
--- 1. Tenants - من PlatformDbContext
+-- 1. Tenants - المؤسسات
 CREATE TABLE IF NOT EXISTS Tenants (
     Id TEXT NOT NULL PRIMARY KEY,
     Name TEXT NOT NULL,
@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS Tenants (
 INSERT OR IGNORE INTO Tenants (Id, Name, IsActive, CreatedAtUtc)
 VALUES ('00000000-0000-0000-0000-000000000001', 'Default Tenant', 1, '2026-01-01 00:00:00');
 
--- 2. Connectors - كان ناقص
+-- 2. Connectors
 CREATE TABLE IF NOT EXISTS Connectors (
     Id TEXT NOT NULL PRIMARY KEY,
     TenantId TEXT NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS DataProtectionKeys (
     Xml TEXT NULL
 );
 
--- 5. WhatsAppWebhookInbox - من ملف SQL حقك
+-- 5. WhatsAppWebhookInbox
 CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
     Id TEXT NOT NULL PRIMARY KEY,
     TenantId TEXT NOT NULL, EventKey TEXT NOT NULL, PhoneNumberId TEXT NOT NULL,
@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
     LeaseUntilUtc TEXT NULL, LeaseOwner TEXT NULL, ProcessedAtUtc TEXT NULL, LastError TEXT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_EventKey ON WhatsAppWebhookInbox (EventKey);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc ON WhatsAppWebhookInbox (Status, NextAttemptAtUtc);
 
 -- 6. WhatsAppStatusInbox
 CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
     ReceivedAtUtc TEXT NOT NULL, ProcessedAtUtc TEXT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_EventKey ON WhatsAppStatusInbox (EventKey);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Wamid_Processed ON WhatsAppStatusInbox (Wamid, Processed);
 
 -- 7. WhatsAppConversations
 CREATE TABLE IF NOT EXISTS WhatsAppConversations (
@@ -88,6 +90,8 @@ CREATE TABLE IF NOT EXISTS WhatsAppConversations (
     UnreadCount INTEGER NOT NULL, Tags TEXT NULL, CreatedAtUtc TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppConversations_Unique ON WhatsAppConversations (TenantId, PhoneNumberId, ContactPhone);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_TenantId_Status ON WhatsAppConversations (TenantId, Status);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_WindowExpiresAtUtc ON WhatsAppConversations (WindowExpiresAtUtc);
 
 -- 8. WhatsAppMessages
 CREATE TABLE IF NOT EXISTS WhatsAppMessages (
@@ -99,6 +103,7 @@ CREATE TABLE IF NOT EXISTS WhatsAppMessages (
     FOREIGN KEY (ConversationId) REFERENCES WhatsAppConversations (Id) ON DELETE CASCADE
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppMessages_Wamid ON WhatsAppMessages (Wamid);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc ON WhatsAppMessages (TenantId, ConversationId, TimestampUtc);
 
 -- 9. WhatsAppOutbox
 CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
@@ -112,8 +117,10 @@ CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
     LastError TEXT NULL, UpdatedAtUtc TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_TenantId_IdempotencyKey ON WhatsAppOutbox (TenantId, IdempotencyKey);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Status_NextAttemptAtUtc ON WhatsAppOutbox (Status, NextAttemptAtUtc);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_MetaMessageId ON WhatsAppOutbox (MetaMessageId);
 
--- 10. WhatsAppTemplates - كان ناقص
+-- 10. WhatsAppTemplates
 CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
     Id TEXT NOT NULL PRIMARY KEY,
     TenantId TEXT NOT NULL,
@@ -127,8 +134,9 @@ CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
     CreatedAtUtc TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Unique ON WhatsAppTemplates (TenantId, WhatsAppTenantId, Name);
+CREATE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Tenant ON WhatsAppTemplates (TenantId, WhatsAppTenantId, IsActive);
 
--- 11. AutoReplyRules - كان ناقص
+-- 11. AutoReplyRules
 CREATE TABLE IF NOT EXISTS AutoReplyRules (
     Id TEXT NOT NULL PRIMARY KEY,
     TenantId TEXT NOT NULL,
@@ -141,6 +149,38 @@ CREATE TABLE IF NOT EXISTS AutoReplyRules (
     CreatedAtUtc TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS IX_AutoReplyRules_Tenant ON AutoReplyRules (TenantId, IsActive, Priority);
+
+-- 12. Users - جدول المستخدمين
+CREATE TABLE IF NOT EXISTS Users (
+    Id TEXT NOT NULL PRIMARY KEY,
+    TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+    FullName TEXT NOT NULL,
+    Phone TEXT NOT NULL,
+    Email TEXT NOT NULL,
+    PasswordHash TEXT NOT NULL,
+    Role TEXT NOT NULL DEFAULT 'agent',
+    IsActive INTEGER NOT NULL DEFAULT 1,
+    CreatedAtUtc TEXT NOT NULL,
+    LastLoginAtUtc TEXT NULL,
+    FOREIGN KEY (TenantId) REFERENCES Tenants (Id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Phone ON Users (TenantId, Phone);
+CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Email ON Users (TenantId, Email);
+
+-- 13. المستخدم الأول: مختار الحوباني - Admin - رقم دولي حسب شروط Meta
+-- اليمن 967 + رقمك 774821733 = 967774821733 بدون + وبدون صفر
+INSERT OR IGNORE INTO Users (Id, TenantId, FullName, Phone, Email, PasswordHash, Role, IsActive, CreatedAtUtc)
+VALUES (
+  '00000000-0000-0000-0000-000000000101',
+  '00000000-0000-0000-0000-000000000001',
+  'مختار الحوباني',
+  '967774821733',
+  'mokhtar@chatplatform.com',
+  'TEMP-HASH-CHANGE-ME',
+  'admin',
+  1,
+  '2026-11-19 00:00:00'
+);
 ";
         cmd.ExecuteNonQuery();
         Console.WriteLine($">>> DB Initialized at {dbPath}");
