@@ -118,12 +118,14 @@ Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن �
 }
 
 // ============================================================
-// 2. Database
+// 2. Database - تم التعديل: مسار ثابت في Fly.io Volume
 // ============================================================
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+    ?? "Data Source=/app/data/platform.db";
+
 builder.Services.AddDbContext<PlatformDbContext>(options =>
-options.UseSqlite(
-builder.Configuration.GetConnectionString("Default")
-?? "Data Source=chatplatform.db"));
+    options.UseSqlite(connectionString));
 
 // ============================================================
 // 3. Configuration and Data Protection
@@ -196,13 +198,13 @@ UriKind.Absolute,
 out var uri))
 return false;
 
-return allowedOrigins.Contains(  
-                uri.GetLeftPart(UriPartial.Authority),  
-                StringComparer.OrdinalIgnoreCase);  
-        })  
-        .AllowAnyHeader()  
-        .AllowAnyMethod()  
-        .AllowCredentials();  
+return allowedOrigins.Contains(
+                uri.GetLeftPart(UriPartial.Authority),
+                StringComparer.OrdinalIgnoreCase);
+        })
+        .AllowAnyHeader()
+        .AllowAnyMethod()
+        .AllowCredentials();
 });
 
 });
@@ -215,29 +217,31 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 
 // ============================================================
-// 9. Database Initialization
+// 9. Database Initialization - تم التعديل: يبني كل الجداول الـ 11
 // ============================================================
 using (var scope = app.Services.CreateScope())
 {
-var db = scope.ServiceProvider
-.GetRequiredService<PlatformDbContext>();
+    try
+    {
+        // هذا هو اللي يبني القاعدة بنفس تقسيمات PlatformDbContext
+        // لأنه ملف Migrations عندك .sql مو .cs، و Migrate ما يقرأه
+        DbInitializer.EnsureCreated(connectionString);
 
-try  
-{  
-    db.Database.EnsureCreated();  
-}  
-catch (Exception ex)  
-{  
-    var logger = scope.ServiceProvider  
-        .GetRequiredService<ILogger<Program>>();  
+        // تأكيد إضافي لـ DataProtectionKeys
+        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        db.Database.EnsureCreated();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider
+            .GetRequiredService<ILogger<Program>>();
 
-    logger.LogError(  
-        ex,  
-        "Failed to initialize ChatPlatform database.");  
+        logger.LogError(
+            ex,
+            "Failed to initialize ChatPlatform database.");
 
-    throw;  
-}
-
+        throw;
+    }
 }
 
 // ============================================================
