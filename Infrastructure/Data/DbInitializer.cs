@@ -9,47 +9,67 @@ public static class DbInitializer
     private const string DefaultDatabaseFile = "platform.db";
     private const string ContainerDataDirectory = "/data";
 
+    private const string DefaultTenantId =
+        "00000000-0000-0000-0000-000000000001";
+
     public static void EnsureCreated(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
+        {
             throw new ArgumentException(
                 "Database connection string is missing.",
                 nameof(connectionString));
+        }
 
         var builder = new SqliteConnectionStringBuilder(connectionString);
 
         var dbPath = builder.DataSource;
 
         if (string.IsNullOrWhiteSpace(dbPath))
+        {
             throw new InvalidOperationException(
                 "SQLite Data Source is not configured.");
+        }
 
-        if (dbPath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+        if (dbPath.Equals(
+                ":memory:",
+                StringComparison.OrdinalIgnoreCase))
         {
             InitializeDatabase(connectionString, dbPath);
             return;
         }
 
         var configuredDirectory =
-            Environment.GetEnvironmentVariable("CHATPLATFORM_DATA_DIR");
+            Environment.GetEnvironmentVariable(
+                "CHATPLATFORM_DATA_DIR");
 
-        var dataDirectory = !string.IsNullOrWhiteSpace(configuredDirectory)
-            ? configuredDirectory
-            : ContainerDataDirectory;
+        var dataDirectory =
+            !string.IsNullOrWhiteSpace(configuredDirectory)
+                ? configuredDirectory
+                : ContainerDataDirectory;
 
         var normalizedPath = dbPath.Replace('\\', '/');
 
-        if (normalizedPath.Equals("/app", StringComparison.OrdinalIgnoreCase) ||
-            normalizedPath.Equals("/app/", StringComparison.OrdinalIgnoreCase))
+        if (normalizedPath.Equals(
+                "/app",
+                StringComparison.OrdinalIgnoreCase)
+            || normalizedPath.Equals(
+                "/app/",
+                StringComparison.OrdinalIgnoreCase))
         {
-            dbPath = Path.Combine(dataDirectory, DefaultDatabaseFile);
+            dbPath = Path.Combine(
+                dataDirectory,
+                DefaultDatabaseFile);
         }
         else if (normalizedPath.StartsWith(
                      "/app/",
                      StringComparison.OrdinalIgnoreCase))
         {
             var fileName = Path.GetFileName(dbPath);
-            dbPath = Path.Combine(dataDirectory, fileName);
+
+            dbPath = Path.Combine(
+                dataDirectory,
+                fileName);
         }
 
         dbPath = Path.GetFullPath(dbPath);
@@ -57,27 +77,33 @@ public static class DbInitializer
         var directory = Path.GetDirectoryName(dbPath);
 
         if (string.IsNullOrWhiteSpace(directory))
+        {
             throw new InvalidOperationException(
-                "Could not determine SQLite database directory.");
+                "Could not determine database directory.");
+        }
 
         Directory.CreateDirectory(directory);
 
         builder.DataSource = dbPath;
 
-        InitializeDatabase(builder.ToString(), dbPath);
+        InitializeDatabase(
+            builder.ToString(),
+            dbPath);
     }
 
     private static void InitializeDatabase(
         string connectionString,
         string dbPath)
     {
-        using var conn = new SqliteConnection(connectionString);
+        using var connection =
+            new SqliteConnection(connectionString);
 
-        conn.Open();
+        connection.Open();
 
-        using var cmd = conn.CreateCommand();
+        using var command =
+            connection.CreateCommand();
 
-        cmd.CommandText = @"
+        command.CommandText = """
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS Tenants (
@@ -87,8 +113,15 @@ CREATE TABLE IF NOT EXISTS Tenants (
     CreatedAtUtc TEXT NOT NULL
 );
 
-INSERT OR IGNORE INTO Tenants (Id, Name, IsActive, CreatedAtUtc)
-VALUES (
+INSERT OR IGNORE INTO Tenants
+(
+    Id,
+    Name,
+    IsActive,
+    CreatedAtUtc
+)
+VALUES
+(
     '00000000-0000-0000-0000-000000000001',
     'Default Tenant',
     1,
@@ -107,7 +140,8 @@ CREATE TABLE IF NOT EXISTS Connectors (
 
 CREATE TABLE IF NOT EXISTS WhatsAppTenants (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+    TenantId TEXT NOT NULL
+        DEFAULT '00000000-0000-0000-0000-000000000001',
     PhoneNumberId TEXT NOT NULL,
     DisplayPhoneNumber TEXT NULL,
     BusinessName TEXT NULL,
@@ -117,7 +151,8 @@ CREATE TABLE IF NOT EXISTS WhatsAppTenants (
     CreatedAtUtc TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTenants_PhoneNumberId
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppTenants_PhoneNumberId
 ON WhatsAppTenants (PhoneNumberId);
 
 CREATE TABLE IF NOT EXISTS DataProtectionKeys (
@@ -143,10 +178,12 @@ CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
     LastError TEXT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_EventKey
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppWebhookInbox_EventKey
 ON WhatsAppWebhookInbox (EventKey);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
 ON WhatsAppWebhookInbox (Status, NextAttemptAtUtc);
 
 CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
@@ -164,10 +201,12 @@ CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
     ProcessedAtUtc TEXT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_EventKey
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppStatusInbox_EventKey
 ON WhatsAppStatusInbox (EventKey);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Wamid_Processed
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppStatusInbox_Wamid_Processed
 ON WhatsAppStatusInbox (Wamid, Processed);
 
 CREATE TABLE IF NOT EXISTS WhatsAppConversations (
@@ -187,13 +226,21 @@ CREATE TABLE IF NOT EXISTS WhatsAppConversations (
     UpdatedAtUtc TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppConversations_Unique
-ON WhatsAppConversations (TenantId, PhoneNumberId, ContactPhone);
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppConversations_Unique
+ON WhatsAppConversations
+(
+    TenantId,
+    PhoneNumberId,
+    ContactPhone
+);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_TenantId_Status
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppConversations_TenantId_Status
 ON WhatsAppConversations (TenantId, Status);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_WindowExpiresAtUtc
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppConversations_WindowExpiresAtUtc
 ON WhatsAppConversations (WindowExpiresAtUtc);
 
 CREATE TABLE IF NOT EXISTS WhatsAppMessages (
@@ -215,11 +262,18 @@ CREATE TABLE IF NOT EXISTS WhatsAppMessages (
         ON DELETE CASCADE
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppMessages_Wamid
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppMessages_Wamid
 ON WhatsAppMessages (Wamid);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc
-ON WhatsAppMessages (TenantId, ConversationId, TimestampUtc);
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc
+ON WhatsAppMessages
+(
+    TenantId,
+    ConversationId,
+    TimestampUtc
+);
 
 CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
     Id TEXT NOT NULL PRIMARY KEY,
@@ -245,13 +299,20 @@ CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
     UpdatedAtUtc TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_TenantId_IdempotencyKey
-ON WhatsAppOutbox (TenantId, IdempotencyKey);
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppOutbox_TenantId_IdempotencyKey
+ON WhatsAppOutbox
+(
+    TenantId,
+    IdempotencyKey
+);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Status_NextAttemptAtUtc
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppOutbox_Status_NextAttemptAtUtc
 ON WhatsAppOutbox (Status, NextAttemptAtUtc);
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppOutbox_MetaMessageId
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppOutbox_MetaMessageId
 ON WhatsAppOutbox (MetaMessageId);
 
 CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
@@ -267,11 +328,23 @@ CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
     CreatedAtUtc TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Unique
-ON WhatsAppTemplates (TenantId, WhatsAppTenantId, Name);
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_WhatsAppTemplates_Unique
+ON WhatsAppTemplates
+(
+    TenantId,
+    WhatsAppTenantId,
+    Name
+);
 
-CREATE INDEX IF NOT EXISTS IX_WhatsAppTemplates_Tenant
-ON WhatsAppTemplates (TenantId, WhatsAppTenantId, IsActive);
+CREATE INDEX IF NOT EXISTS
+IX_WhatsAppTemplates_Tenant
+ON WhatsAppTemplates
+(
+    TenantId,
+    WhatsAppTenantId,
+    IsActive
+);
 
 CREATE TABLE IF NOT EXISTS AutoReplyRules (
     Id TEXT NOT NULL PRIMARY KEY,
@@ -285,12 +358,19 @@ CREATE TABLE IF NOT EXISTS AutoReplyRules (
     CreatedAtUtc TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS IX_AutoReplyRules_Tenant
-ON AutoReplyRules (TenantId, IsActive, Priority);
+CREATE INDEX IF NOT EXISTS
+IX_AutoReplyRules_Tenant
+ON AutoReplyRules
+(
+    TenantId,
+    IsActive,
+    Priority
+);
 
 CREATE TABLE IF NOT EXISTS Users (
     Id TEXT NOT NULL PRIMARY KEY,
-    TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+    TenantId TEXT NOT NULL
+        DEFAULT '00000000-0000-0000-0000-000000000001',
     FullName TEXT NOT NULL,
     Phone TEXT NOT NULL,
     Email TEXT NOT NULL,
@@ -299,19 +379,178 @@ CREATE TABLE IF NOT EXISTS Users (
     IsActive INTEGER NOT NULL DEFAULT 1,
     CreatedAtUtc TEXT NOT NULL,
     LastLoginAtUtc TEXT NULL,
-    FOREIGN KEY (TenantId) REFERENCES Tenants (Id)
+    FOREIGN KEY (TenantId)
+        REFERENCES Tenants (Id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Phone
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_Users_Tenant_Phone
 ON Users (TenantId, Phone);
 
-CREATE UNIQUE INDEX IF NOT EXISTS IX_Users_Tenant_Email
+CREATE UNIQUE INDEX IF NOT EXISTS
+IX_Users_Tenant_Email
 ON Users (TenantId, Email);
-";
+""";
 
-        cmd.ExecuteNonQuery();
+        command.ExecuteNonQuery();
+
+        // تشغيل ترحيل التوافق بعد إنشاء الجداول.
+        ApplyWhatsAppTenantCompatibilityMigration(
+            connection);
 
         Console.WriteLine(
             $">>> DB Initialized successfully at: {dbPath}");
+    }
+
+    private static void ApplyWhatsAppTenantCompatibilityMigration(
+        SqliteConnection connection)
+    {
+        // الأعمدة المطلوبة من WhatsAppTenantEntity الحالي.
+        EnsureColumnExists(
+            connection,
+            "WhatsAppTenants",
+            "WabaId",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection,
+            "WhatsAppTenants",
+            "BusinessTokenEncrypted",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection,
+            "WhatsAppTenants",
+            "AppId",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection,
+            "WhatsAppTenants",
+            "CreatedAt",
+            "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
+
+        // نقل التوكن من الاسم القديم إلى الاسم الحالي.
+        if (ColumnExists(
+                connection,
+                "WhatsAppTenants",
+                "AccessTokenEncrypted"))
+        {
+            using var copyToken =
+                connection.CreateCommand();
+
+            copyToken.CommandText = """
+                UPDATE WhatsAppTenants
+                SET BusinessTokenEncrypted =
+                    AccessTokenEncrypted
+                WHERE
+                    (
+                        BusinessTokenEncrypted IS NULL
+                        OR BusinessTokenEncrypted = ''
+                    )
+                    AND AccessTokenEncrypted IS NOT NULL
+                    AND AccessTokenEncrypted <> '';
+                """;
+
+            copyToken.ExecuteNonQuery();
+        }
+
+        // ضمان وجود المؤسسة الافتراضية.
+        using var tenant =
+            connection.CreateCommand();
+
+        tenant.CommandText = """
+            INSERT OR IGNORE INTO Tenants
+            (
+                Id,
+                Name,
+                IsActive,
+                CreatedAtUtc
+            )
+            VALUES
+            (
+                $tenantId,
+                'Default Tenant',
+                1,
+                '2026-01-01 00:00:00'
+            );
+            """;
+
+        tenant.Parameters.AddWithValue(
+            "$tenantId",
+            DefaultTenantId);
+
+        tenant.ExecuteNonQuery();
+
+        // ضمان وجود الفهرس.
+        using var index =
+            connection.CreateCommand();
+
+        index.CommandText = """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            IX_WhatsAppTenants_PhoneNumberId
+            ON WhatsAppTenants (PhoneNumberId);
+            """;
+
+        index.ExecuteNonQuery();
+
+        Console.WriteLine(
+            ">>> WhatsAppTenants compatibility migration completed.");
+    }
+
+    private static bool ColumnExists(
+        SqliteConnection connection,
+        string tableName,
+        string columnName)
+    {
+        using var command =
+            connection.CreateCommand();
+
+        command.CommandText = """
+            SELECT COUNT(*)
+            FROM pragma_table_info($tableName)
+            WHERE name = $columnName;
+            """;
+
+        command.Parameters.AddWithValue(
+            "$tableName",
+            tableName);
+
+        command.Parameters.AddWithValue(
+            "$columnName",
+            columnName);
+
+        var result = command.ExecuteScalar();
+
+        return Convert.ToInt32(result) > 0;
+    }
+
+    private static void EnsureColumnExists(
+        SqliteConnection connection,
+        string tableName,
+        string columnName,
+        string columnDefinition)
+    {
+        if (ColumnExists(
+                connection,
+                tableName,
+                columnName))
+        {
+            return;
+        }
+
+        // أسماء الجدول والعمود ثابتة داخل الكود.
+        using var command =
+            connection.CreateCommand();
+
+        command.CommandText =
+            $"ALTER TABLE \"{tableName}\" " +
+            $"ADD COLUMN \"{columnName}\" " +
+            $"{columnDefinition};";
+
+        command.ExecuteNonQuery();
+
+        Console.WriteLine(
+            $">>> Added column {tableName}.{columnName}");
     }
 }
