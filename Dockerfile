@@ -10,9 +10,9 @@ COPY . .
 RUN dotnet restore ChatPlatform.csproj
 
 RUN dotnet publish ChatPlatform.csproj \
-    -c Release \
+    --configuration Release \
     --no-restore \
-    -o /app/publish \
+    --output /app/publish \
     /p:UseAppHost=false
 
 
@@ -25,23 +25,13 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
-# Fly.io يركب Volume في /data بعد إنشاء الصورة.
-# لذلك يجب أن يكون التطبيق قادرًا على الكتابة إلى هذا المسار.
+# تشغيل الحاوية بصلاحية root حتى تستطيع الكتابة إلى Fly Volume
 USER root
 
-RUN mkdir -p /data \
-    && chmod 777 /data \
-    && mkdir -p /app \
-    && chmod 755 /app
-
-EXPOSE 8080
-
 ENV ASPNETCORE_URLS=http://+:8080
-
 ENV ASPNETCORE_ENVIRONMENT=Production
-
 ENV CHATPLATFORM_DATA_DIR=/data
 
-ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "ChatPlatform.dll"]
