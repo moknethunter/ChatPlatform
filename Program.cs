@@ -16,10 +16,8 @@ using Microsoft.EntityFrameworkCore;
 using Polly;
 using Polly.Extensions.Http;
 using Microsoft.AspNetCore.HttpOverrides;
-
 var builder = WebApplication.CreateBuilder(args);
-
-builder.Services.Configure<ForwardedHeadersOptions>(options =>
+builder.Services.Configure(options =>
 {
 options.ForwardedHeaders =
 ForwardedHeaders.XForwardedFor
@@ -27,116 +25,104 @@ ForwardedHeaders.XForwardedFor
 options.KnownNetworks.Clear();
 options.KnownProxies.Clear();
 });
-
 // ============================================================
 // 1. WhatsApp Configuration - متوافق مع Meta فقط
 // ============================================================
 var whatsAppSection = builder.Configuration.GetSection("WhatsApp");
 var whatsAppToken =
-    Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
-    ?? whatsAppSection["AccessToken"]
-    ?? string.Empty;
+Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
+?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
+?? whatsAppSection["AccessToken"]
+?? string.Empty;
 var whatsAppPhoneId =
-    Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
-    ?? whatsAppSection["PhoneNumberId"]
-    ?? string.Empty;
+Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
+?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
+?? whatsAppSection["PhoneNumberId"]
+?? string.Empty;
 var whatsAppVerifyToken =
-    Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
-    ?? whatsAppSection["VerifyToken"]
-    ?? string.Empty;
+Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
+?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
+?? whatsAppSection["VerifyToken"]
+?? string.Empty;
 var whatsAppAppSecret =
-    Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
-    ?? whatsAppSection["AppSecret"]
-    ?? string.Empty;
+Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
+?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
+?? whatsAppSection["AppSecret"]
+?? string.Empty;
 var whatsAppApiVersion =
-    Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
-    ?? whatsAppSection["GraphApiVersion"]
-    ?? whatsAppSection["ApiVersion"]
-    ?? "v26.0";
+Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
+?? whatsAppSection["GraphApiVersion"]
+?? whatsAppSection["ApiVersion"]
+?? "v26.0";
+
+// توحيد مصادر الإعدادات على نفس المسميات اللي يستخدمها مشروعك
+builder.Configuration["WhatsApp:AccessToken"] = whatsAppToken;
+builder.Configuration["WhatsApp:PhoneNumberId"] = whatsAppPhoneId;
+builder.Configuration["WhatsApp:VerifyToken"] = whatsAppVerifyToken;
+builder.Configuration["WhatsApp:AppSecret"] = whatsAppAppSecret;
+builder.Configuration["WhatsApp:ApiVersion"] = whatsAppApiVersion;
+builder.Configuration["WhatsApp:GraphApiVersion"] = whatsAppApiVersion;
+
+// تسجيل الخيارات دائماً - مرة واحدة - بنفس SectionName حقك
+var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
+builder.Services.AddSingleton(whatsappOptions);
 
 if (string.IsNullOrWhiteSpace(whatsAppToken) ||
 string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
 string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 {
-var whatsappSection = builder.Configuration.GetSection("WhatsApp");
-
-string whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
-?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
-?? whatsappSection["AccessToken"] ?? "";
-
-string phoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
-?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
-?? whatsappSection["PhoneNumberId"] ?? "";
-
-string verifyToken = Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
-?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
-?? whatsappSection["VerifyToken"] ?? "";
-
-string appSecret = Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
-?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
-?? whatsappSection["AppSecret"] ?? "";
-
-string apiVersion = Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
-?? whatsappSection["ApiVersion"] ?? "v26.0";
-
-if (string.IsNullOrWhiteSpace(whatsappToken) ||
-string.IsNullOrWhiteSpace(phoneNumberId) ||
-string.IsNullOrWhiteSpace(verifyToken))
-{
 Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
 Console.WriteLine("المفقود: " +
-(string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
-(string.IsNullOrWhiteSpace(phoneNumberId) ? "[PhoneNumberId] " : "") +
-(string.IsNullOrWhiteSpace(verifyToken) ? "[VerifyToken] " : ""));
+(string.IsNullOrWhiteSpace(whatsAppToken) ? "[AccessToken] " : "") +
+(string.IsNullOrWhiteSpace(whatsAppPhoneId) ? "[PhoneNumberId] " : "") +
+(string.IsNullOrWhiteSpace(whatsAppVerifyToken) ? "[VerifyToken] " : ""));
 }
 else
 {
-Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
-}
-var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
-builder.Services.AddSingleton(whatsappOptions);
-
-if (!whatsappOptions.IsConfigured)
-{
-Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
-}
-else
-{
-Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsappOptions.ApiVersion}");
-}
+Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsAppApiVersion}");
 }
 
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
 Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
 }
-
 // ============================================================
-// 2. Database - تم التعديل: مسار ثابت في Fly.io Volume
+// 2. Database - تم التعديل: توحيد المسار على /data/platform.db
 // ============================================================
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-    ?? "Data Source=/app/data/platform.db";
+?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+?? "Data Source=/data/platform.db";
+
+var sqliteBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
+var dataDirectory = Environment.GetEnvironmentVariable("CHATPLATFORM_DATA_DIR") ?? "/data";
+
+// إذا كان المسار القديم /app/... نحوله لـ /data/... بنفس اسم الملف
+if (sqliteBuilder.DataSource.StartsWith("/app/", StringComparison.OrdinalIgnoreCase))
+{
+    sqliteBuilder.DataSource = Path.Combine(dataDirectory, Path.GetFileName(sqliteBuilder.DataSource));
+}
+if (sqliteBuilder.DataSource.Equals("/app", StringComparison.OrdinalIgnoreCase))
+{
+    sqliteBuilder.DataSource = Path.Combine(dataDirectory, "platform.db");
+}
+connectionString = sqliteBuilder.ToString();
+Console.WriteLine($">>> SQLite database: {sqliteBuilder.DataSource}");
 
 builder.Services.AddDbContext<PlatformDbContext>(options =>
-    options.UseSqlite(connectionString));
-
+options.UseSqlite(connectionString));
 // ============================================================
 // 3. Configuration and Data Protection
 // ============================================================
-builder.Services.Configure<EngineOptions>(
+builder.Services.Configure(
 builder.Configuration.GetSection("EngineSettings"));
-
 builder.Services.AddDataProtection()
-.PersistKeysToDbContext<PlatformDbContext>()
+.PersistKeysToDbContext()
 .SetApplicationName("ChatPlatform");
-
 // ============================================================
 // 4. Event Bus and Core Engine
 // ============================================================
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-builder.Services.AddHostedService<CoreEngine>();
-
+builder.Services.AddHostedService();
 // ============================================================
 // 5. Integration Adapters
 // ============================================================
@@ -145,12 +131,10 @@ builder.Services.AddSingleton<IIntegrationAdapter, ChatAdapter>();
 builder.Services.AddSingleton<IIntegrationAdapter, UniversalConnectorAdapter>();
 builder.Services.AddWhatsAppAdapter(builder.Configuration);
 builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
-
 // ============================================================
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
-
 builder.Services.AddHttpClient("ResilientClient")
 .AddPolicyHandler(
 HttpPolicyExtensions.HandleTransientHttpError()
@@ -158,7 +142,6 @@ HttpPolicyExtensions.HandleTransientHttpError()
 3,
 retryAttempt =>
 TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
-
 builder.Services.AddHttpClient("WhatsAppCloudApi", client =>
 {
 client.BaseAddress = new Uri($"https://graph.facebook.com/{whatsAppApiVersion}/");
@@ -166,7 +149,6 @@ client.DefaultRequestHeaders.Authorization =
 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", whatsAppToken);
 client.Timeout = TimeSpan.FromSeconds(30);
 });
-
 // ============================================================
 // 7. SignalR and CORS
 // ============================================================
@@ -174,10 +156,8 @@ var allowedOrigins =
 builder.Configuration
 .GetSection("Cors:AllowedOrigins")
 .Get<string[]>()
-?? Array.Empty<string>();
-
+?? Array.Empty();
 builder.Services.AddSignalR();
-
 builder.Services.AddCors(options =>
 {
 options.AddDefaultPolicy(policy =>
@@ -190,66 +170,56 @@ origin,
 UriKind.Absolute,
 out var uri))
 return false;
-
 return allowedOrigins.Contains(
-                uri.GetLeftPart(UriPartial.Authority),
-                StringComparer.OrdinalIgnoreCase);
-        })
-        .AllowAnyHeader()
-        .AllowAnyMethod()
-        .AllowCredentials();
+uri.GetLeftPart(UriPartial.Authority),
+StringComparer.OrdinalIgnoreCase);
+})
+.AllowAnyHeader()
+.AllowAnyMethod()
+.AllowCredentials();
 });
-
 });
-
 // ============================================================
 // 8. Build Application
 // ============================================================
 var app = builder.Build();
-
 app.UseForwardedHeaders();
-
 // ============================================================
-// 9. Database Initialization - هذا هو السطر المهم
+// 9. Database Initialization - مسؤولية DbInitializer فقط
 // ============================================================
 using (var scope = app.Services.CreateScope())
 {
-    try
-    {
-        // هذا هو اللي يبني القاعدة + المستخدم الأول
-        DbInitializer.EnsureCreated(connectionString);
-
-        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        db.Database.EnsureCreated();
-    }
-    catch (Exception ex)
-    {
-        var logger = scope.ServiceProvider
-            .GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "Failed to initialize ChatPlatform database.");
-        throw;
-    }
+try
+{
+DbInitializer.EnsureCreated(connectionString);
+var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+await db.Database.CanConnectAsync();
+var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+logger.LogInformation("ChatPlatform database initialized successfully.");
 }
-
+catch (Exception ex)
+{
+var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+logger.LogError(ex, "Failed to initialize ChatPlatform database.");
+throw;
+}
+}
 // ============================================================
 // 10. Middleware Pipeline
 // ============================================================
-app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseMiddleware();
 app.UseCors();
-app.UseMiddleware<ApiKeyMiddleware>();
+app.UseMiddleware();
 app.UseDefaultFiles();
 app.UseStaticFiles();
-
 // ============================================================
 // 11. All Endpoints
 // ============================================================
 app.MapAllEndpoints(builder.Configuration);
-
 // ============================================================
 // 12. Run
 // ============================================================
 app.Run();
-
 public partial class Program
 {
 }
