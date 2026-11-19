@@ -32,7 +32,7 @@ options.KnownNetworks.Clear();
 options.KnownProxies.Clear();
 });
 // ============================================================
-// 1. WhatsApp Configuration - متوافق مع Meta فقط
+// 1. WhatsApp Configuration
 // ============================================================
 var whatsAppSection = builder.Configuration.GetSection("WhatsApp");
 var whatsAppToken =
@@ -60,49 +60,36 @@ Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
 ?? whatsAppSection["GraphApiVersion"]
 ?? whatsAppSection["ApiVersion"]
 ?? "v26.0";
-
-// توحيد مصادر الإعدادات على نفس المسميات اللي يستخدمها مشروعك
 builder.Configuration["WhatsApp:AccessToken"] = whatsAppToken;
 builder.Configuration["WhatsApp:PhoneNumberId"] = whatsAppPhoneId;
 builder.Configuration["WhatsApp:VerifyToken"] = whatsAppVerifyToken;
 builder.Configuration["WhatsApp:AppSecret"] = whatsAppAppSecret;
 builder.Configuration["WhatsApp:ApiVersion"] = whatsAppApiVersion;
 builder.Configuration["WhatsApp:GraphApiVersion"] = whatsAppApiVersion;
-
-// تسجيل الخيارات دائماً - مرة واحدة - بنفس SectionName حقك
 var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
 builder.Services.AddSingleton(whatsappOptions);
-
 if (string.IsNullOrWhiteSpace(whatsAppToken) ||
 string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
 string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 {
 Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
-Console.WriteLine("المفقود: " +
-(string.IsNullOrWhiteSpace(whatsAppToken) ? "[AccessToken] " : "") +
-(string.IsNullOrWhiteSpace(whatsAppPhoneId) ? "[PhoneNumberId] " : "") +
-(string.IsNullOrWhiteSpace(whatsAppVerifyToken) ? "[VerifyToken] " : ""));
 }
 else
 {
 Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {whatsAppApiVersion}");
 }
-
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
 Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
 }
 // ============================================================
-// 2. Database - تم التعديل: توحيد المسار على /data/platform.db
+// 2. Database - /data/platform.db
 // ============================================================
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
 ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
 ?? "Data Source=/data/platform.db";
-
 var sqliteBuilder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connectionString);
 var dataDirectory = Environment.GetEnvironmentVariable("CHATPLATFORM_DATA_DIR") ?? "/data";
-
-// إذا كان المسار القديم /app/... نحوله لـ /data/... بنفس اسم الملف
 if (sqliteBuilder.DataSource.StartsWith("/app/", StringComparison.OrdinalIgnoreCase))
 {
     sqliteBuilder.DataSource = Path.Combine(dataDirectory, Path.GetFileName(sqliteBuilder.DataSource));
@@ -113,22 +100,21 @@ if (sqliteBuilder.DataSource.Equals("/app", StringComparison.OrdinalIgnoreCase))
 }
 connectionString = sqliteBuilder.ToString();
 Console.WriteLine($">>> SQLite database: {sqliteBuilder.DataSource}");
-
 builder.Services.AddDbContext<PlatformDbContext>(options =>
 options.UseSqlite(connectionString));
 // ============================================================
-// 3. Configuration and Data Protection
+// 3. Configuration and Data Protection - التعديل 1 هنا
 // ============================================================
-builder.Services.Configure<EngineSettings>(
+builder.Services.Configure<EngineOptions>(
 builder.Configuration.GetSection("EngineSettings"));
 builder.Services.AddDataProtection()
 .PersistKeysToDbContext<PlatformDbContext>()
 .SetApplicationName("ChatPlatform");
 // ============================================================
-// 4. Event Bus and Core Engine
+// 4. Event Bus and Core Engine - التعديل 2 هنا
 // ============================================================
 builder.Services.AddSingleton<IEventBus, InMemoryEventBus>();
-builder.Services.AddHostedService<EngineHostedService>();
+builder.Services.AddHostedService<CoreEngine>();
 // ============================================================
 // 5. Integration Adapters
 // ============================================================
@@ -191,7 +177,7 @@ StringComparer.OrdinalIgnoreCase);
 var app = builder.Build();
 app.UseForwardedHeaders();
 // ============================================================
-// 9. Database Initialization - مسؤولية DbInitializer فقط
+// 9. Database Initialization
 // ============================================================
 using (var scope = app.Services.CreateScope())
 {
@@ -211,11 +197,12 @@ throw;
 }
 }
 // ============================================================
-// 10. Middleware Pipeline
+// 10. Middleware Pipeline - التعديل 3 و 4 هنا
 // ============================================================
-app.UseMiddleware<ExceptionHandlingMiddleware>();
+app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors();
-app.UseMiddleware<TenantResolutionMiddleware>();
+// تم حذف TenantResolutionMiddleware مؤقتاً - لا ننشئ وهمي
+// آلية TenantResolver الحالية في WhatsApp تبقى كما هي
 app.UseDefaultFiles();
 app.UseStaticFiles();
 // ============================================================
