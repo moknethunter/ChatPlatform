@@ -58,7 +58,6 @@ if (string.IsNullOrWhiteSpace(whatsAppToken) ||
 string.IsNullOrWhiteSpace(whatsAppPhoneId) ||
 string.IsNullOrWhiteSpace(whatsAppVerifyToken))
 {
-// ===== إعدادات واتساب - لا توقف البرنامج إذا ناقصة =====
 var whatsappSection = builder.Configuration.GetSection("WhatsApp");
 
 string whatsappToken = Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
@@ -84,8 +83,6 @@ if (string.IsNullOrWhiteSpace(whatsappToken) ||
 string.IsNullOrWhiteSpace(phoneNumberId) ||
 string.IsNullOrWhiteSpace(verifyToken))
 {
-// ⚠️ لا ترمي Exception هنا - فقط حذر وكمل التشغيل
-// عشان الواجهة تشتغل وتقدر تشوف رسالة الخطأ في /settings.html
 Console.WriteLine("⚠️ تحذير: إعدادات واتساب ناقصة. سيشتغل الخادم لكن واتساب لن يعمل حتى تكمل الإعدادات.");
 Console.WriteLine("المفقود: " +
 (string.IsNullOrWhiteSpace(whatsappToken) ? "[AccessToken] " : "") +
@@ -96,10 +93,7 @@ else
 {
 Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {apiVersion}");
 }
-// لا تنشئ new WhatsAppOptions يدوي - اقرأه من Configuration عشان يطبق [ConfigurationKeyName]
 var whatsappOptions = builder.Configuration.GetSection(WhatsAppOptions.SectionName).Get<WhatsAppOptions>() ?? new WhatsAppOptions();
-
-// إذا البيئة فيها متغيرات، هي أولى - Configuration يجيبها تلقائياً
 builder.Services.AddSingleton(whatsappOptions);
 
 if (!whatsappOptions.IsConfigured)
@@ -165,7 +159,6 @@ HttpPolicyExtensions.HandleTransientHttpError()
 retryAttempt =>
 TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))));
 
-// HttpClient الرسمي لواتساب - Meta Cloud API
 builder.Services.AddHttpClient("WhatsAppCloudApi", client =>
 {
 client.BaseAddress = new Uri($"https://graph.facebook.com/{whatsAppApiVersion}/");
@@ -217,17 +210,15 @@ var app = builder.Build();
 app.UseForwardedHeaders();
 
 // ============================================================
-// 9. Database Initialization - تم التعديل: يبني كل الجداول الـ 11
+// 9. Database Initialization - هذا هو السطر المهم
 // ============================================================
 using (var scope = app.Services.CreateScope())
 {
     try
     {
-        // هذا هو اللي يبني القاعدة بنفس تقسيمات PlatformDbContext
-        // لأنه ملف Migrations عندك .sql مو .cs، و Migrate ما يقرأه
+        // هذا هو اللي يبني القاعدة + المستخدم الأول
         DbInitializer.EnsureCreated(connectionString);
 
-        // تأكيد إضافي لـ DataProtectionKeys
         var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
         db.Database.EnsureCreated();
     }
@@ -235,11 +226,7 @@ using (var scope = app.Services.CreateScope())
     {
         var logger = scope.ServiceProvider
             .GetRequiredService<ILogger<Program>>();
-
-        logger.LogError(
-            ex,
-            "Failed to initialize ChatPlatform database.");
-
+        logger.LogError(ex, "Failed to initialize ChatPlatform database.");
         throw;
     }
 }
@@ -254,7 +241,7 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // ============================================================
-// 11. All Endpoints - من EndpointMapper فقط، بدون تكرار في Program.cs
+// 11. All Endpoints
 // ============================================================
 app.MapAllEndpoints(builder.Configuration);
 
