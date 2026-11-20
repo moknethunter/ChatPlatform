@@ -10,9 +10,9 @@ COPY . .
 RUN dotnet restore ChatPlatform.csproj
 
 RUN dotnet publish ChatPlatform.csproj \
-    --configuration Release \
+    -c Release \
     --no-restore \
-    --output /app/publish \
+    -o /app/publish \
     /p:UseAppHost=false
 
 
@@ -25,30 +25,13 @@ WORKDIR /app
 
 COPY --from=build /app/publish .
 
-# ============================================================
-# Data directory (داخل WORKDIR - مضمون الكتابة دائمًا)
-# ============================================================
-
-RUN mkdir -p /app/data \
-    && chmod 777 /app/data
-
-# ============================================================
-# Environment
-# ============================================================
+# ضروري للسماح بالكتابة إلى Fly Volume
+USER root
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV CHATPLATFORM_DATA_DIR=/app/data
-ENV CHATPLATFORM_ALLOW_EPHEMERAL_DB=false
-ENV DOTNET_EnableDiagnostics=0
-
-# إعلان مجلد البيانات كـ volume دائم (توثيقي)
-VOLUME ["/app/data"]
+ENV CHATPLATFORM_DATA_DIR=/data
 
 EXPOSE 8080
-
-# ============================================================
-# Startup
-# ============================================================
 
 ENTRYPOINT ["dotnet", "ChatPlatform.dll"]
