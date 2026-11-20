@@ -26,14 +26,10 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # ============================================================
-# Database permissions
+# Data directory (داخل WORKDIR - مضمون الكتابة دائمًا)
 # ============================================================
 
-USER root
-
-RUN mkdir -p /data \
-    && chmod 777 /data \
-    && mkdir -p /app/data \
+RUN mkdir -p /app/data \
     && chmod 777 /app/data
 
 # ============================================================
@@ -41,14 +37,13 @@ RUN mkdir -p /data \
 # ============================================================
 
 ENV ASPNETCORE_URLS=http://+:8080
-
 ENV ASPNETCORE_ENVIRONMENT=Production
-
-ENV CHATPLATFORM_DATA_DIR=/data
-
+ENV CHATPLATFORM_DATA_DIR=/app/data
 ENV CHATPLATFORM_ALLOW_EPHEMERAL_DB=false
-
 ENV DOTNET_EnableDiagnostics=0
+
+# إعلان مجلد البيانات كـ volume دائم (توثيقي)
+VOLUME ["/app/data"]
 
 EXPOSE 8080
 
