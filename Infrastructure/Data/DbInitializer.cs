@@ -12,32 +12,25 @@ public static class DbInitializer
     private const string DefaultTenantId =
         "00000000-0000-0000-0000-000000000001";
 
-    // المؤسسة الافتراضية لمؤسسة الحوباني
     private const string AlhawbaniTenantId =
         "tenant-alhawbani-001";
 
     public static void EnsureCreated(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString))
-        {
             throw new ArgumentException(
                 "Database connection string is missing.",
                 nameof(connectionString));
-        }
 
         var builder = new SqliteConnectionStringBuilder(connectionString);
-
         var dbPath = builder.DataSource;
 
         if (string.IsNullOrWhiteSpace(dbPath))
-        {
             throw new InvalidOperationException(
                 "SQLite Data Source is not configured.");
-        }
 
-        if (dbPath.Equals(
-                ":memory:",
-                StringComparison.OrdinalIgnoreCase))
+        if (dbPath.Equals(":memory:",
+            StringComparison.OrdinalIgnoreCase))
         {
             InitializeDatabase(connectionString, dbPath);
             return;
@@ -48,32 +41,36 @@ public static class DbInitializer
                 "CHATPLATFORM_DATA_DIR");
 
         var dataDirectory =
-            !string.IsNullOrWhiteSpace(configuredDirectory)
-                ? configuredDirectory
-                : ContainerDataDirectory;
+            string.IsNullOrWhiteSpace(configuredDirectory)
+                ? ContainerDataDirectory
+                : configuredDirectory;
 
         var normalizedPath = dbPath.Replace('\\', '/');
 
-        if (normalizedPath.Equals(
-                "/app",
-                StringComparison.OrdinalIgnoreCase)
-            || normalizedPath.Equals(
-                "/app/",
-                StringComparison.OrdinalIgnoreCase))
+        // تحويل مسارات Docker القديمة إلى مجلد البيانات الدائم.
+        if (normalizedPath.Equals("/app",
+            StringComparison.OrdinalIgnoreCase) ||
+            normalizedPath.Equals("/app/",
+            StringComparison.OrdinalIgnoreCase))
         {
             dbPath = Path.Combine(
                 dataDirectory,
                 DefaultDatabaseFile);
         }
         else if (normalizedPath.StartsWith(
-                     "/app/",
-                     StringComparison.OrdinalIgnoreCase))
+            "/app/",
+            StringComparison.OrdinalIgnoreCase))
         {
-            var fileName = Path.GetFileName(dbPath);
-
             dbPath = Path.Combine(
                 dataDirectory,
-                fileName);
+                Path.GetFileName(dbPath));
+        }
+        else if (!Path.IsPathRooted(dbPath))
+        {
+            // المسارات النسبية تحفظ داخل مجلد البيانات.
+            dbPath = Path.Combine(
+                dataDirectory,
+                dbPath);
         }
 
         dbPath = Path.GetFullPath(dbPath);
@@ -81,43 +78,75 @@ public static class DbInitializer
         var directory = Path.GetDirectoryName(dbPath);
 
         if (string.IsNullOrWhiteSpace(directory))
-        {
             throw new InvalidOperationException(
                 "Could not determine database directory.");
-        }
 
-        // FIX Fly.io: /data هو Volume موجود أصلاً
-        // CreateDirectory على Volume موجود يطلع Permission denied
-        // لذلك لا تنشئه إذا كان موجود، وتجاهل الخطأ إذا كان موجود
-        try
+        if (!TryEnsureDirectory(directory))
         {
-            if (!Directory.Exists(directory))
+            // لا نستخدم /tmp تلقائياً في الإنتاج.
+            // لأن ذلك يؤدي إلى فقدان البيانات بعد إعادة التشغيل.
+            var allowEphemeral =
+                string.Equals(
+                    Environment.GetEnvironmentVariable(
+                        "CHATPLATFORM_ALLOW_EPHEMERAL_DB"),
+                    "true",
+                    StringComparison.OrdinalIgnoreCase);
+
+            if (!allowEphemeral)
             {
-                Directory.CreateDirectory(directory);
+                throw new IOException(
+                    $"Cannot write to SQLite directory: {directory}. " +
+                    "Configure CHATPLATFORM_DATA_DIR to a writable " +
+                    "persistent volume.");
             }
-        }
-        catch (UnauthorizedAccessException)
-        {
-            if (!Directory.Exists(directory))
-            {
-                throw;
-            }
-            Console.WriteLine($">>> Directory already exists (Volume): {directory}, continuing...");
-        }
-        catch (IOException)
-        {
-            if (!Directory.Exists(directory))
-            {
-                throw;
-            }
-            Console.WriteLine($">>> Directory already exists (Volume): {directory}, continuing...");
+
+            var fallbackDirectory = Path.Combine(
+                Path.GetTempPath(),
+                "chatplatform-data");
+
+            Console.WriteLine(
+                $">>> WARNING: Using EPHEMERAL database: {fallbackDirectory}");
+
+            if (!TryEnsureDirectory(fallbackDirectory))
+                throw new IOException(
+                    "Cannot create fallback SQLite directory.");
+
+            dbPath = Path.Combine(
+                fallbackDirectory,
+                Path.GetFileName(dbPath));
         }
 
         builder.DataSource = dbPath;
 
-        InitializeDatabase(
-            builder.ToString(),
-            dbPath);
+        InitializeDatabase(builder.ToString(), dbPath);
+    }
+
+    private static bool TryEnsureDirectory(string directory)
+    {
+        try
+        {
+            Directory.CreateDirectory(directory);
+
+            var testFile = Path.Combine(
+                directory,
+                ".chatplatform-write-test-" +
+                Guid.NewGuid().ToString("N"));
+
+            File.WriteAllText(testFile, "test");
+            File.Delete(testFile);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine(
+                $">>> SQLite directory unavailable: {directory}");
+
+            Console.WriteLine(
+                $">>> Reason: {ex.Message}");
+
+            return false;
+        }
     }
 
     private static void InitializeDatabase(
@@ -129,348 +158,364 @@ public static class DbInitializer
 
         connection.Open();
 
-        using var command =
-            connection.CreateCommand();
+        using var transaction =
+            connection.BeginTransaction();
 
-        command.CommandText = """
+        try
+        {
+            Execute(connection, transaction,
+                "PRAGMA foreign_keys = ON;");
 
-        PRAGMA foreign_keys = ON;
+            Execute(connection, transaction, """
+                CREATE TABLE IF NOT EXISTS Tenants (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Name TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    CreatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS Tenants (
-        Id TEXT NOT NULL PRIMARY KEY,
-        Name TEXT NOT NULL,
-        IsActive INTEGER NOT NULL,
-        CreatedAtUtc TEXT NOT NULL
-        );
+                CREATE TABLE IF NOT EXISTS Connectors (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Type TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    ConfigJson TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL,
+                    CreatedAtUtc TEXT NOT NULL
+                );
 
-        INSERT OR IGNORE INTO Tenants
-        (
-        Id,
-        Name,
-        IsActive,
-        CreatedAtUtc
-        )
-        VALUES
-        (
-        '00000000-0000-0000-0000-000000000001',
-        'Default Tenant',
-        1,
-        '2026-01-01 00:00:00'
-        );
+                CREATE TABLE IF NOT EXISTS WhatsAppTenants (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+                    PhoneNumberId TEXT NOT NULL,
+                    DisplayPhoneNumber TEXT NULL,
+                    BusinessName TEXT NULL,
+                    AccessTokenEncrypted TEXT NULL,
+                    VerifyToken TEXT NULL,
+                    IsActive INTEGER NOT NULL,
+                    CreatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS Connectors (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        Type TEXT NOT NULL,
-        Name TEXT NOT NULL,
-        ConfigJson TEXT NOT NULL,
-        IsActive INTEGER NOT NULL,
-        CreatedAtUtc TEXT NOT NULL
-        );
+                CREATE TABLE IF NOT EXISTS DataProtectionKeys (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    FriendlyName TEXT NULL,
+                    Xml TEXT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS WhatsAppTenants (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL
-        DEFAULT '00000000-0000-0000-0000-000000000001',
-        PhoneNumberId TEXT NOT NULL,
-        DisplayPhoneNumber TEXT NULL,
-        BusinessName TEXT NULL,
-        AccessTokenEncrypted TEXT NULL,
-        VerifyToken TEXT NULL,
-        IsActive INTEGER NOT NULL,
-        CreatedAtUtc TEXT NOT NULL
-        );
+                CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    EventKey TEXT NOT NULL,
+                    PhoneNumberId TEXT NOT NULL,
+                    PayloadJson TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    Attempts INTEGER NOT NULL,
+                    MaxAttempts INTEGER NOT NULL,
+                    ReceivedAtUtc TEXT NOT NULL,
+                    NextAttemptAtUtc TEXT NOT NULL,
+                    LeaseUntilUtc TEXT NULL,
+                    LeaseOwner TEXT NULL,
+                    ProcessedAtUtc TEXT NULL,
+                    LastError TEXT NULL
+                );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppTenants_PhoneNumberId
-        ON WhatsAppTenants (PhoneNumberId);
+                CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    EventKey TEXT NOT NULL,
+                    PhoneNumberId TEXT NOT NULL,
+                    ContactPhone TEXT NOT NULL,
+                    Wamid TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    StatusTimestamp INTEGER NOT NULL,
+                    PayloadJson TEXT NOT NULL,
+                    Processed INTEGER NOT NULL,
+                    ReceivedAtUtc TEXT NOT NULL,
+                    ProcessedAtUtc TEXT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS DataProtectionKeys (
-        Id INTEGER PRIMARY KEY AUTOINCREMENT,
-        FriendlyName TEXT NULL,
-        Xml TEXT NULL
-        );
+                CREATE TABLE IF NOT EXISTS WhatsAppConversations (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    PhoneNumberId TEXT NOT NULL,
+                    ContactPhone TEXT NOT NULL,
+                    ContactName TEXT NULL,
+                    LastInboundAtUtc TEXT NULL,
+                    LastOutboundAtUtc TEXT NULL,
+                    WindowExpiresAtUtc TEXT NULL,
+                    Status TEXT NOT NULL,
+                    AssignedToUserId TEXT NULL,
+                    UnreadCount INTEGER NOT NULL,
+                    Tags TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS WhatsAppWebhookInbox (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        EventKey TEXT NOT NULL,
-        PhoneNumberId TEXT NOT NULL,
-        PayloadJson TEXT NOT NULL,
-        Status TEXT NOT NULL,
-        Attempts INTEGER NOT NULL,
-        MaxAttempts INTEGER NOT NULL,
-        ReceivedAtUtc TEXT NOT NULL,
-        NextAttemptAtUtc TEXT NOT NULL,
-        LeaseUntilUtc TEXT NULL,
-        LeaseOwner TEXT NULL,
-        ProcessedAtUtc TEXT NULL,
-        LastError TEXT NULL
-        );
+                CREATE TABLE IF NOT EXISTS WhatsAppMessages (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    ConversationId TEXT NOT NULL,
+                    Wamid TEXT NULL,
+                    Direction TEXT NOT NULL,
+                    MessageType TEXT NOT NULL,
+                    ContentJson TEXT NOT NULL,
+                    TextPreview TEXT NULL,
+                    MediaMimeType TEXT NULL,
+                    MediaUrl TEXT NULL,
+                    Status TEXT NOT NULL,
+                    TimestampUtc TEXT NOT NULL,
+                    CreatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY (ConversationId)
+                        REFERENCES WhatsAppConversations(Id)
+                        ON DELETE CASCADE
+                );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppWebhookInbox_EventKey
-        ON WhatsAppWebhookInbox (EventKey);
+                CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    CorrelationId TEXT NOT NULL,
+                    IdempotencyKey TEXT NOT NULL,
+                    MessageId TEXT NULL,
+                    PhoneNumberId TEXT NOT NULL,
+                    RecipientPhone TEXT NOT NULL,
+                    MessageType TEXT NOT NULL,
+                    PayloadJson TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    Attempts INTEGER NOT NULL,
+                    MaxAttempts INTEGER NOT NULL,
+                    CreatedAtUtc TEXT NOT NULL,
+                    NextAttemptAtUtc TEXT NOT NULL,
+                    ScheduledForUtc TEXT NULL,
+                    LeaseUntilUtc TEXT NULL,
+                    LeaseOwner TEXT NULL,
+                    SentAtUtc TEXT NULL,
+                    MetaMessageId TEXT NULL,
+                    LastError TEXT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
-        ON WhatsAppWebhookInbox (Status, NextAttemptAtUtc);
+                CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    WhatsAppTenantId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Category TEXT NOT NULL,
+                    Language TEXT NOT NULL,
+                    Body TEXT NOT NULL,
+                    Status TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE TABLE IF NOT EXISTS WhatsAppStatusInbox (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        EventKey TEXT NOT NULL,
-        PhoneNumberId TEXT NOT NULL,
-        ContactPhone TEXT NOT NULL,
-        Wamid TEXT NOT NULL,
-        Status TEXT NOT NULL,
-        StatusTimestamp INTEGER NOT NULL,
-        PayloadJson TEXT NOT NULL,
-        Processed INTEGER NOT NULL,
-        ReceivedAtUtc TEXT NOT NULL,
-        ProcessedAtUtc TEXT NULL
-        );
+                CREATE TABLE IF NOT EXISTS AutoReplyRules (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    MatchType TEXT NOT NULL,
+                    KeywordPattern TEXT NULL,
+                    ReplyText TEXT NOT NULL,
+                    Priority INTEGER NOT NULL DEFAULT 0,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAtUtc TEXT NOT NULL
+                );
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppStatusInbox_EventKey
-        ON WhatsAppStatusInbox (EventKey);
+                CREATE TABLE IF NOT EXISTS Users (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+                    FullName TEXT NOT NULL,
+                    Phone TEXT NOT NULL,
+                    Email TEXT NOT NULL,
+                    PasswordHash TEXT NOT NULL,
+                    Role TEXT NOT NULL DEFAULT 'agent',
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAtUtc TEXT NOT NULL,
+                    LastLoginAtUtc TEXT NULL,
+                    FOREIGN KEY (TenantId)
+                        REFERENCES Tenants(Id)
+                );
+                """);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppStatusInbox_Wamid_Processed
-        ON WhatsAppStatusInbox (Wamid, Processed);
+            // ترحيل قواعد البيانات القديمة.
+            ApplyWhatsAppTenantCompatibilityMigration(
+                connection,
+                transaction);
 
-        CREATE TABLE IF NOT EXISTS WhatsAppConversations (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        PhoneNumberId TEXT NOT NULL,
-        ContactPhone TEXT NOT NULL,
-        ContactName TEXT NULL,
-        LastInboundAtUtc TEXT NULL,
-        LastOutboundAtUtc TEXT NULL,
-        WindowExpiresAtUtc TEXT NULL,
-        Status TEXT NOT NULL,
-        AssignedToUserId TEXT NULL,
-        UnreadCount INTEGER NOT NULL,
-        Tags TEXT NULL,
-        CreatedAtUtc TEXT NOT NULL,
-        UpdatedAtUtc TEXT NOT NULL
-        );
+            // إنشاء المؤسسات الافتراضية.
+            EnsureDefaultTenant(connection, transaction);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppConversations_Unique
-        ON WhatsAppConversations
-        (
-        TenantId,
-        PhoneNumberId,
-        ContactPhone
-        );
+            // إنشاء مؤسسة الحوباني.
+            EnsureAlhawbaniTenant(connection, transaction);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppConversations_TenantId_Status
-        ON WhatsAppConversations (TenantId, Status);
+            // ربط حساب واتساب عند توفر إعداداته.
+            EnsureAlhawbaniWhatsAppTenant(
+                connection,
+                transaction);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppConversations_WindowExpiresAtUtc
-        ON WhatsAppConversations (WindowExpiresAtUtc);
+            // إنشاء الفهارس بعد التأكد من الأعمدة.
+            Execute(connection, transaction, """
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppTenants_PhoneNumberId
+                    ON WhatsAppTenants(PhoneNumberId);
 
-        CREATE TABLE IF NOT EXISTS WhatsAppMessages (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        ConversationId TEXT NOT NULL,
-        Wamid TEXT NULL,
-        Direction TEXT NOT NULL,
-        MessageType TEXT NOT NULL,
-        ContentJson TEXT NOT NULL,
-        TextPreview TEXT NULL,
-        MediaMimeType TEXT NULL,
-        MediaUrl TEXT NULL,
-        Status TEXT NOT NULL,
-        TimestampUtc TEXT NOT NULL,
-        CreatedAtUtc TEXT NOT NULL,
-        FOREIGN KEY (ConversationId)
-        REFERENCES WhatsAppConversations (Id)
-        ON DELETE CASCADE
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppWebhookInbox_EventKey
+                    ON WhatsAppWebhookInbox(EventKey);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppMessages_Wamid
-        ON WhatsAppMessages (Wamid);
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
+                    ON WhatsAppWebhookInbox(Status, NextAttemptAtUtc);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc
-        ON WhatsAppMessages
-        (
-        TenantId,
-        ConversationId,
-        TimestampUtc
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppStatusInbox_EventKey
+                    ON WhatsAppStatusInbox(EventKey);
 
-        CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        CorrelationId TEXT NOT NULL,
-        IdempotencyKey TEXT NOT NULL,
-        MessageId TEXT NULL,
-        PhoneNumberId TEXT NOT NULL,
-        RecipientPhone TEXT NOT NULL,
-        MessageType TEXT NOT NULL,
-        PayloadJson TEXT NOT NULL,
-        Status TEXT NOT NULL,
-        Attempts INTEGER NOT NULL,
-        MaxAttempts INTEGER NOT NULL,
-        CreatedAtUtc TEXT NOT NULL,
-        NextAttemptAtUtc TEXT NOT NULL,
-        ScheduledForUtc TEXT NULL,
-        LeaseUntilUtc TEXT NULL,
-        LeaseOwner TEXT NULL,
-        SentAtUtc TEXT NULL,
-        MetaMessageId TEXT NULL,
-        LastError TEXT NULL,
-        UpdatedAtUtc TEXT NOT NULL
-        );
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppStatusInbox_Wamid_Processed
+                    ON WhatsAppStatusInbox(Wamid, Processed);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppOutbox_TenantId_IdempotencyKey
-        ON WhatsAppOutbox
-        (
-        TenantId,
-        IdempotencyKey
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppConversations_Unique
+                    ON WhatsAppConversations(
+                        TenantId,
+                        PhoneNumberId,
+                        ContactPhone);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppOutbox_Status_NextAttemptAtUtc
-        ON WhatsAppOutbox (Status, NextAttemptAtUtc);
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppConversations_TenantId_Status
+                    ON WhatsAppConversations(TenantId, Status);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppOutbox_MetaMessageId
-        ON WhatsAppOutbox (MetaMessageId);
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppConversations_WindowExpiresAtUtc
+                    ON WhatsAppConversations(WindowExpiresAtUtc);
 
-        CREATE TABLE IF NOT EXISTS WhatsAppTemplates (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        WhatsAppTenantId TEXT NOT NULL,
-        Name TEXT NOT NULL,
-        Category TEXT NOT NULL,
-        Language TEXT NOT NULL,
-        Body TEXT NOT NULL,
-        Status TEXT NOT NULL,
-        IsActive INTEGER NOT NULL DEFAULT 1,
-        CreatedAtUtc TEXT NOT NULL
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppMessages_Wamid
+                    ON WhatsAppMessages(Wamid);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_WhatsAppTemplates_Unique
-        ON WhatsAppTemplates
-        (
-        TenantId,
-        WhatsAppTenantId,
-        Name
-        );
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppMessages_TenantId_ConversationId_TimestampUtc
+                    ON WhatsAppMessages(
+                        TenantId,
+                        ConversationId,
+                        TimestampUtc);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_WhatsAppTemplates_Tenant
-        ON WhatsAppTemplates
-        (
-        TenantId,
-        WhatsAppTenantId,
-        IsActive
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppOutbox_TenantId_IdempotencyKey
+                    ON WhatsAppOutbox(TenantId, IdempotencyKey);
 
-        CREATE TABLE IF NOT EXISTS AutoReplyRules (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL,
-        Name TEXT NOT NULL,
-        MatchType TEXT NOT NULL,
-        KeywordPattern TEXT NULL,
-        ReplyText TEXT NOT NULL,
-        Priority INTEGER NOT NULL DEFAULT 0,
-        IsActive INTEGER NOT NULL DEFAULT 1,
-        CreatedAtUtc TEXT NOT NULL
-        );
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppOutbox_Status_NextAttemptAtUtc
+                    ON WhatsAppOutbox(Status, NextAttemptAtUtc);
 
-        CREATE INDEX IF NOT EXISTS
-        IX_AutoReplyRules_Tenant
-        ON AutoReplyRules
-        (
-        TenantId,
-        IsActive,
-        Priority
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppOutbox_MetaMessageId
+                    ON WhatsAppOutbox(MetaMessageId);
 
-        CREATE TABLE IF NOT EXISTS Users (
-        Id TEXT NOT NULL PRIMARY KEY,
-        TenantId TEXT NOT NULL
-        DEFAULT '00000000-0000-0000-0000-000000000001',
-        FullName TEXT NOT NULL,
-        Phone TEXT NOT NULL,
-        Email TEXT NOT NULL,
-        PasswordHash TEXT NOT NULL,
-        Role TEXT NOT NULL DEFAULT 'agent',
-        IsActive INTEGER NOT NULL DEFAULT 1,
-        CreatedAtUtc TEXT NOT NULL,
-        LastLoginAtUtc TEXT NULL,
-        FOREIGN KEY (TenantId)
-        REFERENCES Tenants (Id)
-        );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_WhatsAppTemplates_Unique
+                    ON WhatsAppTemplates(
+                        TenantId,
+                        WhatsAppTenantId,
+                        Name);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_Users_Tenant_Phone
-        ON Users (TenantId, Phone);
+                CREATE INDEX IF NOT EXISTS
+                    IX_WhatsAppTemplates_Tenant
+                    ON WhatsAppTemplates(
+                        TenantId,
+                        WhatsAppTenantId,
+                        IsActive);
 
-        CREATE UNIQUE INDEX IF NOT EXISTS
-        IX_Users_Tenant_Email
-        ON Users (TenantId, Email);
-        """;
+                CREATE INDEX IF NOT EXISTS
+                    IX_AutoReplyRules_Tenant
+                    ON AutoReplyRules(
+                        TenantId,
+                        IsActive,
+                        Priority);
 
-        command.ExecuteNonQuery();
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_Users_Tenant_Phone
+                    ON Users(TenantId, Phone);
 
-        // تشغيل ترحيل التوافق بعد إنشاء الجداول.
-        ApplyWhatsAppTenantCompatibilityMigration(
-            connection);
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    IX_Users_Tenant_Email
+                    ON Users(TenantId, Email);
+                """);
 
-        // ضمان وجود مؤسسة الحوباني.
-        EnsureAlhawbaniTenant(connection);
+            transaction.Commit();
 
-        Console.WriteLine(
-            $">>> DB Initialized successfully at: {dbPath}");
+            Console.WriteLine(
+                $">>> SQLite initialized successfully: {dbPath}");
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
     }
 
-    // إنشاء مؤسسة الحوباني بطريقة آمنة ومتوافقة
-    // مع إعادة تشغيل التطبيق وإعادة النشر.
-    private static void EnsureAlhawbaniTenant(
-        SqliteConnection connection)
+    private static void Execute(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string sql)
     {
-        using var command =
-            connection.CreateCommand();
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
+        command.CommandText = sql;
+
+        command.ExecuteNonQuery();
+    }
+
+    private static void EnsureDefaultTenant(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
 
         command.CommandText = """
             INSERT OR IGNORE INTO Tenants
-            (
-                Id,
-                Name,
-                IsActive,
-                CreatedAtUtc
-            )
+                (Id, Name, IsActive, CreatedAtUtc)
             VALUES
-            (
-                $id,
-                $name,
-                1,
-                $createdAtUtc
-            );
+                ($id, $name, 1, $created);
             """;
 
         command.Parameters.AddWithValue(
-            "$id",
-            AlhawbaniTenantId);
+            "$id", DefaultTenantId);
 
         command.Parameters.AddWithValue(
-            "$name",
-            "مؤسسة الحوباني");
+            "$name", "Default Tenant");
 
         command.Parameters.AddWithValue(
-            "$createdAtUtc",
-            DateTime.UtcNow.ToString("O"));
+            "$created", DateTime.UtcNow.ToString("O"));
+
+        command.ExecuteNonQuery();
+    }
+
+    private static void EnsureAlhawbaniTenant(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
+
+        command.CommandText = """
+            INSERT OR IGNORE INTO Tenants
+                (Id, Name, IsActive, CreatedAtUtc)
+            VALUES
+                ($id, $name, 1, $created);
+            """;
+
+        command.Parameters.AddWithValue(
+            "$id", AlhawbaniTenantId);
+
+        command.Parameters.AddWithValue(
+            "$name", "مؤسسة الحوباني");
+
+        command.Parameters.AddWithValue(
+            "$created", DateTime.UtcNow.ToString("O"));
 
         command.ExecuteNonQuery();
 
@@ -479,109 +524,336 @@ public static class DbInitializer
             AlhawbaniTenantId);
     }
 
-    private static void ApplyWhatsAppTenantCompatibilityMigration(
-        SqliteConnection connection)
+    private static void EnsureAlhawbaniWhatsAppTenant(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
     {
-        // الأعمدة المطلوبة من WhatsAppTenantEntity الحالي.
-        EnsureColumnExists(
-            connection,
-            "WhatsAppTenants",
-            "WabaId",
-            "TEXT NOT NULL DEFAULT ''");
+        var phoneNumberId =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_PHONE_NUMBER_ID");
 
-        EnsureColumnExists(
-            connection,
-            "WhatsAppTenants",
-            "BusinessTokenEncrypted",
-            "TEXT NOT NULL DEFAULT ''");
-
-        EnsureColumnExists(
-            connection,
-            "WhatsAppTenants",
-            "AppId",
-            "TEXT NOT NULL DEFAULT ''");
-
-        EnsureColumnExists(
-            connection,
-            "WhatsAppTenants",
-            "CreatedAt",
-            "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
-
-        // نقل التوكن من الاسم القديم إلى الاسم الحالي.
-        if (ColumnExists(
-                connection,
-                "WhatsAppTenants",
-                "AccessTokenEncrypted"))
+        if (string.IsNullOrWhiteSpace(phoneNumberId))
         {
-            using var copyToken =
-                connection.CreateCommand();
+            Console.WriteLine(
+                ">>> WhatsApp linking skipped: " +
+                "WHATSAPP_PHONE_NUMBER_ID is not configured.");
 
-            copyToken.CommandText = """
-                UPDATE WhatsAppTenants
-                SET BusinessTokenEncrypted =
-                    AccessTokenEncrypted
-                WHERE
-                    (
-                        BusinessTokenEncrypted IS NULL
-                        OR BusinessTokenEncrypted = ''
-                    )
-                    AND AccessTokenEncrypted IS NOT NULL
-                    AND AccessTokenEncrypted <> '';
-                """;
-
-            copyToken.ExecuteNonQuery();
+            return;
         }
 
-        // ضمان وجود المؤسسة الافتراضية.
-        using var tenant =
-            connection.CreateCommand();
+        phoneNumberId = phoneNumberId.Trim();
 
-        tenant.CommandText = """
-            INSERT OR IGNORE INTO Tenants
+        var tenantId =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_TENANT_ID");
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+            tenantId = AlhawbaniTenantId;
+
+        // لا نسمح بربط حساب WhatsApp بمؤسسة غير موجودة.
+        using (var check = connection.CreateCommand())
+        {
+            check.Transaction = transaction;
+
+            check.CommandText = """
+                SELECT COUNT(*)
+                FROM Tenants
+                WHERE Id = $id AND IsActive = 1;
+                """;
+
+            check.Parameters.AddWithValue("$id", tenantId);
+
+            if (Convert.ToInt32(check.ExecuteScalar()) == 0)
+            {
+                throw new InvalidOperationException(
+                    "WhatsApp tenant does not exist or is inactive: " +
+                    tenantId);
+            }
+        }
+
+        var existingTenantId = GetExistingWhatsAppTenant(
+            connection,
+            transaction,
+            phoneNumberId);
+
+        if (existingTenantId != null)
+        {
+            if (!string.Equals(
+                existingTenantId,
+                tenantId,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "PhoneNumberId is already linked to another tenant. " +
+                    "Automatic reassignment was blocked.");
+            }
+
+            Console.WriteLine(
+                ">>> WhatsApp PhoneNumberId already linked: " +
+                phoneNumberId);
+
+            return;
+        }
+
+        var wabaId =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_WABA_ID") ?? "";
+
+        var appId =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_APP_ID") ?? "";
+
+        var businessName =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_BUSINESS_NAME") ??
+            "مؤسسة الحوباني";
+
+        var displayPhone =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_DISPLAY_PHONE_NUMBER");
+
+        var verifyToken =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_VERIFY_TOKEN");
+
+        // يجب أن تكون القيمة مشفرة مسبقاً باستخدام
+        // آلية الحماية المعتمدة في التطبيق.
+        // لا نقرأ Access Token الخام هنا.
+        var encryptedToken =
+            Environment.GetEnvironmentVariable(
+                "WHATSAPP_BUSINESS_TOKEN_ENCRYPTED") ?? "";
+
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
+
+        command.CommandText = """
+            INSERT INTO WhatsAppTenants
             (
                 Id,
-                Name,
+                TenantId,
+                PhoneNumberId,
+                DisplayPhoneNumber,
+                BusinessName,
+                AccessTokenEncrypted,
+                VerifyToken,
                 IsActive,
-                CreatedAtUtc
+                CreatedAtUtc,
+                WabaId,
+                BusinessTokenEncrypted,
+                AppId,
+                CreatedAt
             )
             VALUES
             (
+                $id,
                 $tenantId,
-                'Default Tenant',
+                $phoneNumberId,
+                $displayPhone,
+                $businessName,
+                $encryptedToken,
+                $verifyToken,
                 1,
-                '2026-01-01 00:00:00'
+                $created,
+                $wabaId,
+                $encryptedToken,
+                $appId,
+                $created
             );
             """;
 
-        tenant.Parameters.AddWithValue(
-            "$tenantId",
-            DefaultTenantId);
+        var created = DateTime.UtcNow.ToString("O");
 
-        tenant.ExecuteNonQuery();
+        command.Parameters.AddWithValue(
+            "$id", Guid.NewGuid().ToString());
 
-        // ضمان وجود الفهرس.
-        using var index =
-            connection.CreateCommand();
+        command.Parameters.AddWithValue(
+            "$tenantId", tenantId);
 
-        index.CommandText = """
-            CREATE UNIQUE INDEX IF NOT EXISTS
-            IX_WhatsAppTenants_PhoneNumberId
-            ON WhatsAppTenants (PhoneNumberId);
+        command.Parameters.AddWithValue(
+            "$phoneNumberId", phoneNumberId);
+
+        command.Parameters.AddWithValue(
+            "$displayPhone",
+            (object?)displayPhone ?? DBNull.Value);
+
+        command.Parameters.AddWithValue(
+            "$businessName", businessName);
+
+        command.Parameters.AddWithValue(
+            "$encryptedToken", encryptedToken);
+
+        command.Parameters.AddWithValue(
+            "$verifyToken",
+            (object?)verifyToken ?? DBNull.Value);
+
+        command.Parameters.AddWithValue(
+            "$created", created);
+
+        command.Parameters.AddWithValue(
+            "$wabaId", wabaId);
+
+        command.Parameters.AddWithValue(
+            "$appId", appId);
+
+        command.ExecuteNonQuery();
+
+        Console.WriteLine(
+            ">>> WhatsApp tenant linked successfully.");
+
+        Console.WriteLine(
+            ">>> TenantId: " + tenantId);
+
+        Console.WriteLine(
+            ">>> PhoneNumberId: " + phoneNumberId);
+    }
+
+    private static string? GetExistingWhatsAppTenant(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string phoneNumberId)
+    {
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
+
+        command.CommandText = """
+            SELECT TenantId
+            FROM WhatsAppTenants
+            WHERE PhoneNumberId = $phoneNumberId
+            LIMIT 1;
             """;
 
-        index.ExecuteNonQuery();
+        command.Parameters.AddWithValue(
+            "$phoneNumberId", phoneNumberId);
+
+        var result = command.ExecuteScalar();
+
+        return result == null || result == DBNull.Value
+            ? null
+            : Convert.ToString(result);
+    }
+
+    private static void ApplyWhatsAppTenantCompatibilityMigration(
+        SqliteConnection connection,
+        SqliteTransaction transaction)
+    {
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "TenantId",
+            "TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001'");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "PhoneNumberId",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "DisplayPhoneNumber",
+            "TEXT NULL");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "BusinessName",
+            "TEXT NULL");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "AccessTokenEncrypted",
+            "TEXT NULL");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "VerifyToken",
+            "TEXT NULL");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "IsActive",
+            "INTEGER NOT NULL DEFAULT 1");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "CreatedAtUtc",
+            "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "WabaId",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "BusinessTokenEncrypted",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "AppId",
+            "TEXT NOT NULL DEFAULT ''");
+
+        EnsureColumnExists(
+            connection, transaction,
+            "WhatsAppTenants", "CreatedAt",
+            "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
+
+        Execute(connection, transaction, """
+            UPDATE WhatsAppTenants
+            SET BusinessTokenEncrypted = AccessTokenEncrypted
+            WHERE
+                (BusinessTokenEncrypted IS NULL
+                 OR BusinessTokenEncrypted = '')
+                AND AccessTokenEncrypted IS NOT NULL
+                AND AccessTokenEncrypted <> '';
+
+            UPDATE WhatsAppTenants
+            SET CreatedAt = CreatedAtUtc
+            WHERE CreatedAt IS NULL OR CreatedAt = '';
+            """);
 
         Console.WriteLine(
             ">>> WhatsAppTenants compatibility migration completed.");
     }
 
+    private static void EnsureColumnExists(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string tableName,
+        string columnName,
+        string columnDefinition)
+    {
+        if (ColumnExists(
+            connection,
+            transaction,
+            tableName,
+            columnName))
+            return;
+
+        // أسماء الجداول والأعمدة هنا ثوابت داخلية وليست مدخلات مستخدم.
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
+
+        command.CommandText =
+            $"ALTER TABLE \"{tableName}\" " +
+            $"ADD COLUMN \"{columnName}\" {columnDefinition};";
+
+        command.ExecuteNonQuery();
+
+        Console.WriteLine(
+            $">>> Added column {tableName}.{columnName}");
+    }
+
     private static bool ColumnExists(
         SqliteConnection connection,
+        SqliteTransaction transaction,
         string tableName,
         string columnName)
     {
-        using var command =
-            connection.CreateCommand();
+        using var command = connection.CreateCommand();
+
+        command.Transaction = transaction;
 
         command.CommandText = """
             SELECT COUNT(*)
@@ -590,45 +862,12 @@ public static class DbInitializer
             """;
 
         command.Parameters.AddWithValue(
-            "$tableName",
-            tableName);
+            "$tableName", tableName);
 
         command.Parameters.AddWithValue(
-            "$columnName",
-            columnName);
+            "$columnName", columnName);
 
-        var result = command.ExecuteScalar();
-
-        return Convert.ToInt32(result) > 0;
+        return Convert.ToInt32(
+            command.ExecuteScalar()) > 0;
     }
-
-    private static void EnsureColumnExists(
-        SqliteConnection connection,
-        string tableName,
-        string columnName,
-        string columnDefinition)
-    {
-        if (ColumnExists(
-                connection,
-                tableName,
-                columnName))
-        {
-            return;
-        }
-
-        // أسماء الجدول والعمود ثابتة داخل الكود.
-        using var command =
-            connection.CreateCommand();
-
-        command.CommandText =
-            $"ALTER TABLE \"{tableName}\" " +
-            $"ADD COLUMN \"{columnName}\" " +
-            $"{columnDefinition};";
-
-        command.ExecuteNonQuery();
-
-        Console.WriteLine(
-            $">>> Added column {tableName}.{columnName}");
-    }
-
 }
