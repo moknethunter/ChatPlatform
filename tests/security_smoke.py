@@ -41,7 +41,7 @@ with sqlite3.connect(DB) as db:
     db.executemany("INSERT INTO Tenants (Id, Name, IsActive, CreatedAtUtc) VALUES (?, ?, 1, '2026-01-01')",
        [("ci-tenant-a","CI A"),("ci-tenant-b","CI B")])
     # Synthetic account has no token. No real outbound request is possible.
-    db.execute("INSERT INTO WhatsAppTenants (Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc) VALUES ('ci-account-a','ci-tenant-a','999999999999',1,'2026-01-01')")
+    db.execute("INSERT INTO WhatsAppTenants (Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc,WabaId,AppId,BusinessTokenEncrypted,CreatedAt) VALUES ('ci-account-a','ci-tenant-a','999999999999',1,'2026-01-01','','','','2026-01-01')")
 call("/api/conversations",expected=401)
 call("/api/whatsapp/accounts",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
