@@ -30,7 +30,8 @@ public static class BotRuntime
             ConversationId = conversation.Id, RecipientPhone = conversation.ContactPhone, CreatedAtUtc = now,
             BotId = release?.DraftId, BotVersion = release?.Version };
         db.AutomationRuns.Add(run);
-        if (conversation.LastInboundAtUtc is not DateTime at || at > now || now - at >= TimeSpan.FromHours(24)
+        if (inbound.TimestampUtc > now || now - inbound.TimestampUtc >= TimeSpan.FromHours(24)
+            || conversation.LastInboundAtUtc is not DateTime at || at > now || now - at >= TimeSpan.FromHours(24)
             || !await db.WhatsAppTenants.AsNoTracking().AnyAsync(a => a.TenantId == tenant && a.PhoneNumberId == conversation.PhoneNumberId
                 && a.IsActive && a.BusinessTokenEncrypted != "", ct)
             || !await db.Tenants.AsNoTracking().AnyAsync(t => t.Id == tenant && t.IsActive, ct))

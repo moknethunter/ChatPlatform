@@ -229,8 +229,9 @@ assert call("/api/bots/active",cookie=b)[0]["active"] is None
 changed_flow=json.loads(json.dumps(flow));changed_flow["nodes"][2]["text"]="Unpublished edit"
 call(botpath,"PUT",{"name":"Updated draft","flow":changed_flow,"version":2},cookie=a)
 assert call("/api/bots/active",cookie=a)[0]["active"]["version"]==2
-def automate(wamid,text):
+def automate(wamid,text,timestamp=None):
     bdy={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":wamid,"from":"15550000001","type":"text","text":{"body":text}}]}}]}]}
+    if timestamp is not None: bdy["entry"][0]["changes"][0]["value"]["messages"][0]["timestamp"]=str(timestamp)
     signature="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(bdy).encode(),hashlib.sha256).hexdigest()
     for _ in range(2): call("/webhook","POST",bdy,extra={"X-Hub-Signature-256":signature})
     for _ in range(30):
@@ -243,6 +244,7 @@ def automate(wamid,text):
     raise AssertionError("No automation execution receipt")
 assert automate("wamid.ci.bot.1","hello")==("queued",2,None,"CI reply")
 assert automate("wamid.ci.bot.2","unmatched")==("no_match",2,None,None)
+assert automate("wamid.ci.bot.old","hello",int(time.time())-90000)==("account_or_window_unavailable",2,None,None)
 with sqlite3.connect(DB) as db:
     assert db.execute("SELECT COUNT(*) FROM WhatsAppOutbox WHERE TenantId='ci-tenant-a' AND IdempotencyKey LIKE 'automation:%'").fetchone()[0]==1
     assert db.execute("SELECT COUNT(*) FROM WhatsAppMessages WHERE TenantId='ci-tenant-a' AND Direction='Outbound'").fetchone()[0]==1
