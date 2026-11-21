@@ -11,14 +11,26 @@ permissions:
   contents: read
 concurrency:
   group: isolated-fly-preview
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   verify:
     if: github.ref == 'refs/heads/development/fly-preview-20261121'
     uses: ./.github/workflows/isolated-verification.yml
-  preview:
+  preview-smoke:
     if: github.ref == 'refs/heads/development/fly-preview-20261121'
     needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify actual preview startup, login, simulated inbound and outbound
+        run: python3 tests/preview_smoke.py
+  preview:
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    needs: preview-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:

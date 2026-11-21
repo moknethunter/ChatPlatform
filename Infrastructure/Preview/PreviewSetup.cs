@@ -33,6 +33,9 @@ public static class PreviewSetup
         // These hashes represent independent, randomly generated preview-only passwords.
         SetAccount(0,"preview-admin",Tenant,"Admin","AQAAAAIAAYagAAAAEMOTz8frCMXUFZ7W+VSiTLttRjN+xz4do5xpQnKgTfEt2KCrvM/z5U1AR/IHutctzg==");
         SetAccount(1,"preview-owner",PlatformSecurity.PlatformScope,"SuperAdmin","AQAAAAIAAYagAAAAEJxAnLUn6TO03SrJRtc9PUaNiwezD+ZeRn5tborpqHUnPC5qz/WohVwXfXbTVYikxA==");
+        // A local smoke run may supply a disposable test hash, never an override on Fly.
+        if(Environment.GetEnvironmentVariable("FLY_APP_NAME")==null && b.Configuration["Preview:SmokePasswordHash"] is string testHash && testHash.Length>30)
+            b.Configuration["Security:Accounts:0:PasswordHash"]=testHash;
         void SetAccount(int i,string user,string tenant,string role,string hash)
         {
             var prefix=$"Security:Accounts:{i}:";
@@ -70,9 +73,11 @@ public static class PreviewSetup
     {
         if(await db.Tenants.AnyAsync(t=>t.Id==Tenant))return;
         var now=DateTime.UtcNow;
+        // Data protection persists its first key using a separate scoped connection.
+        var encrypted=new WhatsAppTokenProtection(dp).Protect(TestToken);
         await using var tx=await db.Database.BeginTransactionAsync();
         var tenant=new TenantEntity{Id=Tenant,Name="متجر العرض التجريبي"};
-        var account=new WhatsAppTenantEntity{Id="preview-account",TenantId=Tenant,PhoneNumberId=PhoneId,WabaId="999999999992",BusinessTokenEncrypted=new WhatsAppTokenProtection(dp).Protect(TestToken),IsActive=true};
+        var account=new WhatsAppTenantEntity{Id="preview-account",TenantId=Tenant,PhoneNumberId=PhoneId,WabaId="999999999992",BusinessTokenEncrypted=encrypted,IsActive=true};
         var plan=new ServicePlanEntity{Name="الباقة التجريبية",MonthlyMessages=1000,Agents=10,Accounts=2,Bots=10,Articles=100,Campaigns=false,OwnModel=false,MonthlyPriceMinor=0,Currency="USD"};
         db.Tenants.Add(tenant);db.WhatsAppTenants.Add(account);db.ServicePlans.Add(plan);
         db.TenantSubscriptions.Add(new TenantSubscriptionEntity{TenantId=Tenant,PlanId=plan.Id,EndsAtUtc=now.AddDays(30)});
