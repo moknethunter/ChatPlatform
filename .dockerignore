@@ -1,0 +1,17 @@
+.git
+.github
+**/bin
+**/obj
+.vs
+.env
+.env.*
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.pfx
+**/*.key
+**/*.pem
+data
+server.log

@@ -2,6 +2,8 @@ name: Isolated build and smoke checks
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: ['development/**']
 permissions:
   contents: read
 jobs:
@@ -78,6 +80,22 @@ jobs:
           test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345")" = 401
           test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' "$base/webhook")" = 401
+
+          # Regression: connector list must not return credentials.
+          curl -fsS -H 'Content-Type: application/json' -d '{"name":"CI connector","targetUrl":"https://example.invalid","httpMethod":"POST","authHeaderKey":"Authorization","authToken":"ci-fake-connector-secret","payloadTemplate":"{}"}' "$base/api/connectors/" > /dev/null
+          curl -fsS "$base/api/connectors/" > "$RUNNER_TEMP/ci-connectors.json"
+          python3 - "$RUNNER_TEMP/ci-connectors.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as f:
+              rows = json.load(f)
+          row = next(r for r in rows if r["name"] == "CI connector")
+          assert "authToken" not in row and row["hasAuthToken"] is True
+          assert "ci-fake-connector-secret" not in json.dumps(rows)
+          print("PASS: connector credentials are not returned by list")
+          PY
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '[]' "$base/api/events")" = 400
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"type":42}' "$base/api/events")" = 400
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '[]' "$base/api/inbound/ci")" = 400
 
           # Seed fake account in the disposable database through the existing API.
           # Verify a second organization cannot overwrite its ownership.

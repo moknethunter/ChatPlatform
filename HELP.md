@@ -72,3 +72,9 @@ fly logs -a chatplatform --no-tail
 curl -fsS https://chatplatform.fly.dev/ready
 ``
 من لوحة Fly.io افتح Monitoring ثم Live Logs قبل إعادة طلب accounts. لا تحذف مجلد /data أو قاعدة البيانات. وجود configured=true يثبت وجود الإعدادات فقط، وليس صلاحية التوكن أو اشتراك messages لدى Meta. اختبار CI يحاكي قاعدة قديمة وتوكنات وهمية، ويتحقق من القراءة والتشفير دون إرسال حقيقي.
+
+## تدقيق الأمان في فرع مستقل
+- `git diff main...HEAD --stat`: مراجعة حجم التعديلات المرشحة قبل الدمج.
+- راجع سجل **Isolated build and smoke checks** في GitHub Actions بعد الدفع إلى `development/**`. يستخدم قواعد مؤقتة وتوكنات وهمية فقط. المتوقع نجاح البناء والاختبارات، وليس إثبات أن الإنتاج آمن.
+- `dotnet list ChatPlatform.csproj package --vulnerable --include-transitive`: تدقيق التبعيات؛ يلزم اتصال NuGet. لا تنشر قبل مراجعة الثغرات.
+- مسارات النشر/دفع الصور مقيدة بفرع main؛ لا تشغّلها يدوياً لاختبار فرع تطوير.

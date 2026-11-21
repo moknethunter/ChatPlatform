@@ -1,0 +1,19 @@
+# Local builds, IDE state, databases and secrets
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.pfx
+*.key
+*.pem
+data/
+server.log

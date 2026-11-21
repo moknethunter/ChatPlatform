@@ -43,16 +43,16 @@ public class MessagesController : ControllerBase
 
         await _bus.PublishAsync(evt, ct);
 
-        // انتظار قصير حتى يعالج المحوّل الحدث ويُنشئ الرسالة
-        var textPreview = req.Text.Length > 200 ? req.Text[..200] : req.Text;
+        // Correlate only to this request; identical text is not a unique message identifier.
+        var correlationId = evt.Id.ToString("N");
         for (int i = 0; i < 15; i++)
         {
             await Task.Delay(100, ct);
-            var msg = await _db.WhatsAppMessages
-                .AsNoTracking()
-                .Where(m => m.Direction == "Outbound" && m.TextPreview == textPreview)
-                .OrderByDescending(m => m.Id)
-                .FirstOrDefaultAsync(ct);
+            var msg = await (
+                from o in _db.WhatsAppOutbox.AsNoTracking()
+                join m in _db.WhatsAppMessages.AsNoTracking() on o.MessageId equals (Guid?)m.Id
+                where o.CorrelationId == correlationId && o.TenantId == m.TenantId
+                select m).FirstOrDefaultAsync(ct);
 
             if (msg != null)
                 return Ok(new

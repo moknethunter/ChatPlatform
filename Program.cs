@@ -80,7 +80,7 @@ Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {
 }
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
-Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
+Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. سيتم رفض Webhook POST حتى ضبط AppSecret.");
 }
 // ============================================================
 // 2. Database - /data/platform.db

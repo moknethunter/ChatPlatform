@@ -20,8 +20,17 @@ public sealed class GlobalExceptionMiddleware
         {
             await _next(context);
         }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            // Disconnected clients cannot receive a response.
+            return;
+        }
         catch (Exception ex)
         {
+            if (context.Response.HasStarted)
+                throw;
+
+            context.Response.Clear();
             _log.LogError(ex, "Unhandled request {Method} {Path}; TraceId={TraceId}",
                 context.Request.Method, context.Request.Path, context.TraceIdentifier);
             

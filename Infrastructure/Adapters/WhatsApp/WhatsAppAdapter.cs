@@ -340,6 +340,11 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
             text = new { body = text, preview_url = false }
         });
 
+        var idempotencyKey = $"manual:{evt.Id}";
+        if (await db.WhatsAppOutbox.AnyAsync(o => o.TenantId == account.TenantId &&
+                o.IdempotencyKey == idempotencyKey, ct))
+            return;
+
         // ═══ 5) إنشاء MessageEntity (Outbound, Queued) ═══
         var message = new WhatsAppMessageEntity
         {
@@ -355,14 +360,14 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
             Wamid = null
         };
         db.WhatsAppMessages.Add(message);
-        await db.SaveChangesAsync(ct);
+        // Persist the message and outbox together in one EF Core SaveChanges transaction.
 
         // ═══ 6) إنشاء OutboxEntity مرتبطة بالرسالة ═══
         db.WhatsAppOutbox.Add(new WhatsAppOutboxEntity
         {
             TenantId = account.TenantId,
             CorrelationId = evt.Id.ToString("N"),
-            IdempotencyKey = $"manual:{evt.Id}",
+            IdempotencyKey = idempotencyKey,
             MessageId = message.Id,
             PhoneNumberId = account.PhoneNumberId,
             RecipientPhone = to,
@@ -384,6 +389,10 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
         }
         catch (DbUpdateException)
         {
+            // A storage failure is not necessarily a duplicate. Only suppress a verified duplicate.
+            if (!await db.WhatsAppOutbox.AsNoTracking().AnyAsync(o =>
+                    o.TenantId == account.TenantId && o.IdempotencyKey == idempotencyKey, ct))
+                throw;
             _log.LogInformation("Duplicate whatsapp.send for {EvtId}", evt.Id);
         }
     }

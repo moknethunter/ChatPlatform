@@ -52,7 +52,13 @@ public static class EndpointMapper
         // 2. Connectors API
         var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);
         connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
-            Results.Ok(await db.Connectors.AsNoTracking().ToListAsync()));
+            Results.Ok(await db.Connectors.AsNoTracking()
+                .Select(c => new
+                {
+                    c.Id, c.Name, c.TargetUrl, c.HttpMethod, c.AuthHeaderKey,
+                    c.PayloadTemplate, c.CreatedAt,
+                    hasAuthToken = !string.IsNullOrEmpty(c.AuthToken)
+                }).ToListAsync()));
 
         connectorsGroup.MapPost("/", async (ConnectorEntity req, PlatformDbContext db) =>
         {
@@ -68,6 +74,8 @@ public static class EndpointMapper
             try
             {
                 using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                    return Results.BadRequest(new { error = "Inbound payload must be a JSON object" });
                 await bus.PublishAsync(new PlatformEvent { Type = "message.created", Source = platform, Payload = document.RootElement.Clone() }, ct);
                 return Results.Ok(new { status = "received" });
             }
@@ -81,6 +89,9 @@ public static class EndpointMapper
             {
                 using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
                 var json = document.RootElement;
+                if (json.ValueKind != JsonValueKind.Object ||
+                    (json.TryGetProperty("type", out var suppliedType) && suppliedType.ValueKind != JsonValueKind.String))
+                    return Results.BadRequest(new { error = "Event must be an object with a string type" });
                 var eventType = json.TryGetProperty("type", out var type) ? type.GetString() : "unknown.event";
                 await bus.PublishAsync(new PlatformEvent { Type = eventType ?? "unknown.event", Source = "http-api", Payload = json.Clone() }, ct);
                 return Results.Accepted();

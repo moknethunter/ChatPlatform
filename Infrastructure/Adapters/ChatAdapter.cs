@@ -16,15 +16,15 @@ public sealed class ChatAdapter : IIntegrationAdapter
 
     public async Task HandleEventAsync(PlatformEvent evt, CancellationToken ct)
     {
-        if (evt.Type == "message.created" && evt.Payload.TryGetProperty("ChannelId", out var ch))
+        // Do not relay internal events or customer messages to unauthenticated SignalR clients.
+        if (evt.Type == "message.created" && evt.Source == "chat-app" &&
+            evt.Payload.ValueKind == JsonValueKind.Object &&
+            evt.Payload.TryGetProperty("ChannelId", out var ch) &&
+            ch.ValueKind == JsonValueKind.String)
         {
             var channel = ch.GetString();
-            await _hub.Clients.Group(channel!).SendAsync("message.created", evt, ct);
-        }
-        else
-        {
-            // أي حدث آخر، يرسله للجميع في الشات
-            await _hub.Clients.All.SendAsync("platform.event", evt, ct);
+            if (!string.IsNullOrWhiteSpace(channel))
+                await _hub.Clients.Group(channel).SendAsync("message.created", evt, ct);
         }
     }
 }
