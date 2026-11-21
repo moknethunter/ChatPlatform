@@ -72,3 +72,8 @@ fly logs -a chatplatform --no-tail
 curl -fsS https://chatplatform.fly.dev/ready
 ``
 من لوحة Fly.io افتح Monitoring ثم Live Logs قبل إعادة طلب accounts. لا تحذف مجلد /data أو قاعدة البيانات. وجود configured=true يثبت وجود الإعدادات فقط، وليس صلاحية التوكن أو اشتراك messages لدى Meta. اختبار CI يحاكي قاعدة قديمة وتوكنات وهمية، ويتحقق من القراءة والتشفير دون إرسال حقيقي.
+
+## Trusted reverse proxies and development CI
+- Configure `Security__TrustedProxies__0` (and subsequent indices) only with verified immediate proxy IP addresses. Loopback is trusted by default. Verify Fly.io proxy topology before deploying this change; do not clear the trust lists or enable unrestricted forwarded headers.
+- Development branch pushes run isolated verification, including a dependency vulnerability report. Inspect the report and actual test results before merging; the report alone does not enforce a vulnerability gate.
+- Authentication and cross-tenant authorization remain release blockers. Existing anonymous smoke checks must be revised together with authentication.
