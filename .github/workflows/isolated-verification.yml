@@ -13,6 +13,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Validate Compose syntax (no deployment)
+        run: docker compose -f docker-compose.yml config --quiet
       - name: Restore
         run: dotnet restore ChatPlatform.csproj
       - name: Build
@@ -39,6 +41,8 @@ jobs:
           done
           test "$ready" = true
           base=http://127.0.0.1:5080
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/dev/seed/list")" = 404
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/dev/seed/init-tenants")" = 404
           test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345")" = 401
           test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' "$base/webhook")" = 401

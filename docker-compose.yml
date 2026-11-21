@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   chatplatform:
     image: ghcr.io/moknethunter/chat55d:latest
@@ -11,6 +9,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080
       - CHATPLATFORM_DATA_DIR=/app/data
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/platform.db
       - CHATPLATFORM_ALLOW_EPHEMERAL_DB=false
       # إعدادات WhatsApp (املأ القيم)
       - WhatsApp__AppSecret=${WHATSAPP_APPSECRET}
@@ -19,12 +18,6 @@ services:
       - WhatsApp__AccessToken=${WHATSAPP_ACCESS_TOKEN}
     volumes:
       - chatplatform-data:/app/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 20s
 
 volumes:
   chatplatform-data:

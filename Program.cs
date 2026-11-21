@@ -201,6 +201,19 @@ throw;
 // ============================================================
 app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseCors();
+// Never expose development-only seed operations in production.
+if (!app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/dev/seed", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+        await next(context);
+    });
+}
 // تم حذف TenantResolutionMiddleware مؤقتاً - لا ننشئ وهمي
 // آلية TenantResolver الحالية في WhatsApp تبقى كما هي
 app.UseDefaultFiles();
