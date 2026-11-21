@@ -44,3 +44,5 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 - [ ] Professional unified Arabic RTL UI, accessibility/mobile browser tests.
 - [ ] Multi-turn flow state, human handoff, model integration tests, explicit AI reply opt-in, knowledge retrieval quality.
 - [ ] Dependency security remediation, backup/restore, production configuration before release.
+
+- [x] Unified design foundation, authenticated dashboard and knowledge-management UI (candidate; browser validation pending).

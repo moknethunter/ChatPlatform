@@ -1,0 +1,36 @@
+/* Shared RTL platform design system. No external font or UI dependency. */
+:root{--cp-bg:#f3f6fa;--cp-ink:#17273b;--cp-muted:#586a7c;--cp-primary:#126b58;--cp-line:#dbe4ed;--cp-card:#fff;--cp-radius:16px}
+.cp-shell{position:sticky;top:0;z-index:40;display:grid;grid-template-columns:1fr auto auto;gap:10px 14px;align-items:center;background:#122a3b;color:#edf6f9;padding:12px max(16px,calc((100vw - 1320px)/2));font-family:system-ui,sans-serif;box-shadow:0 4px 16px #142a3b16}
+.cp-brand{font-size:20px;font-weight:800;color:#fff!important;text-decoration:none;letter-spacing:-.6px;direction:ltr;justify-self:start}
+.cp-brand:before{content:"";display:inline-block;width:12px;height:12px;background:#48ce9e;border-radius:4px;margin-inline-end:8px}
+.cp-identity{font-size:.85rem;color:#c0d3df;overflow-wrap:anywhere}
+.cp-logout{background:#243f53!important;color:white!important;border:1px solid #426175!important;padding:7px 14px!important;border-radius:8px!important;margin:0!important;cursor:pointer}
+.cp-nav{grid-column:1/-1;display:flex!important;gap:6px!important;overflow-x:auto;flex-wrap:nowrap!important;margin:0!important;padding:2px 0!important;scrollbar-width:thin}
+.cp-nav a{white-space:nowrap;color:#c9dae5!important;text-decoration:none;font-size:.88rem;padding:9px 13px;border-radius:8px;display:block}
+.cp-nav a:hover,.cp-nav a[aria-current="page"]{background:#244958;color:#fff!important}
+.cp-nav a[aria-current="page"]{box-shadow:inset 0 -2px #54d4aa}
+.cp-app{background:var(--cp-bg);color:var(--cp-ink);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;line-height:1.6}
+.cp-app main{max-width:1320px;padding:28px 20px;margin:auto}
+.cp-app main>nav{display:none}
+.cp-app h1{font-size:clamp(1.5rem,4vw,2rem);letter-spacing:-.4px}
+.cp-app .panel,.cp-app main section{background:#fff;border:1px solid var(--cp-line);border-radius:var(--cp-radius);box-shadow:0 3px 12px #142a3b06}
+.cp-app .muted{color:var(--cp-muted)}
+.cp-app input,.cp-app textarea,.cp-app select{border-color:#bccbd6;border-radius:10px;color:var(--cp-ink)}
+.cp-app main button{border-radius:10px;background:var(--cp-primary);border-color:var(--cp-primary);color:white;min-height:40px}
+.cp-app main button.alt,.cp-app main button.secondary,.cp-app main button.entry{background:white;color:var(--cp-primary)}
+.cp-app main button.entry{border-radius:0;min-height:54px}
+.cp-app main button.entry.selected{background:#e2f2ed}
+.cp-app a{color:#125e50}
+.cp-app :focus-visible,.cp-shell :focus-visible{outline:3px solid #38bca0;outline-offset:3px}
+.cp-app button:disabled{opacity:.55;cursor:not-allowed}
+.cp-app [hidden]{display:none!important}
+.cp-app .cp-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:20px 0}
+.cp-kpi{padding:18px;min-width:0}.cp-kpi span{display:block;color:var(--cp-muted);font-size:.85rem}.cp-kpi strong{display:block;font-size:clamp(1.25rem,4vw,2rem);font-variant-numeric:tabular-nums}
+.cp-app .cp-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cp-action{display:block;padding:18px;text-decoration:none;color:var(--cp-ink)!important;background:white;border:1px solid var(--cp-line);border-radius:14px}
+.cp-action:hover{border-color:var(--cp-primary);box-shadow:0 2px 14px #126b5812}.cp-action strong{display:block;font-size:1rem;color:var(--cp-primary)}.cp-action span{color:var(--cp-muted);font-size:.85rem}
+.cp-recent{padding:18px;margin-top:20px}.cp-recent a{display:flex;justify-content:space-between;gap:10px;text-decoration:none;border-top:1px solid var(--cp-line);padding:12px 0;overflow-wrap:anywhere}.cp-recent small{color:var(--cp-muted)}
+.cp-hero{background:#183c50;border-radius:18px;padding:24px;color:#fff}.cp-hero h1{margin:0 0 5px}.cp-hero p{margin:0;color:#d0e3e8}
+.cp-label{display:block;font-weight:600;margin:12px 0 6px}
+@media(max-width:880px){.cp-app .cp-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.cp-app .cp-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:540px){.cp-app main{padding:16px 12px}.cp-shell{padding:10px}.cp-brand{font-size:17px}.cp-identity{font-size:.75rem}.cp-app .cp-actions{grid-template-columns:1fr}.cp-hero{padding:18px}.cp-kpi{padding:14px}.cp-nav a{padding:8px 10px}}

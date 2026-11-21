@@ -56,6 +56,9 @@ with sqlite3.connect(DB) as db:
     row=db.execute("SELECT BusinessTokenEncrypted,TenantId,AppId FROM WhatsAppTenants WHERE Id='ci-legacy-account'").fetchone()
     assert row[0] and row[0]!="ci-only-bootstrap-token" and row[1:]==("tenant-alhawbani-001","")
 assert call("/api/auth/me",cookie=a)[0]["tenantId"]=="ci-tenant-a"
+call("/api/dashboard",expected=401)
+assert call("/api/dashboard",cookie=a)[0]["metrics"]["contacts"]==0
+assert call("/api/dashboard",cookie=b)[0]["metrics"]["openConversations"]==0
 call("/api/knowledge",expected=401)
 call("/api/knowledge",cookie=agent,expected=403)
 article={"title":"CI warranty","body":"Warranty period is 12 months","isPublished":True,"version":0,"tenantId":"ci-tenant-b"}
@@ -151,6 +154,10 @@ for _ in range(30):
     time.sleep(1)
 else: raise AssertionError("Inbound message not persisted")
 assert match["lastMessage"]["text"]=="CI inbound message"
+summary,_=call("/api/dashboard",cookie=a)
+assert summary["metrics"]["contacts"]==1 and summary["metrics"]["openConversations"]==1
+assert summary["recent"][0]["contactPhone"]=="15550000001"
+assert call("/api/dashboard",cookie=b)[0]["recent"]==[]
 path="/api/conversations/"+match["id"]+"/messages"
 messages,_=call(path,cookie=a)
 assert sum(m.get("wamid")=="wamid.ci.inbound.1" for m in messages)==1
