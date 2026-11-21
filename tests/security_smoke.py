@@ -64,6 +64,11 @@ assert call("/api/bots/simulate","POST",{"flow":flow,"input":"HELLO"},cookie=a)[
 assert call("/api/bots/simulate","POST",{"flow":flow,"input":"no match"},cookie=a)[0]["replies"]==[]
 cyclic=json.loads(json.dumps(flow));cyclic["nodes"][2]["next"]="c"
 call("/api/bots/simulate","POST",{"flow":cyclic,"input":"hello"},cookie=a,expected=400)
+unreachable=json.loads(json.dumps(flow));unreachable["nodes"].append({"id":"unused","type":"end","x":0,"y":0})
+call("/api/bots/simulate","POST",{"flow":unreachable,"input":"hello"},cookie=a,expected=400)
+invalid=json.loads(json.dumps(flow));invalid["nodes"][1]["otherwise"]="missing"
+call("/api/bots/simulate","POST",{"flow":invalid,"input":"hello"},cookie=a,expected=400)
+call("/api/bots/simulate","POST",{"flow":flow,"input":"hello"},cookie=agent,expected=403)
 draft,_=call("/api/bots","POST",{"name":"CI draft","flow":flow,"version":0,"tenantId":"ci-tenant-b"},cookie=a,expected=201)
 botpath="/api/bots/"+draft["id"]
 assert not call("/api/bots",cookie=b)[0]
@@ -74,8 +79,9 @@ call(botpath,"PUT",{"name":"Stale","flow":flow,"version":1},cookie=a,expected=40
 assert call(botpath,cookie=a)[0]["name"]=="Updated"
 def next_event(response):
     while True:
-        line=response.readline().decode().strip()
-        if not line and response.closed: raise AssertionError("stream ended")
+        raw=response.readline()
+        if not raw: raise AssertionError("stream ended")
+        line=raw.decode().strip()
         if line.startswith("event:"):
             event=line.split(":",1)[1].strip()
             value=response.readline().decode().strip().split(":",1)[1].strip()
@@ -224,7 +230,12 @@ with sqlite3.connect(DB) as db:
     assert row[0]!="different-ci-password" and row[1]=="ci-tenant-a"
     db.execute("UPDATE Tenants SET IsActive=0 WHERE Id='ci-tenant-b'")
 call("/api/auth/me",cookie=b,expected=401)
-call("/api/auth/logout","POST",cookie=a,expected=204)
+with open_live(a) as stream:
+    assert next_event(stream)[0]=="inbox"
+    call("/api/auth/logout","POST",cookie=a,expected=204)
+    assert next_event(stream)==("session-expired","1")
+call("/api/live/inbox",cookie=a,expected=401)
 call("/api/auth/me",cookie=a,expected=401)
+print("PASS: active SSE stream stops after server-side session revocation")
 call("/api/auth/me",expected=401)
 print("PASS: authenticated reads, cookie flags, role checks, CSRF, tenant isolation, signed inbound and deduplication")
