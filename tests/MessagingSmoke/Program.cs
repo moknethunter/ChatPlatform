@@ -105,7 +105,31 @@ try
             JsonSerializer.SerializeToElement(new { name = "ci_example", language = new { code = "ar" } }), phoneId, tenant, null);
         if (await ctrl.SendTemplate(template, ct) is not AcceptedResult || await ctrl.SendTemplate(template, ct) is not AcceptedResult)
             throw new Exception("Authenticated template queue or idempotency failed");
-        if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 4)
+        var mediaBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX9sAAAAASUVORK5CYII=");
+        var mediaService = new WhatsAppMediaService(new FakeMediaFactory(mediaBytes));
+        var protection = provider.GetRequiredService<IDataProtectionProvider>();
+        var mediaController = new MediaController(db, mediaService, protection) { ControllerContext = new ControllerContext { HttpContext = context } };
+        using var stream = new MemoryStream(mediaBytes);
+        var upload = await mediaController.Upload(conversationId, new FormFile(stream, 0, mediaBytes.Length, "file", "pixel.png"), ct);
+        if (upload is not OkObjectResult uploaded) throw new Exception("Mocked media upload failed");
+        var ticket = JsonSerializer.SerializeToElement(uploaded.Value).GetProperty("ticket").GetString();
+        context.Request.Headers["Idempotency-Key"] = "ci-image";
+        var sendMedia = new MessagesController.SendMediaRequest(conversationId, ticket, "ci image");
+        var acceptedMedia = await ctrl.SendMedia(sendMedia, protection, ct);
+        if (acceptedMedia is not AcceptedResult || await ctrl.SendMedia(sendMedia, protection, ct) is not AcceptedResult)
+            throw new Exception("Media send or idempotency failed");
+        var image = await db.WhatsAppMessages.AsNoTracking().SingleAsync(m => m.ConversationId == conversationId && m.MessageType == "image", ct);
+        var downloaded = await mediaController.Download(image.Id, false, ct);
+        if (downloaded is not FileContentResult file || !file.FileContents.SequenceEqual(mediaBytes))
+            throw new Exception("Mocked media download failed");
+        // Verify the signed upload ticket is not transferable between tenants.
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", "foreign") }, "smoke"));
+        if (await ctrl.SendMedia(sendMedia, protection, ct) is not ForbidResult ||
+            await mediaController.Download(image.Id, false, ct) is not NotFoundResult)
+            throw new Exception("Media tenant isolation failed");
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", tenant) }, "smoke"));
+        Console.WriteLine("PASS: mocked media upload, download, tenant-bound ticket and idempotent queue.");
+        if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 5)
             throw new Exception("Duplicate queue rows detected");
         Console.WriteLine("PASS: tenant-bound controller text/template queue; repeat keys reuse original message.");
     }
@@ -121,12 +145,12 @@ try
             var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
             var rows = await db.WhatsAppOutbox.AsNoTracking().Where(x => x.TenantId == tenant).ToListAsync(ct);
             var messages = await db.WhatsAppMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).ToListAsync(ct);
-            if (rows.Count == 4 && rows.All(x => x.Status == "Sent") &&
-                messages.Count == 4 && messages.All(x => x.Status == "Sent" && x.Wamid != null))
+            if (rows.Count == 5 && rows.All(x => x.Status == "Sent") &&
+                messages.Count == 5 && messages.All(x => x.Status == "Sent" && x.Wamid != null))
             {
-                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || requests.Count != 4)
+                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || !requests.Contains("ci image") || requests.Count != 5)
                     throw new Exception("Unexpected simulated Graph requests.");
-                Console.WriteLine("PASS: manual send, auto-reply, authenticated text and template reached mocked Graph API; all marked Sent.");
+                Console.WriteLine("PASS: manual send, auto-reply, authenticated text, template and image reached mocked Graph API; all marked Sent.");
                 break;
             }
             await Task.Delay(250, ct);
@@ -150,11 +174,45 @@ sealed class FakeGraphHandler(ConcurrentQueue<string> requests) : HttpMessageHan
             throw new InvalidOperationException("Unexpected outgoing request.");
         using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
         var root = payload.RootElement;
-        requests.Enqueue(root.GetProperty("type").GetString() == "template" ? root.GetProperty("template").GetProperty("name").GetString()! : root.GetProperty("text").GetProperty("body").GetString()!);
+        requests.Enqueue(root.GetProperty("type").GetString() switch {
+            "template" => root.GetProperty("template").GetProperty("name").GetString()!,
+            "image" => root.GetProperty("image").GetProperty("caption").GetString()!,
+            _ => root.GetProperty("text").GetProperty("body").GetString()!
+        });
         // No network is used. Return a different synthetic ID for each accepted message.
         return new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(JsonSerializer.Serialize(new { messages = new[] { new { id = "wamid.smoke." + Guid.NewGuid().ToString("N") } } }))
         };
+    }
+}
+
+sealed class FakeMediaFactory(byte[] bytes) : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name)
+    {
+        if (name != "whatsapp-media") throw new InvalidOperationException("Unexpected media client");
+        return new HttpClient(new FakeMediaHandler(bytes)) { BaseAddress = new Uri("https://graph.facebook.com/v26.0/") };
+    }
+}
+sealed class FakeMediaHandler(byte[] bytes) : HttpMessageHandler
+{
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        if (request.Headers.Authorization?.Parameter != "fake-token") throw new Exception("Unexpected media credentials");
+        var uri = request.RequestUri!;
+        if (request.Method == HttpMethod.Post && uri.Host == "graph.facebook.com" && uri.AbsolutePath == "/v26.0/999999999999/media")
+        {
+            if (request.Content is not MultipartFormDataContent form || form.Count() != 3)
+                throw new Exception("Invalid upload form");
+            var file = form.Single(c => c.Headers.ContentDisposition?.Name?.Trim('"') == "file");
+            if (!(await file.ReadAsByteArrayAsync(ct)).SequenceEqual(bytes)) throw new Exception("Upload bytes mismatch");
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"id\":\"123456789\"}") };
+        }
+        if (request.Method == HttpMethod.Get && uri.Host == "graph.facebook.com" && uri.AbsolutePath == "/v26.0/123456789" && uri.Query == "?phone_number_id=999999999999")
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"url\":\"https://lookaside.fbsbx.com/whatsapp_business/attachments/123456789\"}") };
+        if (request.Method == HttpMethod.Get && uri.Host == "lookaside.fbsbx.com")
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+        throw new Exception("Unexpected media HTTP request");
     }
 }
