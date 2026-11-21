@@ -340,6 +340,15 @@ public static class DbInitializer
                 connection,
                 transaction);
 
+            // Preserve existing templates while adding fields required by the EF model.
+            EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "MetaTemplateId", "TEXT NULL");
+            EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "UpdatedAtUtc",
+                "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'");
+            Execute(connection, transaction, """
+                UPDATE WhatsAppTemplates SET UpdatedAtUtc = CreatedAtUtc
+                WHERE UpdatedAtUtc = '0001-01-01 00:00:00';
+                """);
+
             // Keep existing auto-reply rules while adding fields used by EF Core.
             EnsureColumnExists(connection, transaction, "AutoReplyRules", "CooldownSeconds",
                 "INTEGER NOT NULL DEFAULT 60");
