@@ -343,6 +343,8 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            previewStatus() { return request("/api/preview"); },
+            previewInbound(conversationId,text) { return request("/api/preview/inbound",{method:"POST",body:{conversationId,text},retries:0}); },
             subscription() { return request("/api/subscription"); },
             platformPlans() { return request("/api/platform-admin/plans"); },
             platformCreatePlan(data) { return request("/api/platform-admin/plans",{method:"POST",body:data,retries:0}); },
@@ -654,6 +656,8 @@
                 bar.append(brand,identityText,logout,links);
                 if(!document.querySelector('link[href="/platform.css"]')){const css=document.createElement("link");css.rel="stylesheet";css.href="/platform.css";document.head.append(css);}
                 document.body.prepend(bar);
+                const banner=document.createElement("div");banner.className="preview-notice";banner.textContent="نسخة تجريبية خاصة • بيانات وهمية • إرسال واتساب محاكى • لا ربط خارجي";
+                bar.insertAdjacentElement("afterend",banner);
                 document.body.classList.add('cp-shell-ready');
             } catch (err) {
                 if (err.status !== 401) console.warn("Unable to verify session");
