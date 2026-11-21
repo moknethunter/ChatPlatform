@@ -15,7 +15,23 @@ concurrency:
   group: isolated-fly-preview
   cancel-in-progress: true
 jobs:
+  credential-check:
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_PREVIEW_API_TOKEN }}
+    steps:
+      - name: Check dedicated repository secret without displaying it
+        shell: bash
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_PREVIEW_API_TOKEN is not available to this run. Add it as a Repository secret under Settings > Secrets and variables > Actions (not Variables, Dependabot or an unattached Environment)."
+            exit 1
+          fi
+          echo "Dedicated deployment secret is present; authorization will be verified by flyctl."
   verify:
+    needs: credential-check
     if: github.ref == 'refs/heads/development/fly-preview-20261121'
     uses: ./.github/workflows/isolated-verification.yml
   preview-smoke:
