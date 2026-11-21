@@ -64,6 +64,20 @@ public static class PlatformSecurity
     public static string TenantId(this ClaimsPrincipal user) =>
         user.FindFirstValue("tenant_id") ?? throw new InvalidOperationException("Tenant identity is required.");
 
+    internal static async Task<bool> IsSessionValidAsync(IConfiguration cfg, PlatformDbContext db, ClaimsPrincipal? principal, CancellationToken ct)
+    {
+        var account = await FindAsync(cfg, db, principal?.Identity?.Name, ct);
+        var sessionId = principal?.FindFirstValue(Session);
+        var now = DateTime.UtcNow;
+        return account != null && sessionId != null &&
+            principal?.FindFirstValue("tenant_id") == account.TenantId &&
+            principal?.FindFirstValue(ClaimTypes.Role) == account.Role &&
+            principal?.FindFirstValue(Stamp) == Fingerprint(account) &&
+            await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, ct) &&
+            await db.PlatformSessions.AnyAsync(s => s.Id == sessionId && s.Username == account.Username
+                && s.TenantId == account.TenantId && s.ExpiresAtUtc > now, ct);
+    }
+
     public static IServiceCollection AddPlatformSecurity(this IServiceCollection services)
     {
         services.AddAuthentication(Scheme).AddCookie(options =>
@@ -81,15 +95,7 @@ public static class PlatformSecurity
             {
                 var cfg = c.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
                 var db = c.HttpContext.RequestServices.GetRequiredService<PlatformDbContext>();
-                var account = await FindAsync(cfg, db, c.Principal?.Identity?.Name, c.HttpContext.RequestAborted);
-                var sessionId = c.Principal?.FindFirstValue(Session);
-                var now = DateTime.UtcNow;
-                if (account == null || c.Principal?.FindFirstValue("tenant_id") != account.TenantId
-                    || c.Principal?.FindFirstValue(ClaimTypes.Role) != account.Role
-                    || c.Principal?.FindFirstValue(Stamp) != Fingerprint(account)
-                    || !await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, c.HttpContext.RequestAborted)
-                    || !await db.PlatformSessions.AnyAsync(s => s.Id == sessionId && s.Username == account.Username
-                        && s.TenantId == account.TenantId && s.ExpiresAtUtc > now, c.HttpContext.RequestAborted))
+                if (!await IsSessionValidAsync(cfg, db, c.Principal, c.HttpContext.RequestAborted))
                 {
                     c.RejectPrincipal();
                     await c.HttpContext.SignOutAsync(Scheme);
@@ -112,6 +118,8 @@ public static class PlatformSecurity
             options.AddPolicy("media", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new FixedWindowRateLimiterOptions {
                     PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            options.AddPolicy("inbox-live", context => RateLimitPartition.GetConcurrencyLimiter(
+                context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 2, QueueLimit = 0 }));
             options.AddFixedWindowLimiter("oauth-policy", o => { o.PermitLimit = 10; o.Window = TimeSpan.FromMinutes(1); o.QueueLimit = 0; });
         });
         return services;

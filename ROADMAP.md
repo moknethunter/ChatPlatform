@@ -32,3 +32,6 @@ Baseline: archive/security-baseline-20261121 at 680db70682c9377a176f0e715d046696
 Do not merge or deploy until reviewed, tested and explicitly approved.
 
 - Media: candidate upload/download/preview and audio-file playback; automatic 5-second refresh; direct voice recording, permanent retention, malware scanning, positive mocked media tests and true realtime push remain pending.
+
+- [x] Authenticated inbox SSE invalidation stream and visual bot draft editor/simulator (candidate; CI pending).
+- [ ] Browser drag/touch validation, reconnect load test, bot publication/activation, durable execution, event deduplication and quotas.

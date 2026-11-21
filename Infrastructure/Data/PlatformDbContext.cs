@@ -15,6 +15,8 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<PlatformSessionEntity> PlatformSessions => Set<PlatformSessionEntity>();
     public DbSet<ManagedAgentEntity> ManagedAgents => Set<ManagedAgentEntity>();
     public DbSet<CrmContactEntity> CrmContacts => Set<CrmContactEntity>();
+    public DbSet<InboxRevisionEntity> InboxRevisions => Set<InboxRevisionEntity>();
+    public DbSet<BotDraftEntity> BotDrafts => Set<BotDraftEntity>();
     public DbSet<WhatsAppWebhookInboxEntity> WhatsAppWebhookInbox => Set<WhatsAppWebhookInboxEntity>();
     public DbSet<WhatsAppStatusInboxEntity> WhatsAppStatusInbox => Set<WhatsAppStatusInboxEntity>();
     public DbSet<WhatsAppConversationEntity> WhatsAppConversations => Set<WhatsAppConversationEntity>();
@@ -25,6 +27,8 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
+        mb.Entity<InboxRevisionEntity>(e => e.HasKey(x => x.TenantId));
+        mb.Entity<BotDraftEntity>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.TenantId); });
         mb.Entity<CrmContactEntity>(e => e.HasKey(x => new { x.TenantId, x.Phone }));
         mb.Entity<ManagedAgentEntity>(e =>
         {

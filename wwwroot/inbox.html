@@ -42,8 +42,21 @@ if(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder&&MediaRecorder.isT
 }else recordHint.textContent="التسجيل المباشر غير مدعوم في هذا المتصفح؛ يمكنك إرفاق ملف صوتي.";
 $("mediaForm").file.onchange=()=>{recorded=null;recordedFor=null;$("mediaForm").file.required=true;recordHint.textContent="";};
 async function refreshLive(){if(document.hidden||refreshing||!identity)return;refreshing=true;try{const listOk=await load(),messagesOk=await messages();$("live").textContent=listOk&&messagesOk?"آخر تحديث تلقائي: "+new Date().toLocaleTimeString("ar"):"تعذر التحديث التلقائي؛ أعد المحاولة.";}finally{refreshing=false;}}
-setInterval(refreshLive,5000);document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshLive();});
+let live=null,liveConnected=false,revision=null,dirty=false;
+function stopLive(){live?.close();live=null;liveConnected=false;}
+function startLive(){
+ if(!identity||document.hidden||live||!window.EventSource)return;
+ live=new EventSource("/api/live/inbox");
+ live.onopen=()=>{liveConnected=true;$("live").textContent="الاتصال اللحظي نشط";};
+ live.addEventListener("inbox",ev=>{if(ev.data!==revision){revision=ev.data;dirty=true;if(!refreshing)drainLive();}});
+ live.addEventListener("session-expired",()=>{stopLive();identity=null;location.assign("/login.html");});
+ live.onerror=()=>{liveConnected=false;$("live").textContent="إعادة الاتصال؛ التحديث الاحتياطي نشط";};
+}
+async function drainLive(){if(document.hidden||refreshing||!dirty)return;dirty=false;await refreshLive();if(dirty)setTimeout(drainLive,0);}
+setInterval(()=>{if(!liveConnected)refreshLive();else if(dirty)drainLive();},5000);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)stopLive();else{revision=null;startLive();refreshLive();}});
+window.addEventListener("pagehide",stopLive);window.addEventListener("pageshow",startLive);
 $("refresh").onclick=async()=>{page=1;await load();await messages();};$("state").onchange=$("assignedFilter").onchange=()=>{page=1;load();};$("prev").onclick=()=>{if(page>1){page--;load();}};$("next").onclick=()=>{page++;load();};
-(async()=>{try{identity=await api.getIdentity();if(identity.role==="Admin"){const agents=await api.getTeam();$("agent").add(new Option("غير مسندة",""));for(const agent of agents.filter(a=>a.isActive))$("agent").add(new Option(agent.displayName,agent.username));$("agentControls").hidden=false;}await load();}catch(e){status(e.message);}})();
+(async()=>{try{identity=await api.getIdentity();if(identity.role==="Admin"){const agents=await api.getTeam();$("agent").add(new Option("غير مسندة",""));for(const agent of agents.filter(a=>a.isActive))$("agent").add(new Option(agent.displayName,agent.username));$("agentControls").hidden=false;}await load();startLive();}catch(e){status(e.message);}})();
 })();
 </script></body></html>

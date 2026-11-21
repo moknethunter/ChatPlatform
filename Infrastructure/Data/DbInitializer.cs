@@ -295,6 +295,66 @@ public static class DbInitializer
                         ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS InboxRevisions (
+                    TenantId TEXT NOT NULL PRIMARY KEY,
+                    Revision INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS BotDrafts (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    DefinitionJson TEXT NOT NULL,
+                    Version INTEGER NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_INSERT AFTER INSERT ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_UPDATE AFTER UPDATE ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_DELETE AFTER DELETE ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_INSERT AFTER INSERT ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_UPDATE AFTER UPDATE ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_DELETE AFTER DELETE ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_INSERT AFTER INSERT ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_UPDATE AFTER UPDATE ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_DELETE AFTER DELETE ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+
                 CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,

@@ -343,6 +343,10 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            listBots() { return request("/api/bots"); },
+            getBot(id) { return request("/api/bots/" + encodeURIComponent(id)); },
+            saveBot(id,data) { return request("/api/bots" + (id ? "/" + encodeURIComponent(id) : ""), {method:id?"PUT":"POST",body:data}); },
+            simulateBot(flow,input) { return request("/api/bots/simulate",{method:"POST",body:{flow,input}}); },
             getContacts(opts = {}) {
                 const q = new URLSearchParams();
                 for (const key of ["search","stage","page","limit"]) if (opts[key]) q.set(key, String(opts[key]));

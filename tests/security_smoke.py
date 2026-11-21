@@ -43,6 +43,8 @@ with sqlite3.connect(DB) as db:
     # Synthetic account has no token. No real outbound request is possible.
     db.execute("INSERT INTO WhatsAppTenants (Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc,WabaId,AppId,BusinessTokenEncrypted,CreatedAt) VALUES ('ci-account-a','ci-tenant-a','999999999999',1,'2026-01-01','','','','2026-01-01')")
 call("/api/conversations",expected=401)
+call("/api/live/inbox",expected=401)
+call("/api/bots",expected=401)
 call("/api/media/00000000-0000-0000-0000-000000000001",expected=401)
 call("/api/whatsapp/accounts",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
@@ -55,6 +57,41 @@ with sqlite3.connect(DB) as db:
     assert row[0] and row[0]!="ci-only-bootstrap-token" and row[1:]==("tenant-alhawbani-001","")
 assert call("/api/auth/me",cookie=a)[0]["tenantId"]=="ci-tenant-a"
 assert not call("/api/whatsapp/accounts",cookie=b)[0]
+call("/api/live/inbox",cookie=a,expected=403,extra={"Origin":"https://untrusted.example"})
+call("/api/bots",cookie=agent,expected=403)
+flow={"start":"s","nodes":[{"id":"s","type":"start","next":"c","x":0,"y":0},{"id":"c","type":"contains","text":"hello","next":"r","otherwise":"e","x":180,"y":0},{"id":"r","type":"reply","text":"CI reply","next":"e","x":360,"y":0},{"id":"e","type":"end","x":540,"y":0}]}
+assert call("/api/bots/simulate","POST",{"flow":flow,"input":"HELLO"},cookie=a)[0]["replies"]==["CI reply"]
+assert call("/api/bots/simulate","POST",{"flow":flow,"input":"no match"},cookie=a)[0]["replies"]==[]
+cyclic=json.loads(json.dumps(flow));cyclic["nodes"][2]["next"]="c"
+call("/api/bots/simulate","POST",{"flow":cyclic,"input":"hello"},cookie=a,expected=400)
+draft,_=call("/api/bots","POST",{"name":"CI draft","flow":flow,"version":0,"tenantId":"ci-tenant-b"},cookie=a,expected=201)
+botpath="/api/bots/"+draft["id"]
+assert not call("/api/bots",cookie=b)[0]
+call(botpath,cookie=b,expected=404)
+call(botpath,"PUT",{"name":"Foreign","flow":flow,"version":1},cookie=b,expected=404)
+assert call(botpath,"PUT",{"name":"Updated","flow":flow,"version":1},cookie=a)[0]["version"]==2
+call(botpath,"PUT",{"name":"Stale","flow":flow,"version":1},cookie=a,expected=409)
+assert call(botpath,cookie=a)[0]["name"]=="Updated"
+def next_event(response):
+    while True:
+        line=response.readline().decode().strip()
+        if not line and response.closed: raise AssertionError("stream ended")
+        if line.startswith("event:"):
+            event=line.split(":",1)[1].strip()
+            value=response.readline().decode().strip().split(":",1)[1].strip()
+            return event,value
+def open_live(cookie):
+    return urllib.request.urlopen(urllib.request.Request(BASE+"/api/live/inbox",headers={"Cookie":cookie}),timeout=10)
+with open_live(a) as ra, open_live(b) as rb:
+    ea,va=next_event(ra); eb,vb=next_event(rb)
+    assert ea==eb=="inbox"
+    with sqlite3.connect(DB) as db:
+        db.execute("INSERT INTO CrmContacts(TenantId,Phone,CreatedAtUtc,UpdatedAtUtc) VALUES ('ci-tenant-a','15559990000','2026-01-01','2026-01-01')")
+    assert next_event(ra)==("inbox",str(int(va)+1))
+    with sqlite3.connect(DB) as db:
+        assert db.execute("SELECT Revision FROM InboxRevisions WHERE TenantId='ci-tenant-b'").fetchone() is None or int(vb)==db.execute("SELECT Revision FROM InboxRevisions WHERE TenantId='ci-tenant-b'").fetchone()[0]
+        db.execute("DELETE FROM CrmContacts WHERE TenantId='ci-tenant-a' AND Phone='15559990000'")
+    print("PASS: draft simulation, tenant isolation, version conflicts and SSE tenant revision")
 call("/api/conversations?tenantId=ci-tenant-b",cookie=a,expected=403)
 call("/api/events","POST",{},cookie=a,expected=403)
 call("/api/messages/send","POST",{"to":"15550000001","text":"CI","phoneNumberId":"999999999998"},cookie=a,expected=404)
