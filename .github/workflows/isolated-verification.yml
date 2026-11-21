@@ -18,6 +18,8 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Validate Compose syntax (no deployment)
         run: docker compose -f docker-compose.yml config --quiet
+      - name: Static UI integrity (Node syntax and local links)
+        run: python3 tests/check_web_assets.py
       - name: Restore
         run: dotnet restore ChatPlatform.csproj
       - name: Audit dependency vulnerabilities (report)

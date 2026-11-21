@@ -626,7 +626,7 @@
                 identityText.title=identity.tenantId;
                 const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
                 const menu=[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
-                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"]);
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
                 for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
                     if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
                     links.append(link);}
@@ -635,6 +635,7 @@
                 bar.append(brand,identityText,logout,links);
                 if(!document.querySelector('link[href="/platform.css"]')){const css=document.createElement("link");css.rel="stylesheet";css.href="/platform.css";document.head.append(css);}
                 document.body.prepend(bar);
+                document.body.classList.add('cp-shell-ready');
             } catch (err) {
                 if (err.status !== 401) console.warn("Unable to verify session");
             }
