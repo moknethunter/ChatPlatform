@@ -224,6 +224,7 @@
                 const headers = {
                     "Accept": "application/json",
                     "X-Request-Id": requestId,
+                    "X-ChatPlatform-CSRF": "1",
                     ...mutableHeaders,
                     ...(useJson ? { "Content-Type": "application/json" } : {}),
                     ...options.headers
@@ -287,6 +288,9 @@
                 }
 
                 if (response.ok) return data;
+                if (response.status === 401 && typeof window !== "undefined" && new URL(url, window.location.href).origin === window.location.origin) {
+                    window.location.assign("/login.html");
+                }
 
                 const metaCode = extractMetaCode(data);
                 const rawMessage = extractErrorMessage(data);
@@ -335,8 +339,36 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
+                for (const key of ["search","status","assigned"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
+            },
+            activeBot() { return request("/api/bots/active"); },
+            publishBot(id,version) { return request("/api/bots/"+encodeURIComponent(id)+"/publish",{method:"POST",body:{version}}); },
+            stopBot(id,activationId) { return request("/api/bots/"+encodeURIComponent(id)+"/publish/"+encodeURIComponent(activationId),{method:"DELETE"}); },
+            botRuns() { return request("/api/bots/runs"); },
+            listBots() { return request("/api/bots"); },
+            getBot(id) { return request("/api/bots/" + encodeURIComponent(id)); },
+            saveBot(id,data) { return request("/api/bots" + (id ? "/" + encodeURIComponent(id) : ""), {method:id?"PUT":"POST",body:data}); },
+            simulateBot(flow,input) { return request("/api/bots/simulate",{method:"POST",body:{flow,input}}); },
+            getContacts(opts = {}) {
+                const q = new URLSearchParams();
+                for (const key of ["search","stage","page","limit"]) if (opts[key]) q.set(key, String(opts[key]));
+                return request("/api/contacts?" + q, { signal: opts.signal });
+            },
+            getContact(phone) { return request("/api/contacts/" + encodeURIComponent(phone)); },
+            createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
+            updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
+            updateConversation(id, action, body = {}) {
+                if (!["status","read","assign","tags"].includes(action)) throw new ApiError("Invalid action");
+                return request(API.conversations + "/" + encodeURIComponent(id) + "/" + action, { method: "PUT", body });
+            },
+            uploadMedia(conversationId, file) {
+                const data = new FormData(); data.append("file", file);
+                return request("/api/media/upload/" + encodeURIComponent(conversationId), { method: "POST", rawBody: data, timeout: 45000, retries: 0 });
+            },
+            sendMedia(conversationId, ticket, caption, idempotencyKey) {
+                return request("/api/messages/send-media", { method: "POST", body: { conversationId, ticket, caption }, headers: { "Idempotency-Key": idempotencyKey }, retries: 0 });
             },
             getConversationMessages(id, take = 100, opts = {}) {
                 id = validateId(id, "معرّف المحادثة");
@@ -374,6 +406,7 @@
                         fallbackTemplateName: options.fallbackTemplateName || null,
                         fallbackTemplateLanguage: normalizeMetaLanguage(options.fallbackTemplateLanguage || "ar"),
                         tenantId: options.tenantId || null,
+                        phoneNumberId: options.phoneNumberId || null,
                         whatsAppTenantId: options.whatsAppTenantId || null
                     }
                 });
@@ -415,6 +448,7 @@
                         messaging_product: "whatsapp",
                         to: cleanTo,
                         type: "template",
+                        phoneNumberId: options.phoneNumberId || null,
                         template: { name, language: { code: langCode }, components },
                         tenantId: options.tenantId || null,
                         whatsAppTenantId: options.whatsAppTenantId || null
@@ -423,9 +457,16 @@
             },
 
             // --- Tenants / WhatsApp Accounts - بدون this لتتوافق مع whatsapp.html ---
+            getWhatsAppDiagnostics(opts = {}) { return request("/api/whatsapp/diagnostics", { signal: opts.signal }); },
+            getTeam(opts = {}) { return request("/api/team", { signal: opts.signal }); },
+            createAgent(data) { return request("/api/team", { method: "POST", body: data }); },
+            setAgentActive(username, isActive) { return request("/api/team/" + encodeURIComponent(username) + "/active", { method: "PUT", body: { isActive } }); },
+            resetAgentPassword(username, password) { return request("/api/team/" + encodeURIComponent(username) + "/password", { method: "PUT", body: { password } }); },
+            getIdentity(opts = {}) { return request("/api/auth/me", { signal: opts.signal }); },
+            logout() { return request("/api/auth/logout", { method: "POST" }); },
             async getTenants(opts = {}) {
-                const data = await request(API.tenants, { signal: opts.signal });
-                return unwrapList(data);
+                const identity = await request("/api/auth/me", { signal: opts.signal });
+                return [{ id: identity.tenantId, tenantId: identity.tenantId, name: identity.tenantId }];
             },
             createTenant(data, opts = {}) {
                 if (!data || typeof data !== "object") throw new ApiError("بيانات حساب واتساب غير صالحة.");
@@ -441,11 +482,13 @@
             },
             deleteWhatsAppAccount(id, opts = {}) {
                 id = validateId(id, "معرّف حساب واتساب");
-                return request(`${API.tenants}/${encodeURIComponent(id)}`, { method: "DELETE", signal: opts.signal });
+                return request("/api/whatsapp/accounts/" + encodeURIComponent(id), { method: "DELETE", signal: opts.signal });
             },
-            getWhatsAppAccounts(opts = {}) { return api.getTenants(opts); },
-            getWhatsAppTenants(opts = {}) { return api.getTenants(opts); },
-            createWhatsAppAccount(data, opts = {}) { return api.createTenant(data, opts); },
+            getWhatsAppAccounts(opts = {}) { return request("/api/whatsapp/accounts", { signal: opts.signal }); },
+            getWhatsAppTenants(opts = {}) { return api.getWhatsAppAccounts(opts); },
+            createWhatsAppAccount(data, opts = {}) { return request("/api/whatsapp/accounts", { method: "POST", body: data, signal: opts.signal }); },
+            validateMetaCredentials(data, opts = {}) { return request("/api/whatsapp/validate-credentials", { method: "POST", body: data, signal: opts.signal }); },
+            updateWhatsAppToken(id, data, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/token", { method: "PUT", body: data, signal: opts.signal }); },
 
             getConnectors(opts = {}) { return request(API.connectors, { signal: opts.signal }); },
             createConnector(data, opts = {}) {
@@ -559,6 +602,30 @@
         window.ChatPlatformAPI = defaultClient;
         window.ChatPlatformApiError = ApiError;
         window.ChatPlatformClient = { createClient, ApiError };
+        // All pages loading the shared API client obtain the user's identity from the server.
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                const identity = await defaultClient.getIdentity();
+                const bar = document.createElement("div");
+                bar.setAttribute("dir", "rtl");
+                bar.style.cssText = "padding:10px 16px;background:#f0f7f4;color:#173b32;display:flex;align-items:center;gap:12px;flex-wrap:wrap";
+                const label = document.createElement("span");
+                label.textContent = identity.username + " | " + identity.tenantId + " | " + (identity.role === "Admin" ? "مدير" : "موظف");
+                const logout = document.createElement("button");
+                logout.textContent = "تسجيل الخروج";
+                logout.addEventListener("click", async () => {
+                    try { await defaultClient.logout(); location.assign("/login.html"); }
+                    catch { label.textContent = "تعذر تسجيل الخروج؛ حاول مجددًا."; }
+                });
+                bar.append(label);
+                if (identity.role === "Admin") {
+                    const link = document.createElement("a"); link.href = "/team.html"; link.textContent = "إدارة الفريق"; bar.append(link);
+                }
+                bar.append(logout); document.body.prepend(bar);
+            } catch (err) {
+                if (err.status !== 401) console.warn("Unable to verify session");
+            }
+        }, { once: true });
     }
     if (typeof module !== "undefined" && module.exports) {
         module.exports = { createClient, ApiError, defaultClient };

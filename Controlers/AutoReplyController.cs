@@ -1,3 +1,5 @@
+using ChatPlatform.Security;
+using Microsoft.AspNetCore.Authorization;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
@@ -16,12 +18,13 @@ public sealed class AutoReplyController : ControllerBase
         _db = db;
     }
 
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet]
     public async Task<IActionResult> List(
         [FromQuery] string? tenantId,
         CancellationToken ct)
     {
-        var effectiveTenantId = NormalizeTenantId(tenantId);
+        var effectiveTenantId = User.TenantId();
 
         var rules = await _db.AutoReplyRules
             .AsNoTracking()
@@ -43,6 +46,7 @@ public sealed class AutoReplyController : ControllerBase
         bool? IsActive,
         string? TenantId);
 
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPost]
     public async Task<IActionResult> Create(
         [FromBody] RuleRequest req,
@@ -57,7 +61,7 @@ public sealed class AutoReplyController : ControllerBase
 
         var rule = new AutoReplyRuleEntity
         {
-            TenantId = NormalizeTenantId(req.TenantId),
+            TenantId = User.TenantId(),
             Name = req.Name.Trim(),
             MatchType = req.MatchType.Trim().ToLowerInvariant(),
             KeywordPattern = req.KeywordPattern?.Trim(),
@@ -82,6 +86,7 @@ public sealed class AutoReplyController : ControllerBase
         return Ok(rule);
     }
 
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(
         Guid id,
@@ -93,7 +98,7 @@ public sealed class AutoReplyController : ControllerBase
         if (error != null)
             return BadRequest(new { error });
 
-        var tenantId = NormalizeTenantId(req.TenantId);
+        var tenantId = User.TenantId();
 
         var rule = await _db.AutoReplyRules
             .FirstOrDefaultAsync(
@@ -135,6 +140,7 @@ public sealed class AutoReplyController : ControllerBase
         return Ok(rule);
     }
 
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(
         Guid id,
@@ -144,7 +150,7 @@ public sealed class AutoReplyController : ControllerBase
         var rule = await _db.AutoReplyRules
             .FirstOrDefaultAsync(
                 r => r.Id == id &&
-                     r.TenantId == NormalizeTenantId(tenantId),
+                     r.TenantId == User.TenantId(),
                 ct);
 
         if (rule == null)
@@ -158,6 +164,7 @@ public sealed class AutoReplyController : ControllerBase
         return Ok(rule);
     }
 
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(
         Guid id,
@@ -167,7 +174,7 @@ public sealed class AutoReplyController : ControllerBase
         var rule = await _db.AutoReplyRules
             .FirstOrDefaultAsync(
                 r => r.Id == id &&
-                     r.TenantId == NormalizeTenantId(tenantId),
+                     r.TenantId == User.TenantId(),
                 ct);
 
         if (rule == null)
@@ -181,25 +188,6 @@ public sealed class AutoReplyController : ControllerBase
         {
             deleted = true
         });
-    }
-
-    private static string NormalizeTenantId(
-        string? tenantId)
-    {
-        if (string.IsNullOrWhiteSpace(tenantId))
-            return TenantEntity.DefaultTenantId;
-
-        var value = tenantId.Trim();
-
-        if (string.Equals(
-                value,
-                "default",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            return TenantEntity.DefaultTenantId;
-        }
-
-        return value;
     }
 
     private static string? Validate(

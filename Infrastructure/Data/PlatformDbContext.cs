@@ -12,6 +12,13 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<WhatsAppTenantEntity> WhatsAppTenants => Set<WhatsAppTenantEntity>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<TenantEntity> Tenants => Set<TenantEntity>();
+    public DbSet<PlatformSessionEntity> PlatformSessions => Set<PlatformSessionEntity>();
+    public DbSet<ManagedAgentEntity> ManagedAgents => Set<ManagedAgentEntity>();
+    public DbSet<CrmContactEntity> CrmContacts => Set<CrmContactEntity>();
+    public DbSet<InboxRevisionEntity> InboxRevisions => Set<InboxRevisionEntity>();
+    public DbSet<BotDraftEntity> BotDrafts => Set<BotDraftEntity>();
+    public DbSet<BotReleaseEntity> BotReleases => Set<BotReleaseEntity>();
+    public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
     public DbSet<WhatsAppWebhookInboxEntity> WhatsAppWebhookInbox => Set<WhatsAppWebhookInboxEntity>();
     public DbSet<WhatsAppStatusInboxEntity> WhatsAppStatusInbox => Set<WhatsAppStatusInboxEntity>();
     public DbSet<WhatsAppConversationEntity> WhatsAppConversations => Set<WhatsAppConversationEntity>();
@@ -22,6 +29,17 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
+        mb.Entity<InboxRevisionEntity>(e => e.HasKey(x => x.TenantId));
+        mb.Entity<BotDraftEntity>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.TenantId); });
+        mb.Entity<BotReleaseEntity>(e => e.HasKey(x => x.TenantId));
+        mb.Entity<AutomationRunEntity>(e => e.HasKey(x => x.InboundMessageId));
+        mb.Entity<CrmContactEntity>(e => e.HasKey(x => new { x.TenantId, x.Phone }));
+        mb.Entity<ManagedAgentEntity>(e =>
+        {
+            e.HasKey(x => x.Username);
+            e.HasIndex(x => x.TenantId);
+            e.HasOne<TenantEntity>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         mb.Entity<TenantEntity>(e =>
         {

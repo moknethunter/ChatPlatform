@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChatPlatform.Security;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Adapters;
@@ -28,8 +29,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 options.ForwardedHeaders =
 ForwardedHeaders.XForwardedFor
 | ForwardedHeaders.XForwardedProto;
-options.KnownNetworks.Clear();
-options.KnownProxies.Clear();
+// Trust loopback by default; accept additional proxies only when explicitly configured.
+foreach (var address in builder.Configuration.GetSection("Security:TrustedProxies").Get<string[]>() ?? Array.Empty<string>())
+{
+    options.KnownProxies.Add(System.Net.IPAddress.Parse(address));
+}
 });
 // ============================================================
 // 1. WhatsApp Configuration
@@ -80,7 +84,7 @@ Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {
 }
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
-Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
+Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. راجع إعدادات التحقق من توقيع Meta قبل التشغيل.");
 }
 // ============================================================
 // 2. Database - /data/platform.db
@@ -127,6 +131,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
+builder.Services.AddPlatformSecurity();
 builder.Services.AddHttpClient("ResilientClient")
 .AddPolicyHandler(
 HttpPolicyExtensions.HandleTransientHttpError()
@@ -220,6 +225,7 @@ throw;
 // 10. Middleware Pipeline - التعديل 3 و 4 هنا
 // ============================================================
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseRouting();
 app.UseCors();
 // Never expose development-only seed operations in production.
 if (!app.Environment.IsDevelopment())
@@ -238,6 +244,11 @@ if (!app.Environment.IsDevelopment())
 // آلية TenantResolver الحالية في WhatsApp تبقى كما هي
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
+app.Use(PlatformSecurity.ProtectBrowserWrites);
+app.UseRateLimiter();
+app.MapPlatformSecurity();
 // ============================================================
 // 11. All Endpoints
 // ============================================================

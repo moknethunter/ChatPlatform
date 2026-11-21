@@ -251,6 +251,31 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS CrmContacts (
+                    TenantId TEXT NOT NULL,
+                    Phone TEXT NOT NULL,
+                    DisplayName TEXT NOT NULL DEFAULT '',
+                    Email TEXT NOT NULL DEFAULT '',
+                    Notes TEXT NOT NULL DEFAULT '',
+                    Tags TEXT NOT NULL DEFAULT '',
+                    Stage TEXT NOT NULL DEFAULT 'new',
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, Phone)
+                );
+                CREATE INDEX IF NOT EXISTS IX_CrmContacts_Tenant_Stage ON CrmContacts(TenantId, Stage);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_Tenant_Updated ON WhatsAppConversations(TenantId, UpdatedAtUtc);
+                -- Import existing conversations without overwriting a CRM profile.
+                INSERT OR IGNORE INTO CrmContacts (TenantId, Phone, DisplayName, CreatedAtUtc, UpdatedAtUtc)
+                SELECT TenantId, ContactPhone, COALESCE(ContactName,''), CreatedAtUtc, UpdatedAtUtc
+                FROM WhatsAppConversations ORDER BY UpdatedAtUtc DESC;
+                CREATE TRIGGER IF NOT EXISTS CRM_Conversation_Insert
+                AFTER INSERT ON WhatsAppConversations
+                BEGIN
+                    INSERT OR IGNORE INTO CrmContacts (TenantId, Phone, DisplayName, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (NEW.TenantId, NEW.ContactPhone, COALESCE(NEW.ContactName,''), NEW.CreatedAtUtc, NEW.UpdatedAtUtc);
+                END;
+
                 CREATE TABLE IF NOT EXISTS WhatsAppMessages (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,
@@ -269,6 +294,89 @@ public static class DbInitializer
                         REFERENCES WhatsAppConversations(Id)
                         ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS InboxRevisions (
+                    TenantId TEXT NOT NULL PRIMARY KEY,
+                    Revision INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS BotDrafts (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    DefinitionJson TEXT NOT NULL,
+                    Version INTEGER NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TABLE IF NOT EXISTS BotReleases (
+                    TenantId TEXT NOT NULL PRIMARY KEY,
+                    DraftId TEXT NOT NULL,
+                    ActivationId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Version INTEGER NOT NULL,
+                    DefinitionJson TEXT NOT NULL,
+                    PublishedAtUtc TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS AutomationRuns (
+                    InboundMessageId TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    ConversationId TEXT NOT NULL,
+                    RecipientPhone TEXT NOT NULL,
+                    BotId TEXT NULL,
+                    BotVersion INTEGER NULL,
+                    RuleId TEXT NULL,
+                    Outcome TEXT NOT NULL,
+                    OutboundMessageId TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_AutomationRuns_Tenant_Phone_Created ON AutomationRuns(TenantId, RecipientPhone, CreatedAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_AutomationRuns_Tenant_Created ON AutomationRuns(TenantId, CreatedAtUtc);
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_INSERT AFTER INSERT ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_UPDATE AFTER UPDATE ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_DELETE AFTER DELETE ON WhatsAppConversations
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_INSERT AFTER INSERT ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_UPDATE AFTER UPDATE ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppMessages_DELETE AFTER DELETE ON WhatsAppMessages
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_INSERT AFTER INSERT ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_UPDATE AFTER UPDATE ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_CrmContacts_DELETE AFTER DELETE ON CrmContacts
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (OLD.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
 
                 CREATE TABLE IF NOT EXISTS WhatsAppOutbox (
                     Id TEXT NOT NULL PRIMARY KEY,
@@ -319,6 +427,26 @@ public static class DbInitializer
                     CreatedAtUtc TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ManagedAgents (
+                    Username TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    DisplayName TEXT NOT NULL,
+                    PasswordHash TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY (TenantId) REFERENCES Tenants(Id)
+                );
+                CREATE INDEX IF NOT EXISTS IX_ManagedAgents_TenantId ON ManagedAgents(TenantId);
+
+                CREATE TABLE IF NOT EXISTS PlatformSessions (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Username TEXT NOT NULL,
+                    TenantId TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_PlatformSessions_ExpiresAtUtc ON PlatformSessions(ExpiresAtUtc);
+
                 CREATE TABLE IF NOT EXISTS Users (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
@@ -339,6 +467,15 @@ public static class DbInitializer
             ApplyWhatsAppTenantCompatibilityMigration(
                 connection,
                 transaction);
+
+            // Preserve existing templates while adding fields required by the EF model.
+            EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "MetaTemplateId", "TEXT NULL");
+            EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "UpdatedAtUtc",
+                "TEXT NOT NULL DEFAULT '0001-01-01 00:00:00'");
+            Execute(connection, transaction, """
+                UPDATE WhatsAppTemplates SET UpdatedAtUtc = CreatedAtUtc
+                WHERE UpdatedAtUtc = '0001-01-01 00:00:00';
+                """);
 
             // Keep existing auto-reply rules while adding fields used by EF Core.
             EnsureColumnExists(connection, transaction, "AutoReplyRules", "CooldownSeconds",

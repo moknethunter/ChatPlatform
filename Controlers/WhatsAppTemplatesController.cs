@@ -1,3 +1,5 @@
+using ChatPlatform.Security;
+using Microsoft.AspNetCore.Authorization;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Mvc;
@@ -26,14 +28,15 @@ public sealed class WhatsAppTemplatesController : ControllerBase
     );
 
     // GET /api/templates?tenantId=...&whatsAppTenantId=...
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet]
     public async Task<IActionResult> GetTemplates(
         [FromQuery] string tenantId,
         [FromQuery] string? whatsAppTenantId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(tenantId))
-            return BadRequest(new { error = "tenantId is required" });
+        if (tenantId != User.TenantId()) return Forbid();
+        tenantId = User.TenantId();
 
         var query = _db.WhatsAppTemplates
             .AsNoTracking()
@@ -53,11 +56,14 @@ public sealed class WhatsAppTemplatesController : ControllerBase
     }
 
     // POST /api/templates
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPost]
     public async Task<IActionResult> CreateTemplate(
         [FromBody] CreateTemplateRequest request,
         CancellationToken cancellationToken)
     {
+        var UserTenant = User.TenantId();
+        if (request.TenantId != UserTenant) return Forbid();
         if (string.IsNullOrWhiteSpace(request.TenantId) ||
             string.IsNullOrWhiteSpace(request.WhatsAppTenantId) ||
             string.IsNullOrWhiteSpace(request.Name) ||
@@ -78,7 +84,7 @@ public sealed class WhatsAppTemplatesController : ControllerBase
         var tenant = await _db.Tenants
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                x => x.Id == request.TenantId && x.IsActive,
+                x => x.Id == UserTenant && x.IsActive,
                 cancellationToken);
 
         if (tenant is null)
@@ -88,7 +94,7 @@ public sealed class WhatsAppTemplatesController : ControllerBase
             .AsNoTracking()
             .FirstOrDefaultAsync(
                 x => x.Id == request.WhatsAppTenantId
-                     && x.TenantId == request.TenantId
+                     && x.TenantId == UserTenant
                      && x.IsActive,
                 cancellationToken);
 
@@ -103,7 +109,7 @@ public sealed class WhatsAppTemplatesController : ControllerBase
         var name = request.Name.Trim();
 
         var exists = await _db.WhatsAppTemplates.AnyAsync(
-            x => x.TenantId == request.TenantId
+            x => x.TenantId == UserTenant
                  && x.WhatsAppTenantId == request.WhatsAppTenantId
                  && x.Name == name,
             cancellationToken);
@@ -119,7 +125,7 @@ public sealed class WhatsAppTemplatesController : ControllerBase
         var template = new WhatsAppTemplateEntity
         {
             Id = Guid.NewGuid().ToString(),
-            TenantId = request.TenantId,
+            TenantId = UserTenant,
             WhatsAppTenantId = request.WhatsAppTenantId,
             Name = name,
             Category = category,
@@ -147,14 +153,15 @@ public sealed class WhatsAppTemplatesController : ControllerBase
     }
 
     // GET /api/templates/{id}
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet("{id}")]
     public async Task<IActionResult> GetTemplate(
         string id,
         [FromQuery] string tenantId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(tenantId))
-            return BadRequest(new { error = "tenantId is required" });
+        if (tenantId != User.TenantId()) return Forbid();
+        tenantId = User.TenantId();
 
         var template = await _db.WhatsAppTemplates
             .AsNoTracking()
@@ -168,14 +175,15 @@ public sealed class WhatsAppTemplatesController : ControllerBase
     }
 
     // DELETE /api/templates/{id}?tenantId=...
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteTemplate(
         string id,
         [FromQuery] string tenantId,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(tenantId))
-            return BadRequest(new { error = "tenantId is required" });
+        if (tenantId != User.TenantId()) return Forbid();
+        tenantId = User.TenantId();
 
         var template = await _db.WhatsAppTemplates
             .FirstOrDefaultAsync(

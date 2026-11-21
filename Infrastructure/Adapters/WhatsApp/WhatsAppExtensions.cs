@@ -42,6 +42,13 @@ public static class WhatsAppExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // Never forward business tokens through redirects or to a caller-supplied URL.
+        services.AddHttpClient("whatsapp-media", client =>
+        {
+            client.BaseAddress = new Uri($"https://graph.facebook.com/{graphApiVersion}/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+        services.AddScoped<WhatsAppMediaService>();
         services.AddScoped<IWhatsAppTenantResolver, WhatsAppTenantResolver>();
         services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
         services.AddScoped<WhatsAppOnboardingService>();
@@ -99,7 +106,7 @@ public static class WhatsAppExtensions
                 return Results.BadRequest();
 
             return Results.Text(challenge, "text/plain");
-        });
+        }).AllowAnonymous();
 
         // POST /webhook
         // Meta incoming messages and statuses.
@@ -193,7 +200,7 @@ public static class WhatsAppExtensions
 
                     return Results.StatusCode(503);
                 }
-            });
+            }).AllowAnonymous();
 
         return app;
     }

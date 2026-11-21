@@ -37,9 +37,9 @@ public static class EndpointMapper
                     dataDeletion = $"{baseUrl}/data-deletion.html"
                 }
             });
-        });
+        }).RequireAuthorization("TenantRead");
 
-        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow }));
+        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow })).AllowAnonymous();
 
         // Readiness checks storage separately from the liveness endpoint.
         app.MapGet("/ready", async (PlatformDbContext db, CancellationToken ct) =>
@@ -47,7 +47,7 @@ public static class EndpointMapper
             if (!await db.Database.CanConnectAsync(ct))
                 return Results.StatusCode(503);
             return Results.Ok(new { status = "ready" });
-        });
+        }).AllowAnonymous();
 
         // 2. Connectors API
         var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);
@@ -94,143 +94,24 @@ public static class EndpointMapper
         // 6. WhatsApp Webhook
         app.MapWhatsAppWebhook();
 
-        // 7. WhatsApp Meta - حالة Webhook - متوافق مع Meta فقط
-        app.MapGet(
-            ApiEndpoints.WhatsAppWebhookStatus,
-            (IOptions<WhatsAppOptions> options,
-             HttpRequest request) =>
+        // Report configuration for this tenant, never the platform's global access token or phone.
+        app.MapGet(ApiEndpoints.WhatsAppWebhookStatus, async (HttpContext ctx, PlatformDbContext db,
+            IOptions<WhatsAppOptions> options, CancellationToken ct) =>
         {
-            var whatsapp =
-                options.Value;
-
-            var token =
-                whatsapp.AccessToken;
-
-            var phoneNumberId =
-                whatsapp.PhoneNumberId;
-
-            var verifyToken =
-                whatsapp.VerifyToken;
-
-            var appSecret =
-                whatsapp.AppSecret;
-
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                token =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_TOKEN");
-            }
-
-            if (string.IsNullOrWhiteSpace(phoneNumberId))
-            {
-                phoneNumberId =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_PHONE_NUMBER_ID");
-            }
-
-            if (string.IsNullOrWhiteSpace(verifyToken))
-            {
-                verifyToken =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_VERIFY_TOKEN");
-            }
-
-            if (string.IsNullOrWhiteSpace(appSecret))
-            {
-                appSecret =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_APP_SECRET");
-            }
-
-            var forwardedProto =
-                request.Headers["X-Forwarded-Proto"]
-                    .FirstOrDefault();
-
-            var scheme =
-                string.Equals(
-                    forwardedProto,
-                    "https",
-                    StringComparison.OrdinalIgnoreCase)
-                    ? "https"
-                    : request.Scheme;
-
-            var baseUrl =
-                $"{scheme}://{request.Host}";
-
+            var tenant = ChatPlatform.Security.PlatformSecurity.TenantId(ctx.User);
+            var accountConfigured = await db.WhatsAppTenants.AnyAsync(a => a.TenantId == tenant &&
+                a.IsActive && a.BusinessTokenEncrypted != "", ct);
             return Results.Ok(new
             {
-                configured =
-                    !string.IsNullOrWhiteSpace(token) &&
-                    !string.IsNullOrWhiteSpace(phoneNumberId) &&
-                    !string.IsNullOrWhiteSpace(verifyToken),
-
-                phoneNumberId,
-
-                apiVersion =
-                    whatsapp.ApiVersion,
-
-                webhookUrl =
-                    $"{baseUrl}{ApiEndpoints.WhatsAppWebhook}",
-
-                verifyTokenConfigured =
-                    !string.IsNullOrWhiteSpace(verifyToken),
-
-                appSecretConfigured =
-                    !string.IsNullOrWhiteSpace(appSecret)
+                configured = accountConfigured,
+                apiVersion = options.Value.ApiVersion,
+                webhookUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/webhook",
+                verifyTokenConfigured = !string.IsNullOrWhiteSpace(options.Value.VerifyToken),
+                appSecretConfigured = !string.IsNullOrWhiteSpace(options.Value.AppSecret)
             });
-        });
+        }).RequireAuthorization("TenantRead");
 
-        // 8. WhatsApp Meta - إرسال قالب معتمد - متوافق مع Meta فقط
-        app.MapPost(ApiEndpoints.WhatsAppSendTemplate, async (
-            HttpRequest request,
-            IHttpClientFactory httpFactory,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
-                var root = doc.RootElement;
-
-                if (!root.TryGetProperty("to", out var to) ||
-                    !root.TryGetProperty("template", out var template))
-                    return Results.BadRequest(new { error = "to و template مطلوبان." });
-
-                var cleanTo = to.GetString()?.Trim().TrimStart('+').Replace(" ", "").Replace("-", "");
-                if (string.IsNullOrWhiteSpace(cleanTo))
-                    return Results.BadRequest(new { error = "رقم المستلم غير صالح." });
-
-                var phoneId = configuration["WhatsApp:PhoneNumberId"];
-                if (string.IsNullOrWhiteSpace(phoneId))
-                    return Results.BadRequest(new { error = "WhatsApp:PhoneNumberId غير معين." });
-
-                var payload = new
-                {
-                    messaging_product = "whatsapp",
-                    to = cleanTo,
-                    type = "template",
-                    template = new
-                    {
-                        name = template.GetProperty("name").GetString(),
-                        language = new { code = template.TryGetProperty("language", out var lang) && lang.TryGetProperty("code", out var code) ? code.GetString() ?? "ar" : "ar" },
-                        components = template.TryGetProperty("components", out var comp) ? comp : (JsonElement?)null
-                    }
-                };
-
-                var client = httpFactory.CreateClient("WhatsAppCloudApi");
-                var response = await client.PostAsJsonAsync($"{phoneId}/messages", payload, ct);
-                var content = await response.Content.ReadAsStringAsync(ct);
-
-                if (!response.IsSuccessStatusCode)
-                    return Results.Json(new { error = JsonDocument.Parse(content).RootElement }, statusCode: (int)response.StatusCode);
-
-                return Results.Ok(JsonDocument.Parse(content).RootElement);
-            }
-            catch (JsonException)
-            {
-                return Results.BadRequest(new { error = "Invalid JSON body" });
-            }
-        });
+        // Template sending is implemented by the authenticated durable MessagesController.
 
         // 9. Controllers
         app.MapControllers();

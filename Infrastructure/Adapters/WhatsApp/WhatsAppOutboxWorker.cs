@@ -69,24 +69,24 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         var now = DateTime.UtcNow;
 
         // 1. البحث عن رسالة جاهزة للإرسال
-        var candidateId = await db.WhatsAppOutbox
+        var candidate = await db.WhatsAppOutbox
             .AsNoTracking()
             .Where(x => ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                          (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
                         && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
-                        && x.Attempts < x.MaxAttempts)
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && x.IdempotencyKey.StartsWith("automation:"))))
             .OrderBy(x => x.CreatedAtUtc)
-            .Select(x => (Guid?)x.Id)
+            .Select(x => new { x.Id, x.Status })
             .FirstOrDefaultAsync(ct);
 
-        if (candidateId == null) return false;
+        if (candidate == null) return false;
 
         // 2. الحجز الذري للرسالة
         var claimed = await db.WhatsAppOutbox
-            .Where(x => x.Id == candidateId.Value 
+            .Where(x => x.Id == candidate.Id && x.Status == candidate.Status
                         && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                             (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
-                        && x.Attempts < x.MaxAttempts)
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && x.IdempotencyKey.StartsWith("automation:"))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.Status, StatusProcessing)
                 .SetProperty(x => x.LeaseUntilUtc, now.AddSeconds(LeaseSeconds))
@@ -97,8 +97,16 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
 
         db.ChangeTracker.Clear();
 
-        var item = await db.WhatsAppOutbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidateId.Value, ct);
+        var item = await db.WhatsAppOutbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidate.Id, ct);
         if (item == null) return true;
+        var automated = item.IdempotencyKey.StartsWith("automation:", StringComparison.Ordinal);
+        // A previous worker might have sent successfully and died before saving the result.
+        // Do not resend an automated reply after an expired processing lease.
+        if (automated && candidate.Status == StatusProcessing)
+        {
+            await MarkUncertainAsync(db, item, "automation_expired_lease", ct);
+            return true;
+        }
 
         // 3. جلب الحساب والتحقق من المستأجر
         var account = await db.WhatsAppTenants
@@ -110,6 +118,19 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         {
             await FailPermanentAsync(db, item, "no_active_matching_tenant", ct);
             return true;
+        }
+
+        // Recheck the customer-service window immediately before dispatching an automated reply.
+        if (automated)
+        {
+            var at = await db.WhatsAppConversations.AsNoTracking().Where(c => c.TenantId == item.TenantId &&
+                c.PhoneNumberId == item.PhoneNumberId && c.ContactPhone == item.RecipientPhone)
+                .Select(c => c.LastInboundAtUtc).FirstOrDefaultAsync(ct);
+            if (at == null || at > now || now - at.Value >= TimeSpan.FromHours(24))
+            {
+                await FailPermanentAsync(db, item, "automation_window_closed", ct);
+                return true;
+            }
         }
 
         // 4. فك تشفير رمز الوصول
@@ -131,7 +152,14 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 
         // 6. معالجة نتيجة الإرسال
-        if (result.IsSuccess)
+        if (automated && ((result.IsSuccess && string.IsNullOrWhiteSpace(result.MetaMessageId))
+            || (result.IsTransient && !(result.Raw?.StartsWith("http_429:", StringComparison.Ordinal) ?? false))))
+        {
+            // HTTP 5xx, network/timeout and malformed successful responses can be ambiguous;
+            // only an explicit 429 rejection is automatically retried for automation.
+            await MarkUncertainAsync(db, item, "automation_delivery_uncertain", ct);
+        }
+        else if (result.IsSuccess)
         {
             await MarkSentAsync(db, item, result.MetaMessageId, ct);
         }
@@ -145,6 +173,23 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         }
 
         return true;
+    }
+
+    private async Task MarkUncertainAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string reason, CancellationToken ct)
+    {
+        const string unknown = "DeliveryUnknown";
+        var now = DateTime.UtcNow;
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var affected = await db.WhatsAppOutbox
+            .Where(x => x.Id == item.Id && x.TenantId == item.TenantId && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, unknown).SetProperty(x => x.LastError, reason)
+                .SetProperty(x => x.UpdatedAtUtc, now).SetProperty(x => x.LeaseUntilUtc, (DateTime?)null)
+                .SetProperty(x => x.LeaseOwner, (string?)null), ct);
+        if (affected == 1 && item.MessageId.HasValue)
+            await db.WhatsAppMessages.Where(x => x.Id == item.MessageId.Value && x.TenantId == item.TenantId)
+                .ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, unknown), ct);
+        await tx.CommitAsync(ct);
+        _logger.LogWarning("Automated outbox {Id} marked delivery unknown; not automatically retried.", item.Id);
     }
 
     private async Task MarkSentAsync(PlatformDbContext db, WhatsAppOutboxEntity item, string? metaId, CancellationToken ct)

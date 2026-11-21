@@ -48,6 +48,10 @@ public sealed class WhatsAppAutoReplyAdapter
             return;
         }
 
+        // Durable inbox already evaluated the bot or legacy rule in its database transaction.
+        if (evt.Payload.ValueKind == JsonValueKind.Object && evt.Payload.TryGetProperty("automationHandled", out var handled)
+            && handled.ValueKind == JsonValueKind.True) return;
+
         var from = GetString(evt.Payload, "from");
         var text = GetString(evt.Payload, "text");
         var conversationId =
@@ -190,7 +194,7 @@ public sealed class WhatsAppAutoReplyAdapter
         }
     }
 
-    private static bool Matches(
+    internal static bool Matches(
         AutoReplyRuleEntity rule,
         string text)
     {
@@ -245,7 +249,7 @@ public sealed class WhatsAppAutoReplyAdapter
                 text,
                 pattern,
                 RegexOptions.IgnoreCase,
-                TimeSpan.FromSeconds(1));
+                TimeSpan.FromMilliseconds(50));
         }
         catch (RegexMatchTimeoutException)
         {

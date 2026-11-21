@@ -1,3 +1,5 @@
+using ChatPlatform.Security;
+using Microsoft.AspNetCore.Authorization;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -21,11 +23,13 @@ public class TenantsController : ControllerBase
         _protector = protectionProvider.CreateProtector("BusinessToken");
     }
 
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
+        var tenant = User.TenantId();
         var tenants = await _db.WhatsAppTenants
-            .AsNoTracking()
+            .AsNoTracking().Where(t => t.TenantId == tenant)
             .OrderBy(t => t.PhoneNumberId)
             .Select(t => new
             {

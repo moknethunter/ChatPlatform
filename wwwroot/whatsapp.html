@@ -339,27 +339,29 @@ async function loadAccounts() {
             
             const isActive = item.isActive !== false;
             
-            box.innerHTML = `
-                <div class="account-top">
-                    <div class="account-name">
-                        ${item.displayName || item.phoneNumberId || "حساب WhatsApp"}
-                        <span class="badge ${isActive ? '' : 'off'}">${isActive ? 'نشط' : 'معطل'}</span>
-                    </div>
-                </div>
-                <div class="account-detail">Tenant: ${item.tenantId || "—"}</div>
-                <div class="account-detail">Phone ID: ${item.phoneNumberId || "—"} | WABA: ${item.wabaId || "—"}</div>
-                <div class="account-detail">Token: ${item.hasToken ? "مشفر ومحفوظ" : "غير مضبوط"}</div>
-                <div class="account-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="testConnection('${item.id || item.phoneNumberId}')">اختبار الاتصال</button>
-                    <button class="btn btn-secondary btn-sm" onclick="openTokenModal('${item.id || item.phoneNumberId}')">تحديث التوكن</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteAccount('${item.id || item.phoneNumberId}')">حذف</button>
-                </div>
-            `;
+            const add = (cls, text) => {
+                const element = document.createElement("div"); element.className = cls;
+                element.textContent = text; box.appendChild(element); return element;
+            };
+            const title = add("account-name", item.displayName || item.phoneNumberId || "حساب WhatsApp");
+            const badge = document.createElement("span"); badge.className = "badge" + (isActive ? "" : " off");
+            badge.textContent = isActive ? "نشط" : "معطل"; title.appendChild(badge);
+            add("account-detail", "Tenant: " + (item.tenantId || "—"));
+            add("account-detail", "Phone ID: " + (item.phoneNumberId || "—") + " | WABA: " + (item.wabaId || "—"));
+            add("account-detail", "Token: " + (item.hasToken ? "مشفر ومحفوظ" : "غير مضبوط"));
+            const actions = add("account-actions", "");
+            for (const [label, action, cls] of [
+                ["تحديث التوكن", () => openTokenModal(item.id), "btn-secondary"],
+                ["إيقاف الحساب", () => deleteAccount(item.id), "btn-danger"]
+            ]) {
+                const btn = document.createElement("button"); btn.className = "btn btn-sm " + cls;
+                btn.textContent = label; btn.addEventListener("click", action); actions.appendChild(btn);
+            }
             list.appendChild(box);
         });
         updateAccountStatus(items);
     } catch (e) {
-        list.innerHTML = `<div class="empty" style="color:var(--danger)">${e.message || "فشل التحميل"}</div>`;
+        list.textContent = e.message || "فشل التحميل";
     }
 }
 
@@ -371,23 +373,23 @@ async function loadDiagnostics() {
         
         // Update Status Cards
         updateDot("metaStatusDot", data.metaConnected ? "green" : "red");
-        $("metaStatusText").textContent = data.metaConnected ? "متصل" : "غير متصل";
+        $("metaStatusText").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "متصل" : "غير متصل";
         
         updateDot("webhookStatusDot", data.webhookVerified ? "green" : "yellow");
         $("webhookStatusText").textContent = data.webhookVerified ? "يعمل" : "يحتاج تحقق";
         
         // Update Diagnostics List
-        $("diagMetaApi").textContent = data.metaConnected ? "Connected" : "Disconnected";
+        $("diagMetaApi").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "Connected" : "Disconnected";
         $("diagMetaApi").style.color = data.metaConnected ? "var(--success)" : "var(--danger)";
         
-        $("diagToken").textContent = data.tokenValid ? "Valid" : "Invalid";
+        $("diagToken").textContent = data.tokenValid == null ? "غير مفحوص" : data.tokenValid ? "Valid" : "Invalid";
         $("diagToken").style.color = data.tokenValid ? "var(--success)" : "var(--danger)";
         
-        $("diagWebhookVerify").textContent = data.webhookVerified ? "Passed" : "Failed";
+        $("diagWebhookVerify").textContent = data.webhookVerified == null ? "غير مفحوص" : data.webhookVerified ? "Passed" : "Failed";
         $("diagWebhookSig").textContent = data.webhookSignatureEnabled ? "Enabled" : "Disabled";
         
-        $("diagInbox").textContent = data.inboxWorkerRunning ? "Running" : "Stopped";
-        $("diagOutbox").textContent = data.outboxWorkerRunning ? "Running" : "Stopped";
+        $("diagInbox").textContent = data.inboxWorkerRunning == null ? "غير مفحوص" : data.inboxWorkerRunning ? "Running" : "Stopped";
+        $("diagOutbox").textContent = data.outboxWorkerRunning == null ? "غير مفحوص" : data.outboxWorkerRunning ? "Running" : "Stopped";
 
         // Update Webhook URL from backend
         if (data.webhookUrl) {
@@ -517,7 +519,7 @@ $("modalSaveTokenBtn").addEventListener("click", async () => {
 });
 
 async function deleteAccount(id) {
-    if (!confirm("هل أنت متأكد من حذف هذا الحساب؟")) return;
+    if (!confirm("هل أنت متأكد من إيقاف الحساب وإزالة توكنه؟")) return;
     try {
         await ChatPlatformAPI.deleteWhatsAppAccount(id); // DELETE /api/whatsapp/accounts/{id}
         loadAccounts();

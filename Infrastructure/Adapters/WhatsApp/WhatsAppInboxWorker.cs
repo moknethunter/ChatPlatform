@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChatPlatform.Infrastructure.Bots;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
@@ -143,6 +144,14 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             return; // سيتم اعتباره مكتملاً لأننا لا نستطيع معالجته
         }
 
+        // Serialize the ownership check, deduplication, cooldown decision and commit.
+        // SQLite's write transaction protects against concurrent publication or inbox processing.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var now = DateTime.UtcNow;
+        if (!await db.WhatsAppWebhookInbox.AsNoTracking().AnyAsync(x => x.Id == row.Id &&
+            x.TenantId == row.TenantId && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner &&
+            x.LeaseUntilUtc > now, ct)) return;
+
         // منع التكرار (Idempotency)
         if (await db.WhatsAppMessages.AsNoTracking().AnyAsync(x => x.Wamid == wamid, ct))
         {
@@ -157,7 +166,14 @@ public sealed class WhatsAppInboxWorker : BackgroundService
         var preview = text ?? $"[{type}]";
         if (preview.Length > 200) preview = preview[..200];
 
-        var now = DateTime.UtcNow;
+        // Use the server receipt as the upper bound, never let a delayed webhook
+        // reopen the 24-hour reply window merely because it was processed now.
+        var received = row.ReceivedAtUtc <= now ? row.ReceivedAtUtc : now;
+        if (long.TryParse(msg.GetString("timestamp"), out var unix) && unix >= 0 && unix <= 253402300799L)
+        {
+            var signedTime = DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime;
+            if (signedTime < received) received = signedTime;
+        }
 
         // جلب أو إنشاء المحادثة
         var conversation = await db.WhatsAppConversations.FirstOrDefaultAsync(
@@ -173,16 +189,19 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 Status = "open",
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now,
-                LastInboundAtUtc = now,
-                WindowExpiresAtUtc = now.AddHours(24),
+                LastInboundAtUtc = received,
+                WindowExpiresAtUtc = received.AddHours(24),
                 UnreadCount = 1
             };
             db.WhatsAppConversations.Add(conversation);
         }
         else
         {
-            conversation.LastInboundAtUtc = now;
-            conversation.WindowExpiresAtUtc = now.AddHours(24);
+            if (conversation.LastInboundAtUtc == null || conversation.LastInboundAtUtc < received)
+            {
+                conversation.LastInboundAtUtc = received;
+                conversation.WindowExpiresAtUtc = received.AddHours(24);
+            }
             conversation.UpdatedAtUtc = now;
             conversation.UnreadCount++;
             if (conversation.Status != "open") conversation.Status = "open";
@@ -198,15 +217,17 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             ContentJson = row.PayloadJson,
             TextPreview = preview,
             Status = "Received",
-            TimestampUtc = now,
+            TimestampUtc = received,
             CreatedAtUtc = now,
             Wamid = wamid
         };
 
         db.WhatsAppMessages.Add(message);
 
-        // 🚀 تحسين ذكي: حفظ المحادثة والرسالة معاً في خطوة واحدة (Transaction ضمني)
+        // All durable automation rows commit with the incoming message, before any in-memory notification.
+        await BotRuntime.StageAsync(db, conversation, message, text, now, ct);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         // نشر الحدث (Event)
         try
@@ -217,6 +238,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 Source = "whatsapp",
                 Payload = JsonSerializer.SerializeToElement(new
                 {
+                    automationHandled = true,
                     conversationId = conversation.Id,
                     messageId = message.Id,
                     tenantId = row.TenantId,

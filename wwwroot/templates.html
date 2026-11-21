@@ -285,7 +285,7 @@ function statusBadge(status){
 
 async function loadTenants(){
     try{
-        const result = await ChatPlatformAPI.getTenants();
+        const result = await ChatPlatformAPI.getWhatsAppAccounts();
         const items = Array.isArray(result) ? result : result.items || [];
 
         $("tenantId").replaceChildren(
@@ -329,7 +329,8 @@ async function loadTemplates(){
     tbody.appendChild(loading);
 
     try{
-        const result = await ChatPlatformAPI.getTemplates(tenantId, tenantId);
+        const identity = await ChatPlatformAPI.getIdentity();
+        const result = await ChatPlatformAPI.getTemplates(identity.tenantId, tenantId);
         const items = Array.isArray(result) ? result : result.items || [];
 
         tbody.replaceChildren();
@@ -379,14 +380,14 @@ async function saveTemplate(){
 
     const data = {
         name: $("name").value.trim(),
-        tenantId: $("tenantId").value,
+        tenantId: "",
         whatsAppTenantId: $("tenantId").value,
         category: $("category").value,
         language: $("language").value,
         body: $("body").value.trim()
     };
 
-    if(!data.name || !data.tenantId || !data.body){
+    if(!data.name || !data.whatsAppTenantId || !data.body){
         showMessage("يرجى إدخال اسم القالب والحساب والنص.");
         return;
     }
@@ -394,6 +395,7 @@ async function saveTemplate(){
     button.disabled = true;
 
     try{
+        data.tenantId = (await ChatPlatformAPI.getIdentity()).tenantId;
         await ChatPlatformAPI.createTemplate(data);
 
         showMessage("تم إرسال طلب حفظ القالب إلى الخادم.");

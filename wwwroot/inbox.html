@@ -1,371 +1,62 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0A0F1E">
-    <title>ChatPlatform | لوحة التحكم</title>
-    <style>
-        :root {
-            --bg: #0A0F1E;
-            --sidebar: #0D1428;
-            --panel: #111A30;
-            --panel2: #16213D;
-            --panel-hover: #1A2745;
-            --border: #1E2D4D;
-            --border-light: #2A3B60;
-            --text: #F1F5FF;
-            --muted: #8B9BB8;
-            --muted2: #6B7C9D;
-            --primary: #25D366;
-            --primary-glow: rgba(37, 211, 102, 0.18);
-            --blue: #3B82F6;
-            --orange: #F59E0B;
-            --purple: #A855F7;
-            --success: #22C55E;
-            --success-bg: #0F2A1D;
-            --danger: #EF4444;
-            --danger-bg: #3A161C;
-            --warning: #F59E0B;
-            --warning-bg: #49391B;
-            --info-bg: #162A4D;
-            --radius: 14px;
-            --radius-sm: 10px;
-            --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.18);
-        }
-        * { box-sizing: border-box; }
-        body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, Arial, sans-serif; line-height: 1.6; }
-        button, input, textarea, select { font: inherit; }
-
-        /* ===== TOPBAR ===== */
-        .topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 24px; background: #0D1428; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 100; }
-        .topbar .brand { font-weight: 800; font-size: 20px; margin-left: 18px; display: flex; align-items: center; gap: 10px; }
-        .topbar .brand::before { content: ""; width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #25D366, #128C7E); display: inline-block; box-shadow: 0 4px 14px rgba(37, 211, 102, 0.35); }
-        .topbar .brand span { color: var(--primary); }
-        .topbar a { color: #B8C6DD; text-decoration: none; padding: 9px 13px; border-radius: var(--radius-sm); font-weight: 600; font-size: 13.5px; transition: all .18s; border: 1px solid transparent; }
-        .topbar a:hover { background: var(--panel2); color: #fff; }
-        .topbar a.active { background: linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06)); color: #fff; border-color: rgba(37,211,102,0.25); }
-        .topbar .spacer { flex: 1; }
-        .connection { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; font-size: 12.5px; font-weight: 600; color: var(--muted); }
-        .connection.online { color: #4ADE80; border-color: rgba(34,197,94,0.35); background: rgba(34,197,94,0.08); }
-        .connection.offline { color: #FCA5A5; border-color: rgba(239,68,68,0.35); background: rgba(239,68,68,0.08); }
-
-        .layout { display: flex; min-height: calc(100vh - 61px); }
-        .sidebar { width: 260px; flex-shrink: 0; background: var(--sidebar); border-left: 1px solid var(--border); padding: 28px 16px; position: sticky; top: 61px; height: calc(100vh - 61px); }
-        .nav-title { color: var(--muted2); font-size: 11px; font-weight: 700; letter-spacing: 0.8px; padding: 10px 12px; }
-        .nav a { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #B8C6DD; padding: 12px 14px; border-radius: var(--radius-sm); margin: 4px 0; font-size: 14px; font-weight: 500; transition: all .18s; border: 1px solid transparent; }
-        .nav a:hover { background: var(--panel2); color: white; transform: translateX(-2px); }
-        .nav a.active { background: linear-gradient(90deg, rgba(37,211,102,0.14), rgba(37,211,102,0.06)); color: #fff; border-color: rgba(37,211,102,0.25); border-right: 3px solid var(--primary); }
-
-        .main { flex: 1; min-width: 0; padding: 28px 30px; max-width: 1280px; margin: 0 auto; width: 100%; }
-        h1 { font-size: 27px; font-weight: 800; letter-spacing: -0.4px; margin: 0 0 6px; }
-        .subtitle { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
-
-        /* ===== STATS ===== */
-        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-        .stat { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); position: relative; overflow: hidden; }
-        .stat::before { content: ""; position: absolute; top: 0; right: 0; left: 0; height: 3px; background: var(--primary); }
-        .stat:nth-child(2)::before { background: var(--blue); }
-        .stat:nth-child(3)::before { background: var(--orange); }
-        .stat:nth-child(4)::before { background: var(--purple); }
-        .stat-label { color: var(--muted); font-size: 13px; font-weight: 600; }
-        .stat-value { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-top: 8px; }
-
-        /* ===== WHATSAPP BANNER - v26.0 ===== */
-        .wa-banner { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: linear-gradient(90deg, rgba(37,211,102,0.12), rgba(37,211,102,0.03)); border: 1px solid rgba(37,211,102,0.25); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px; }
-        .wa-banner.warn { background: var(--warning-bg); border-color: rgba(245,158,11,0.4); }
-        .wa-banner.fail { background: var(--danger-bg); border-color: rgba(239,68,68,0.4); }
-        .wa-title { font-weight: 800; font-size: 15px; }
-        .wa-desc { font-size: 12.5px; color: var(--muted); margin-top: 3px; }
-
-        /* ===== QUICK ACCESS ===== */
-        .section-title { font-size: 18px; font-weight: 700; margin: 28px 0 16px; display: flex; align-items: center; gap: 9px; }
-        .section-title::before { content: ""; width: 4px; height: 20px; background: var(--primary); border-radius: 99px; display: inline-block; }
-        .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 8px; }
-        .action-card { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); text-decoration: none; color: var(--text); text-align: center; box-shadow: var(--shadow-sm); transition: all .18s; }
-        .action-card:hover { transform: translateY(-3px); border-color: rgba(37,211,102,0.35); }
-        .action-card .icon { width: 52px; height: 52px; border-radius: 13px; display: flex; align-items: center; justify-content: center; font-size: 24px; }
-        .action-card.inbox .icon { background: rgba(59,130,246,0.14); }
-        .action-card.whatsapp .icon { background: rgba(37,211,102,0.14); }
-        .action-card.templates .icon { background: rgba(245,158,11,0.14); }
-        .action-card.test .icon { background: rgba(239,68,68,0.14); }
-        .action-card .label { font-weight: 700; font-size: 14.5px; }
-        .action-card .desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
-
-        /* ===== CONTENT / INTEGRATIONS ===== */
-        .content { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .85fr); gap: 20px; align-items: start; }
-        .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; box-shadow: var(--shadow-sm); }
-        .card h2 { font-size: 17px; font-weight: 700; margin: 0 0 18px; display: flex; align-items: center; gap: 9px; }
-        .card h2::before { content: ""; width: 4px; height: 20px; background: var(--primary); border-radius: 99px; display: inline-block; }
-        label { display: block; font-size: 13px; font-weight: 600; color: #CBD6EA; margin: 14px 0 7px; }
-        input, textarea, select { display: block; width: 100%; padding: 12px 14px; background: #0B1326; color: white; border: 1px solid var(--border); border-radius: var(--radius-sm); outline: none; font-size: 14px; transition: border-color .18s, box-shadow .18s; }
-        input:focus, textarea:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); background: #0D1730; }
-        input::placeholder, textarea::placeholder { color: #5A6B8A; }
-        textarea { resize: vertical; min-height: 108px; direction: ltr; text-align: left; font-family: Consolas, monospace; font-size: 13px; }
-        .hint { font-size: 11.5px; color: var(--muted); margin-top: 6px; line-height: 1.7; background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 8px; border: 1px dashed var(--border); }
-        .btn { border: 0; padding: 12px 20px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 700; font-size: 14px; color: #06130B; background: linear-gradient(135deg, #2EE56F, #1EB85A); box-shadow: 0 6px 16px rgba(37,211,102,0.28); transition: all .18s; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
-        .btn:hover { transform: translateY(-1px); box-shadow: 0 9px 20px rgba(37,211,102,0.35); }
-        .btn:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: none; }
-        .btn-secondary { background: var(--panel2); color: #E2EAFB; border: 1px solid var(--border-light); box-shadow: none; }
-        .btn-secondary:hover { background: var(--panel-hover); }
-        .btn-danger { background: #2A1216; color: #FCA5A5; border: 1px solid rgba(239,68,68,0.35); padding: 8px 14px; font-size: 12.5px; box-shadow: none; }
-        .btn-danger:hover { background: #3A161C; }
-        .form-actions { display: flex; gap: 10px; margin-top: 18px; }
-        .message { display: none; padding: 13px 15px; margin: 16px 0; border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7; font-weight: 500; border: 1px solid transparent; white-space: pre-wrap; word-break: break-word; }
-        .message.show { display: block; }
-        .message.error { background: var(--danger-bg); color: #FECACA; border-color: rgba(239,68,68,0.35); }
-        .message.success { background: var(--success-bg); color: #A7F3D0; border-color: rgba(34,197,94,0.35); }
-        .message.info { background: var(--info-bg); color: #BFDBFE; border-color: rgba(59,130,246,0.35); }
-        .connector { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--panel2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 15px; margin-bottom: 10px; }
-        .connector-name { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
-        .connector-url { color: var(--muted); font-size: 11.5px; margin-top: 5px; overflow-wrap: anywhere; direction: ltr; text-align: right; font-family: Consolas, monospace; }
-        .empty { text-align: center; color: var(--muted); padding: 32px 10px; font-size: 13px; background: rgba(255,255,255,0.015); border: 1px dashed var(--border); border-radius: var(--radius-sm); }
-        .footer { color: var(--muted2); text-align: center; font-size: 11.5px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
-        @media(max-width: 1000px) { .stats { grid-template-columns: 1fr 1fr; } .actions { grid-template-columns: 1fr 1fr; } .content { grid-template-columns: 1fr; } }
-        @media(max-width: 650px) { .sidebar { display: none; } .main { padding: 16px; } .stats, .actions { grid-template-columns: 1fr; } .topbar { padding: 12px 14px; } }
-    </style>
-</head>
-<body>
-
-<!-- ===== TOPBAR - من لوحة التحكم ===== -->
-<nav class="topbar">
-    <span class="brand">Chat<span>Platform</span></span>
-    <a href="/index.html" class="active">لوحة التحكم</a>
-    <a href="/inbox.html">الانبوكس</a>
-    <a href="/whatsapp.html">WhatsApp</a>
-    <a href="/templates.html">القوالب</a>
-    <a href="/settings.html">الإعدادات</a>
-    <a href="/test-whatsapp.html">اختبار واتساب</a>
-    <span class="spacer"></span>
-    <span id="connection" class="connection">جاري فحص الاتصال...</span>
-</nav>
-
-<div class="layout">
-    <!-- ===== SIDEBAR - من لوحة التكاملات ===== -->
-    <aside class="sidebar">
-        <div class="nav-title">القائمة الرئيسية</div>
-        <nav class="nav">
-            <a href="/index.html" class="active">لوحة التحكم</a>
-            <a href="/inbox.html">صندوق المحادثات</a>
-            <a href="/whatsapp.html">إدارة WhatsApp</a>
-            <a href="/autoreply.html">الردود الآلية</a>
-            <a href="/templates.html">قوالب الرسائل</a>
-            <a href="/settings.html">الإعدادات</a>
-            <a href="/privacy.html">الخصوصية</a>
-        </nav>
-        <div class="nav-title" style="margin-top:20px">أدوات سريعة</div>
-        <nav class="nav">
-            <a href="/test-whatsapp.html">🧪 اختبار واتساب v26.0</a>
-            <a href="/whatsapp.html">🔗 فحص Webhook</a>
-        </nav>
-    </aside>
-
-    <main class="main">
-        <h1>مرحباً بك 👋</h1>
-        <div class="subtitle">نظرة عامة على منصتك - لوحة التحكم والتكاملات في مكان واحد - Graph API v26.0</div>
-
-        <!-- ===== STATS - من لوحة التحكم - ربط حقيقي ===== -->
-        <section class="stats">
-            <div class="stat"><div class="stat-label">المحادثات</div><div class="stat-value" id="statConvs">—</div></div>
-            <div class="stat"><div class="stat-label">الرسائل غير المقروءة</div><div class="stat-value" id="statUnread">—</div></div>
-            <div class="stat"><div class="stat-label">إجمالي التكاملات</div><div class="stat-value" id="totalCount">—</div></div>
-            <div class="stat"><div class="stat-label">حالة الخادم</div><div class="stat-value" id="serverStatus" style="font-size:19px">—</div></div>
-        </section>
-
-        <!-- ===== WHATSAPP STATUS - توافق v26.0 - ربط حقيقي ===== -->
-        <div class="wa-banner" id="waBanner">
-            <div>
-                <div class="wa-title" id="waTitle">جاري فحص واتساب...</div>
-                <div class="wa-desc" id="waDesc">فحص التوكن و Webhook وإصدار Graph API</div>
-            </div>
-            <a href="/whatsapp.html" class="btn btn-secondary" style="text-decoration:none">إدارة واتساب</a>
-        </div>
-
-        <!-- ===== QUICK ACCESS - من لوحة التحكم ===== -->
-        <h2 class="section-title">الوصول السريع</h2>
-        <div class="actions">
-            <a href="/inbox.html" class="action-card inbox"><div class="icon">📥</div><div class="label">صندوق المحادثات</div><div class="desc">استعرض وأرسل الرسائل</div></a>
-            <a href="/whatsapp.html" class="action-card whatsapp"><div class="icon">💚</div><div class="label">إدارة WhatsApp</div><div class="desc">الربط و Webhook والإعدادات</div></a>
-            <a href="/templates.html" class="action-card templates"><div class="icon">📝</div><div class="label">قوالب الرسائل</div><div class="desc">إدارة الردود الجاهزة</div></a>
-            <a href="/test-whatsapp.html" class="action-card test"><div class="icon">🧪</div><div class="label">اختبار واتساب</div><div class="desc">فحص التوكن و Webhook و v26.0</div></a>
-        </div>
-
-        <div id="globalMessage" class="message"></div>
-
-        <!-- ===== INTEGRATIONS - من لوحة التكاملات ===== -->
-        <h2 class="section-title">لوحة التكاملات المركزية</h2>
-        <section class="content">
-            <div class="card">
-                <h2>إضافة تكامل جديد</h2>
-                <form id="connectorForm">
-                    <label for="name">اسم التكامل</label>
-                    <input id="name" type="text" maxlength="100" placeholder="مثال: Telegram Sales" required>
-                    <label for="url">عنوان API</label>
-                    <input id="url" type="url" placeholder="https://api.example.com/endpoint" required>
-                    <label for="method">طريقة الاتصال</label>
-                    <select id="method"><option value="POST">POST</option><option value="GET">GET</option></select>
-                    <label for="authKey">اسم هيدر المصادقة</label>
-                    <input id="authKey" type="text" maxlength="100" value="Authorization">
-                    <label for="authToken">رمز المصادقة</label>
-                    <input id="authToken" type="password" autocomplete="new-password" maxlength="2000" placeholder="أدخل الرمز السري">
-                    <div class="hint">لا تعرض المنصة الرمز السري بعد حفظه. تأكد أن الخادم يخزنه بطريقة آمنة.</div>
-                    <label for="template">قالب البيانات JSON</label>
-                    <textarea id="template" placeholder='{"chat_id":"123","text":"{Message}"}'></textarea>
-                    <div class="hint">يجب أن يكون قالب البيانات بصيغة JSON صحيحة.</div>
-                    <div class="form-actions">
-                        <button type="submit" id="saveButton" class="btn">إضافة التكامل</button>
-                        <button type="reset" class="btn btn-secondary">مسح الحقول</button>
-                    </div>
-                </form>
-                <div id="formMessage" class="message"></div>
-            </div>
-
-            <div class="card">
-                <h2>التكاملات المسجلة</h2>
-                <button id="refreshButton" class="btn btn-secondary" type="button">تحديث القائمة</button>
-                <div id="connectorList" style="margin-top:18px"><div class="empty">جاري تحميل التكاملات...</div></div>
-            </div>
-        </section>
-
-        <footer class="footer">ChatPlatform · Unified Integration Management · WhatsApp Graph API v26.0</footer>
-    </main>
-</div>
-
-<script src="/api.js"></script>
-<script>
-"use strict";
-const $ = id => document.getElementById(id);
-function showMessage(el, text, type="info"){ el.textContent=text; el.className="message show "+type; }
-function clearMessage(el){ el.textContent=""; el.className="message"; }
-function getArray(data){ if(Array.isArray(data)) return data; if(Array.isArray(data?.items)) return data.items; if(Array.isArray(data?.data)) return data.data; return null; }
-
-// ===== 1 - ربط الخادم + واتساب v26.0 - ربط حقيقي مع الباكيند =====
-async function checkServerAndWhatsApp(){
-    const badge = $("connection");
-    try{
-        await ChatPlatformAPI.getHealth();
-        badge.textContent = "● الخادم متصل";
-        badge.className = "connection online";
-        $("serverStatus").textContent = "متصل";
-        $("serverStatus").style.color = "#4ADE80";
-    }catch(e){
-        badge.textContent = "● تعذر الاتصال";
-        badge.className = "connection offline";
-        $("serverStatus").textContent = "غير متصل";
-        $("serverStatus").style.color = "#FCA5A5";
-    }
-
-    // فحص واتساب v26.0 - هذا هو أهم ربط
-    const banner = $("waBanner");
-    try{
-        const w = await ChatPlatformAPI.getWebhookStatus(); // GET /api/whatsapp/webhook-status
-        const apiVersion = w.apiVersion || "غير معروف";
-        const configured = w.configured;
-        if(!configured){
-            banner.className = "wa-banner fail";
-            $("waTitle").textContent = "❌ واتساب غير مكون - أكمل الإعداد";
-            $("waDesc").textContent = "روح لصفحة إدارة WhatsApp وأدخل AccessToken و PhoneNumberId و VerifyToken.";
-            return;
-        }
-        if(apiVersion !== "v26.0"){
-            banner.className = "wa-banner warn";
-            $("waTitle").textContent = "⚠️ واتساب شغال لكن الإصدار " + apiVersion + " وليس v26.0";
-            $("waDesc").textContent = "غير ApiVersion في appsettings.json إلى v26.0، لأن Meta ستلغي الإصدارات القديمة. التوكن: " + (w.verifyTokenConfigured ? "موجود" : "مفقود") + " | AppSecret: " + (w.appSecretConfigured ? "موجود" : "مفقود ⚠️");
-            return;
-        }
-        banner.className = "wa-banner";
-        $("waTitle").textContent = "✅ واتساب متصل - Graph API v26.0";
-        $("waDesc").textContent = "PhoneId: " + (w.phoneNumberId || "-") + " | VerifyToken: " + (w.verifyTokenConfigured ? "موجود ✅" : "مفقود ❌") + " | AppSecret: " + (w.appSecretConfigured ? "موجود ✅" : "مفقود ⚠️");
-    }catch(e){
-        banner.className = "wa-banner fail";
-        $("waTitle").textContent = "❌ تعذر فحص واتساب - " + (e.message || "الباكيند لم يرجع حالة Webhook");
-        $("waDesc").textContent = "تأكد أن EndpointMapper.cs فيه GET /api/whatsapp/webhook-status. افتح test-whatsapp.html للتشخيص الكامل.";
-    }
+<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>صندوق المحادثات | ChatPlatform</title><style>*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:#f3f6f5;color:#17392e;font-family:system-ui,sans-serif}main{max-width:1320px;margin:auto;padding:20px 16px}nav{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:18px}a{color:#176b50}h1,h2,p{margin:0 0 12px}h1{font-size:1.6rem}h2{font-size:1.1rem}.panel{background:white;border:1px solid #dce8e1;border-radius:14px;padding:16px;min-width:0}.grid{display:grid;grid-template-columns:minmax(250px,1fr) minmax(0,2fr);gap:14px}.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}input,select,textarea,button{font:inherit;border:1px solid #b7c9c0;border-radius:8px;padding:10px;min-width:0}input,textarea,select{background:white;color:inherit}button{cursor:pointer;background:#176b50;color:white;border-color:#176b50}button.alt{background:white;color:#176b50}button:disabled{opacity:.5;cursor:default}label{display:block;font-size:.9rem;margin:12px 0 5px}form input,form textarea,form select{width:100%}.muted{color:#567267;font-size:.88rem}.entry{display:block;width:100%;text-align:right;background:white;color:#17392e;border:0;border-bottom:1px solid #dce8e1;border-radius:0;padding:14px 8px;overflow-wrap:anywhere}.entry:hover,.entry.selected{background:#e7f3ed}.entry strong{display:block}.pager{display:flex;gap:8px;align-items:center;margin-top:12px}.messages{height:420px;overflow:auto;background:#eaf0ed;padding:12px;border-radius:10px;display:flex;flex-direction:column;gap:10px}.bubble{max-width:84%;align-self:flex-start;background:white;border-radius:12px;padding:10px;white-space:pre-wrap;overflow-wrap:anywhere}.bubble.out{align-self:flex-end;background:#d5efdf}.bubble small{display:block;color:#547366;margin-top:5px}.chatTitle{overflow-wrap:anywhere}.status{min-height:1.5em;color:#6e3a23}@media(max-width:720px){.grid{grid-template-columns:1fr}.messages{height:330px}main{padding:12px}.toolbar input{width:100%}}</style></head><body><main>
+<nav><a href="/index.html">لوحة التحكم</a><a href="/contacts.html">إدارة العملاء</a><a href="/whatsapp.html">حسابات واتساب</a></nav><h1>صندوق المحادثات المشترك</h1><p id="status" class="status" role="status"></p><p id="live" class="muted" role="status">التحديث التلقائي: جارٍ الاتصال</p>
+<div class="grid"><section class="panel"><h2>المحادثات</h2><div class="toolbar"><input id="search" placeholder="بحث بالاسم أو الرقم" aria-label="بحث"><select id="state" aria-label="حالة المحادثة"><option value="">جميع الحالات</option><option value="open">مفتوحة</option><option value="closed">مغلقة</option></select><select id="assignedFilter" aria-label="الموظف"><option value="">الجميع</option><option value="me">محادثاتي</option><option value="unassigned">غير مسندة</option></select><button id="refresh">تحديث</button></div><div id="list"></div><div class="pager"><button id="prev" class="alt">السابق</button><span id="page"></span><button id="next" class="alt">التالي</button></div></section>
+<section class="panel"><div id="empty">اختر محادثة لعرض الرسائل.</div><div id="chat" hidden><h2 id="title" class="chatTitle"></h2><p id="info" class="muted"></p><div class="toolbar"><button id="toggle" class="alt"></button><button id="read" class="alt">تمت القراءة</button><a id="contact" href="/contacts.html">ملف العميل</a></div><div class="toolbar" id="agentControls" hidden><select id="agent" aria-label="اسناد الموظف"></select><button id="assign" class="alt">إسناد</button></div><div class="toolbar"><input id="tags" maxlength="300" placeholder="وسوم المحادثة" aria-label="الوسوم"><button id="saveTags" class="alt">حفظ الوسوم</button></div><div id="messages" class="messages" aria-live="polite"></div><form id="send"><label>رسالة نصية</label><textarea name="text" rows="3" maxlength="4096" required placeholder="اكتب الرسالة"></textarea><button type="submit">إرسال</button><p id="window" class="muted"></p></form><form id="mediaForm"><label>إرفاق صورة أو فيديو أو PDF أو ملف صوتي (5 MB)</label><input name="file" type="file" accept="image/jpeg,image/png,video/mp4,application/pdf,audio/ogg,audio/mpeg" required><label>تعليق اختياري</label><input name="caption" maxlength="1024"><button type="submit">إرسال المرفق</button><button type="button" id="record" hidden class="alt">تسجيل صوت</button><p id="recordHint" class="muted"></p></form></div></section></div></main>
+<script src="/api.js"></script><script>
+(()=>{const $=id=>document.getElementById(id),api=window.ChatPlatformAPI;let rows=[],current=null,page=1,version=0,identity=null,pending=null,mediaPending=null,sending=false,mediaSending=false,refreshing=false,listVersion=0,lastSignature=null;const status=t=>$("status").textContent=t;
+$("search").value=new URLSearchParams(location.search).get("phone")||"";
+function time(s){return s?new Date(s).toLocaleString("ar"): "";}
+async function load(){const requestVersion=++listVersion;try{const result=await api.getConversations({page,limit:25,search:$("search").value.trim(),status:$("state").value,assigned:$("assignedFilter").value});if(requestVersion!==listVersion)return false;rows=result;$("list").replaceChildren();for(const c of rows){const b=document.createElement("button");b.className="entry"+(current?.id===c.id?" selected":"");const n=document.createElement("strong");n.textContent=(c.contactName||c.contactPhone)+(c.unreadCount?" · "+c.unreadCount+" جديدة":"");const p=document.createElement("span");p.className="muted";p.textContent=(c.lastMessage?.text||"لا توجد رسائل")+" · "+(c.status==="closed"?"مغلقة":"مفتوحة");b.append(n,p);b.onclick=()=>select(c);$("list").append(b);}if(!rows.length)$("list").textContent="لا توجد محادثات.";$("page").textContent="صفحة "+page;$("prev").disabled=page===1;$("next").disabled=rows.length<25;if(current){const fresh=rows.find(x=>x.id===current.id);if(fresh){current=fresh;renderHeader();}}return true;}catch(e){status(e.message);return false;}}
+function renderHeader(){if(!current)return;$("title").textContent=current.contactName||current.contactPhone;$("info").textContent=current.contactPhone+" · "+(current.assignedToUserId||"غير مسندة");$("contact").href="/contacts.html?phone="+encodeURIComponent(current.contactPhone);$("toggle").textContent=current.status==="closed"?"إعادة فتح":"إغلاق المحادثة";$("window").textContent=current.isWindowOpen?"نافذة الرد مفتوحة":"نافذة الرد مغلقة؛ استخدم قالبًا معتمدًا من صفحة الاختبار."; $("send").querySelector("button").disabled=sending||!current.isWindowOpen;$("mediaForm").querySelector("button").disabled=mediaSending||!current.isWindowOpen; }
+async function messages(){if(!current)return true;const id=current.id,v=++version;try{const data=await api.getConversationMessages(id,100);if(v!==version||current?.id!==id)return false;const signature=JSON.stringify(data.map(m=>[m.id,m.status,m.textPreview,m.messageType]));if(lastSignature===signature)return true;lastSignature=signature;const box=$("messages");const atBottom=box.scrollHeight-box.scrollTop-box.clientHeight<80;box.replaceChildren();for(const m of data){const b=document.createElement("div");b.className="bubble"+(m.direction==="Outbound"?" out":"");let full=m.textPreview;try{const raw=JSON.parse(m.contentJson);if(typeof raw.text?.body==="string")full=raw.text.body;}catch{}b.textContent=full||"["+m.messageType+"]";
+if(["image","audio","video","document"].includes(m.messageType)){
+ const link=document.createElement("a");link.href="/api/media/"+encodeURIComponent(m.id)+"?attachment=true";link.textContent="تنزيل المرفق";link.style.display="block";b.append(link);
+ if(m.messageType!=="document"){const show=document.createElement("button");show.type="button";show.className="alt";show.textContent="عرض / تشغيل";show.onclick=()=>{const element=document.createElement(m.messageType==="image"?"img":m.messageType);element.style.maxWidth="100%";element.style.display="block";if(m.messageType!=="image")element.controls=true;element.src="/api/media/"+encodeURIComponent(m.id);element.onerror=()=>status("تعذر فتح الوسائط أو انتهت صلاحيتها.");show.replaceWith(element);};b.append(show);}
 }
-
-// ===== 2 - ربط المحادثات - إحصاءات حقيقية =====
-async function loadConversationStats(){
-    try{
-        const convs = await ChatPlatformAPI.getConversations(); // GET /api/whatsapp/inbox - ربط حقيقي
-        const list = getArray(convs) || [];
-        $("statConvs").textContent = list.length;
-        let unread = 0;
-        for(const c of list){ if(typeof c.unreadCount === 'number') unread += c.unreadCount; }
-        $("statUnread").textContent = unread;
-    }catch(e){
-        $("statConvs").textContent = "—";
-        $("statUnread").textContent = "—";
-        console.warn("Conversations failed:", e);
-    }
+const small=document.createElement("small");small.textContent=time(m.timestampUtc)+" · "+(m.status==="DeliveryUnknown"?"حالة التسليم غير مؤكدة — لا تعاود الإرسال قبل التحقق":m.status);b.append(small);box.append(b);}if(atBottom)box.scrollTop=box.scrollHeight;return true;}catch(e){if(v===version)status(e.message);return false;}}
+async function select(c){current=c;$("empty").hidden=true;$("chat").hidden=false;$("tags").value=c.tags||"";$("agent").value=c.assignedToUserId||"";$("send").reset();$("mediaForm").reset();$("mediaForm").file.required=true;recorded=null;recordedFor=null;if(recorder?.state==="recording")recorder.stop();pending=null;mediaPending=null;lastSignature=null;renderHeader();await messages();}
+async function action(name,body={}){if(!current)return;const id=current.id;try{await api.updateConversation(id,name,body);status("تم التحديث.");if(current?.id===id){if(name==="status")current.status=body.status;if(name==="assign")current.assignedToUserId=body.username;if(name==="tags")current.tags=body.tags;renderHeader();}await load();}catch(e){status(e.message);}}
+$("toggle").onclick=()=>action("status",{status:current.status==="closed"?"open":"closed"});$("read").onclick=()=>action("read");$("assign").onclick=()=>action("assign",{username:$("agent").value||null});$("saveTags").onclick=()=>action("tags",{tags:$("tags").value});
+$("send").onsubmit=async e=>{e.preventDefault();if(!current)return;const form=e.currentTarget,btn=form.querySelector("button"),id=current.id,text=form.text.value.trim(),phone=current.phoneNumberId,to=current.contactPhone;if(!text)return;if(!pending||pending.id!==id||pending.text!==text)pending={id,text,key:crypto.randomUUID()};const key=pending.key;sending=true;btn.disabled=true;try{await api.sendMessage(to,text,{phoneNumberId:phone,idempotencyKey:key});if(current?.id===id){form.reset();pending=null;status("تمت جدولة الرسالة للإرسال.");await messages();}await load();}catch(err){status(err.message);}finally{sending=false;renderHeader();}};
+$("mediaForm").onsubmit=async e=>{e.preventDefault();if(!current||mediaSending)return;const form=e.currentTarget,id=current.id,file=recordedFor===id&&recorded?recorded:form.file.files[0],caption=form.caption.value.trim();if(!file||file.size>5*1024*1024){status("الحد الأقصى 5 MB.");return;}mediaSending=true;renderHeader();try{if(!mediaPending||mediaPending.id!==id||mediaPending.file!==file||mediaPending.caption!==caption){const uploaded=await api.uploadMedia(id,file);mediaPending={id,file,caption,ticket:uploaded.ticket,key:crypto.randomUUID()};}const request=mediaPending;await api.sendMedia(id,request.ticket,caption,request.key);if(current?.id===id){form.reset();form.file.required=true;recorded=null;recordedFor=null;mediaPending=null;recordHint.textContent="";status("تمت جدولة المرفق.");await messages();}await load();}catch(err){status(err.message);}finally{mediaSending=false;renderHeader();}};
+let recorder=null,recorded=null,recordedFor=null,recordStarted=0,recordTimer=null;
+const recordBtn=$("record"),recordHint=$("recordHint");
+const recordMime="audio/ogg;codecs=opus";
+if(navigator.mediaDevices?.getUserMedia&&window.MediaRecorder&&MediaRecorder.isTypeSupported(recordMime)) {
+ recordBtn.hidden=false;
+ recordBtn.onclick=async()=>{
+  if(recorder?.state==="recording"){recorder.stop();return;}
+  if(!current||!current.isWindowOpen)return;
+  const selected=current.id;let stream;
+  try{
+   stream=await navigator.mediaDevices.getUserMedia({audio:true});
+   if(current?.id!==selected){stream.getTracks().forEach(t=>t.stop());return;}
+   const chunks=[];let bytes=0;recorded=null;recordedFor=selected;
+   recorder=new MediaRecorder(stream,{mimeType:recordMime});
+   recorder.ondataavailable=e=>{bytes+=e.data.size;if(bytes<=5*1024*1024)chunks.push(e.data);else if(recorder.state==="recording")recorder.stop();};
+   recorder.onstop=()=>{clearTimeout(recordTimer);stream.getTracks().forEach(t=>t.stop());recordBtn.textContent="تسجيل صوت";if(current?.id!==selected)return;if(bytes>5*1024*1024||!chunks.length){recordHint.textContent="التسجيل فارغ أو تجاوز الحد.";return;}recorded=new File(chunks,"voice.ogg",{type:"audio/ogg"});$("mediaForm").file.required=false;recordHint.textContent="تم تسجيل الصوت. اضغط إرسال المرفق لإرساله.";};
+   recorder.onerror=()=>{stream.getTracks().forEach(t=>t.stop());recordHint.textContent="تعذر التسجيل.";};
+   recorder.start(1000);recordStarted=Date.now();recordBtn.textContent="إيقاف التسجيل";recordHint.textContent="جاري تسجيل الصوت...";recordTimer=setTimeout(()=>{if(recorder.state==="recording")recorder.stop();},120000);
+  }catch{stream?.getTracks().forEach(t=>t.stop());recordHint.textContent="تعذر الوصول إلى الميكروفون.";}
+ };
+}else recordHint.textContent="التسجيل المباشر غير مدعوم في هذا المتصفح؛ يمكنك إرفاق ملف صوتي.";
+$("mediaForm").file.onchange=()=>{recorded=null;recordedFor=null;$("mediaForm").file.required=true;recordHint.textContent="";};
+async function refreshLive(){if(document.hidden||refreshing||!identity)return;refreshing=true;try{const listOk=await load(),messagesOk=await messages();$("live").textContent=listOk&&messagesOk?"آخر تحديث تلقائي: "+new Date().toLocaleTimeString("ar"):"تعذر التحديث التلقائي؛ أعد المحاولة.";}finally{refreshing=false;}}
+let live=null,liveConnected=false,revision=null,dirty=false;
+function stopLive(){live?.close();live=null;liveConnected=false;}
+function startLive(){
+ if(!identity||document.hidden||live||!window.EventSource)return;
+ live=new EventSource("/api/live/inbox");
+ live.onopen=()=>{liveConnected=true;$("live").textContent="الاتصال اللحظي نشط";};
+ live.addEventListener("inbox",ev=>{if(ev.data!==revision){revision=ev.data;dirty=true;if(!refreshing)drainLive();}});
+ live.addEventListener("session-expired",()=>{stopLive();identity=null;location.assign("/login.html");});
+ live.onerror=()=>{liveConnected=false;$("live").textContent="إعادة الاتصال؛ التحديث الاحتياطي نشط";};
 }
-
-// ===== 3 - ربط التكاملات =====
-function renderConnectors(items){
-    const list = $("connectorList");
-    list.replaceChildren();
-    $("totalCount").textContent = items.length;
-    if(items.length === 0){
-        const d = document.createElement("div"); d.className="empty"; d.textContent="لا توجد تكاملات مسجلة حتى الآن."; list.appendChild(d); return;
-    }
-    for(const item of items){
-        const row = document.createElement("div"); row.className="connector";
-        const info = document.createElement("div");
-        const name = document.createElement("div"); name.className="connector-name"; name.textContent = item.name || "تكامل بدون اسم";
-        const url = document.createElement("div"); url.className="connector-url"; url.textContent = item.targetUrl || "";
-        info.append(name, url);
-        const remove = document.createElement("button"); remove.type="button"; remove.className="btn btn-danger"; remove.textContent="حذف";
-        remove.addEventListener("click", ()=> deleteConnector(item.id, remove));
-        row.append(info, remove); list.appendChild(row);
-    }
-}
-async function loadConnectors(){
-    const list = $("connectorList");
-    list.textContent = "جاري تحميل التكاملات...";
-    try{
-        const result = await ChatPlatformAPI.getConnectors();
-        const items = getArray(result);
-        if(!items) throw new Error("تنسيق استجابة التكاملات غير معروف.");
-        renderConnectors(items);
-        clearMessage($("globalMessage"));
-    }catch(error){
-        list.textContent = "";
-        const m = document.createElement("div"); m.className="empty";
-        m.textContent = error.status===401||error.status===403 ? "الوصول إلى التكاملات يتطلب مصادقة من الخادم." : error.message || "تعذر تحميل التكاملات.";
-        list.appendChild(m);
-    }
-}
-async function addConnector(e){
-    e.preventDefault();
-    const button = $("saveButton"); const message = $("formMessage");
-    clearMessage(message);
-    const name = $("name").value.trim(); const rawUrl = $("url").value.trim(); const method = $("method").value;
-    const authKey = $("authKey").value.trim(); const authToken = $("authToken").value; const template = $("template").value.trim();
-    if(!name || !rawUrl){ showMessage(message, "اسم التكامل والرابط مطلوبان.", "error"); return; }
-    let target; try{ target = new URL(rawUrl); }catch{ showMessage(message, "رابط API غير صحيح.", "error"); return; }
-    if(target.protocol !== "https:" && target.hostname !== "localhost"){ showMessage(message, "يجب استخدام HTTPS مع الخدمات الخارجية.", "error"); return; }
-    if(template){ try{ JSON.parse(template); }catch{ showMessage(message, "قالب البيانات ليس JSON صالحاً.", "error"); return; } }
-    const data = { name, targetUrl: target.href, httpMethod: method, authHeaderKey: authKey, authToken, payloadTemplate: template };
-    button.disabled = true; button.textContent = "جاري الحفظ...";
-    try{ await ChatPlatformAPI.createConnector(data); showMessage(message, "تم إرسال طلب الإضافة بنجاح.", "success"); $("connectorForm").reset(); await loadConnectors(); }
-    catch(error){ showMessage(message, error.message || "تعذر إضافة التكامل.", "error"); }
-    finally{ button.disabled = false; button.textContent = "إضافة التكامل"; }
-}
-async function deleteConnector(id, button){
-    if(!id) return; if(!confirm("هل تريد حذف هذا التكامل؟")) return;
-    button.disabled = true;
-    try{ await ChatPlatformAPI.deleteConnector(id); showMessage($("globalMessage"), "تم تنفيذ طلب الحذف.", "success"); await loadConnectors(); }
-    catch(error){ showMessage($("globalMessage"), error.message || "تعذر حذف التكامل.", "error"); button.disabled = false; }
-}
-$("connectorForm").addEventListener("submit", addConnector);
-$("refreshButton").addEventListener("click", async ()=>{ await loadConnectors(); await checkServerAndWhatsApp(); await loadConversationStats(); });
-
-async function initialize(){
-    if(!window.ChatPlatformAPI){ showMessage($("globalMessage"), "ملف api.js غير موجود أو لم يتم تحميله.", "error"); return; }
-    await checkServerAndWhatsApp();
-    await loadConversationStats();
-    await loadConnectors();
-}
-initialize();
-</script>
-</body>
-</html>
+async function drainLive(){if(document.hidden||refreshing||!dirty)return;dirty=false;await refreshLive();if(dirty)setTimeout(drainLive,0);}
+setInterval(()=>{if(!liveConnected)refreshLive();else if(dirty)drainLive();},5000);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)stopLive();else{revision=null;startLive();refreshLive();}});
+window.addEventListener("pagehide",stopLive);window.addEventListener("pageshow",startLive);
+$("refresh").onclick=async()=>{page=1;await load();await messages();};$("state").onchange=$("assignedFilter").onchange=()=>{page=1;load();};$("prev").onclick=()=>{if(page>1){page--;load();}};$("next").onclick=()=>{page++;load();};
+(async()=>{try{identity=await api.getIdentity();if(identity.role==="Admin"){const agents=await api.getTeam();$("agent").add(new Option("غير مسندة",""));for(const agent of agents.filter(a=>a.isActive))$("agent").add(new Option(agent.displayName,agent.username));$("agentControls").hidden=false;}await load();startLive();}catch(e){status(e.message);}})();
+})();
+</script></body></html>

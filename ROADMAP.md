@@ -19,3 +19,22 @@
 - [ ] Test at least two tenant identities with positive same-tenant and negative cross-tenant access for every resource.
 
 Current changes are candidates, not a completed security program. The existing API and UI require coordinated auth changes before activation, so avoid breaking production with a partial shared-key gate.
+
+## Phase 4: commercial platform development
+Baseline: archive/security-baseline-20261121 at 680db70682c9377a176f0e715d04669629bd9fe4 (CI success). Development continues separately.
+- [x] Add tenant-managed Agent accounts, password reset, activation and session revocation (CI passed at 261f3d3).
+- [ ] Verify the new team UI in a real browser, and implement a first-login password change flow.
+- [ ] Backup and restore drill on disposable SQLite; verify Docker runtime and production configuration.
+- [x] CRM contacts and shared inbox assignment, tags, search and pagination (candidate; CI pending).
+- [ ] CRM activity history, reporting, media, template composer, live updates and browser accessibility tests.
+- [ ] Reviewed OAuth signup and real-time tenant groups; leave legacy unrestricted endpoints denied.
+- [ ] Subscriptions, quotas, billing and operational monitoring.
+Do not merge or deploy until reviewed, tested and explicitly approved.
+
+- Media: candidate upload/download/preview and audio-file playback; automatic 5-second refresh; direct voice recording, permanent retention, malware scanning, positive mocked media tests and true realtime push remain pending.
+
+- [x] Authenticated inbox SSE invalidation stream and visual bot draft editor/simulator (candidate; CI pending).
+- [ ] Browser drag/touch validation, reconnect load test, bot publication/activation, durable execution, event deduplication and quotas.
+
+- [x] Published immutable bot snapshots, tenant-exclusive durable automation, legacy fallback and execution history (candidate; CI pending).
+- [ ] Stateful bot conversations, handoff nodes, scheduled actions, platform quotas and external delivery ambiguity review.

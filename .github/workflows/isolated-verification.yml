@@ -1,5 +1,7 @@
 name: Isolated build and smoke checks
 on:
+  push:
+    branches: ['development/**']
   pull_request:
     branches: [main]
 permissions:
@@ -17,6 +19,8 @@ jobs:
         run: docker compose -f docker-compose.yml config --quiet
       - name: Restore
         run: dotnet restore ChatPlatform.csproj
+      - name: Audit dependency vulnerabilities (report)
+        run: dotnet list ChatPlatform.csproj package --vulnerable --include-transitive
       - name: Build
         run: dotnet build ChatPlatform.csproj -c Release --no-restore
       - name: Smoke checks (disposable database; no external credentials)
@@ -49,6 +53,7 @@ jobs:
                   VALUES ('ci-legacy-account', 'tenant-alhawbani-001', '999999999998', 1, '2026-01-01');
               """)
           PY
+          eval "$(python3 tests/security_smoke.py --environment)"
           dotnet run --project ChatPlatform.csproj -c Release --no-build --no-launch-profile > "$RUNNER_TEMP/chatplatform-smoke.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; cat "$RUNNER_TEMP/chatplatform-smoke.log"' EXIT
@@ -61,67 +66,6 @@ jobs:
           test "$ready" = true
           base=http://127.0.0.1:5080
           curl -fsS "$base/ready" > /dev/null
-          # Account listing must work on the migrated legacy volume.
-          curl -fsS "$base/api/whatsapp/accounts" > "$RUNNER_TEMP/ci-accounts.json"
-          python3 - "$RUNNER_TEMP/ci-accounts.json" "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
-          import json, sqlite3, sys
-          with open(sys.argv[1]) as f:
-              account = next(a for a in json.load(f) if a["phoneNumberId"] == "999999999998")
-          assert account["hasToken"] and account["wabaId"] == ""
-          with sqlite3.connect(sys.argv[2]) as db:
-              row = db.execute("SELECT BusinessTokenEncrypted, TenantId, AppId FROM WhatsAppTenants WHERE Id='ci-legacy-account'").fetchone()
-              assert row[0] and row[0] != "ci-only-bootstrap-token" and row[1:] == ("tenant-alhawbani-001", "")
-          print("PASS: legacy account listing and encrypted configured-token initialization")
-          PY
-          test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/dev/seed/list")" = 404
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/dev/seed/init-tenants")" = 404
-          test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
-          test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345")" = 401
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' "$base/webhook")" = 401
-
-          # Seed fake account in the disposable database through the existing API.
-          # Verify a second organization cannot overwrite its ownership.
-          python3 - "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              db.executemany("INSERT INTO Tenants (Id, Name, IsActive, CreatedAtUtc) VALUES (?, ?, 1, '2026-01-01')", [('ci-tenant-a','CI A'),('ci-tenant-b','CI B')])
-          PY
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"tenantId":"ci-tenant-a","phoneNumberId":"999999999999","accessToken":"fake-ci-token"}' "$base/api/whatsapp/tenants")" = 200
-          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"tenantId":"ci-tenant-b","phoneNumberId":"999999999999","accessToken":"fake-ci-token-b"}' "$base/api/whatsapp/tenants")" = 409
-          python3 - "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
-          import sqlite3, sys
-          with sqlite3.connect(sys.argv[1]) as db:
-              assert db.execute("SELECT TenantId FROM WhatsAppTenants WHERE PhoneNumberId = ?", ('999999999999',)).fetchone() == ('ci-tenant-a',)
-          PY
-
-          # Send a signed synthetic inbound message; never contact Meta.
-          python3 - <<'PY'
-          import json, hmac, hashlib, urllib.request, time
-          base = "http://127.0.0.1:5080"
-          body = json.dumps({"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.inbound.1","from":"15550000001","type":"text","text":{"body":"CI inbound message"}}]}}]}]}).encode()
-          signature = "sha256=" + hmac.new(b"ci-only-test-secret", body, hashlib.sha256).hexdigest()
-          for _ in range(2):
-              request = urllib.request.Request(base+"/webhook", data=body, headers={"Content-Type":"application/json","X-Hub-Signature-256":signature})
-              with urllib.request.urlopen(request, timeout=10) as response:
-                  assert response.status == 200
-          def get(path):
-              with urllib.request.urlopen(base+path, timeout=10) as response:
-                  return json.load(response)
-          # Wait for the real background worker to persist the message.
-          for _ in range(30):
-              conversations = get("/api/conversations?tenantId=ci-tenant-a")
-              match = next((c for c in conversations if c["contactPhone"]=="15550000001"), None)
-              if match and match.get("lastMessage"):
-                  break
-              time.sleep(1)
-          else:
-              raise AssertionError("Inbound message never appeared in conversations")
-          assert match["lastMessage"]["text"] == "CI inbound message", match
-          messages = get("/api/conversations/"+match["id"]+"/messages")
-          assert sum(m.get("wamid")=="wamid.ci.inbound.1" for m in messages)==1, messages
-          assert messages[0]["textPreview"]=="CI inbound message", messages
-          assert not get("/api/conversations?tenantId=ci-tenant-b")
-          print("PASS: signed webhook -> worker -> conversation -> message API; duplicate suppressed")
-          PY
+          python3 tests/security_smoke.py
       - name: Manual send and auto-reply through mocked Graph API
         run: dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
