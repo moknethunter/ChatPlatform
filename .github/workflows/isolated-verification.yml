@@ -28,6 +28,7 @@ jobs:
           export ConnectionStrings__DefaultConnection="Data Source=$CHATPLATFORM_DATA_DIR/platform.db"
           export ASPNETCORE_ENVIRONMENT=Production
           export ASPNETCORE_URLS=http://127.0.0.1:5080
+          export CHATPLATFORM_REVISION="$GITHUB_SHA"
           export WHATSAPP_VERIFY_TOKEN=ci-only-test-token
           export WHATSAPP_APP_SECRET=ci-only-test-secret
           # Simulate an older persistent volume with nullable account metadata.
@@ -60,7 +61,7 @@ jobs:
           done
           test "$ready" = true
           base=http://127.0.0.1:5080
-          curl -fsS "$base/ready" > /dev/null
+          python3 scripts/check_deployment.py --base-url "$base" --expected-revision "$GITHUB_SHA" --attempts 1
           # Account listing must work on the migrated legacy volume.
           curl -fsS "$base/api/whatsapp/accounts" > "$RUNNER_TEMP/ci-accounts.json"
           python3 - "$RUNNER_TEMP/ci-accounts.json" "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
@@ -125,3 +126,13 @@ jobs:
           PY
       - name: Manual send and auto-reply through mocked Graph API
         run: dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
+
+  public-observation:
+    # A production outage does not invalidate isolated code tests.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Observe public health and readiness only (no credentials or customer data)
+        run: python3 scripts/check_deployment.py --attempts 1
