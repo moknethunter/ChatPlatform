@@ -15,6 +15,9 @@ RUN dotnet publish ChatPlatform.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
+ARG APP_REVISION=unknown
+ENV CHATPLATFORM_REVISION=${APP_REVISION}
+
 WORKDIR /app
 
 COPY --from=build /app/publish .
