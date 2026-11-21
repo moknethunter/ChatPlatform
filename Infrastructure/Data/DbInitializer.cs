@@ -319,6 +319,18 @@ public static class DbInitializer
                     CreatedAtUtc TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS ManagedAgents (
+                    Username TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    DisplayName TEXT NOT NULL,
+                    PasswordHash TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY (TenantId) REFERENCES Tenants(Id)
+                );
+                CREATE INDEX IF NOT EXISTS IX_ManagedAgents_TenantId ON ManagedAgents(TenantId);
+
                 CREATE TABLE IF NOT EXISTS PlatformSessions (
                     Id TEXT NOT NULL PRIMARY KEY,
                     Username TEXT NOT NULL,

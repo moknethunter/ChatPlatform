@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ChatPlatform.Security;
 
-// Transitional, operator-provisioned identities. No password or hash is committed.
+// Operator-provisioned administrators and database-managed agents. No credentials are committed.
 public sealed class PlatformAccount
 {
     public string Username { get; set; } = "";
@@ -32,11 +32,26 @@ public static class PlatformSecurity
     private static readonly PlatformAccount Dummy = new();
     private static readonly string DummyHash = Hasher.HashPassword(Dummy, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
 
-    private static PlatformAccount? Find(IConfiguration cfg, string? username)
+    internal static bool IsReservedUsername(IConfiguration cfg, string username) =>
+        (cfg.GetSection("Security:Accounts").Get<PlatformAccount[]>() ?? Array.Empty<PlatformAccount>())
+            .Any(a => string.Equals(a.Username, username, StringComparison.OrdinalIgnoreCase));
+
+    internal static string HashAgentPassword(string password) => Hasher.HashPassword(Dummy, password);
+
+    private static async Task<PlatformAccount?> FindAsync(IConfiguration cfg, PlatformDbContext db, string? username, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(username)) return null;
         var matches = (cfg.GetSection("Security:Accounts").Get<PlatformAccount[]>() ?? Array.Empty<PlatformAccount>())
             .Where(a => string.Equals(a.Username, username, StringComparison.Ordinal)).Take(2).ToArray();
+        if (matches.Length == 0)
+        {
+            // Configuration identities remain reserved even if their spelling differs.
+            if (IsReservedUsername(cfg, username)) return null;
+            var agent = await db.ManagedAgents.AsNoTracking().SingleOrDefaultAsync(x => x.Username == username && x.IsActive, ct);
+            if (agent == null) return null;
+            return new PlatformAccount { Username = agent.Username, TenantId = agent.TenantId,
+                Role = "Agent", PasswordHash = agent.PasswordHash };
+        }
         if (matches.Length != 1) return null;
         var a = matches[0];
         return !string.IsNullOrWhiteSpace(a.TenantId) && !string.IsNullOrWhiteSpace(a.PasswordHash)
@@ -65,8 +80,8 @@ public static class PlatformSecurity
             options.Events.OnValidatePrincipal = async c =>
             {
                 var cfg = c.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
-                var account = Find(cfg, c.Principal?.Identity?.Name);
                 var db = c.HttpContext.RequestServices.GetRequiredService<PlatformDbContext>();
+                var account = await FindAsync(cfg, db, c.Principal?.Identity?.Name, c.HttpContext.RequestAborted);
                 var sessionId = c.Principal?.FindFirstValue(Session);
                 var now = DateTime.UtcNow;
                 if (account == null || c.Principal?.FindFirstValue("tenant_id") != account.TenantId
@@ -130,7 +145,7 @@ public static class PlatformSecurity
             if (string.IsNullOrWhiteSpace(req.Username) || req.Username.Length > 100
                 || string.IsNullOrEmpty(req.Password) || req.Password.Length > 1024)
                 return Results.Unauthorized();
-            var a = Find(cfg, req.Username);
+            var a = await FindAsync(cfg, db, req.Username, ct);
             PasswordVerificationResult result;
             try { result = Hasher.VerifyHashedPassword(a ?? Dummy, a?.PasswordHash ?? DummyHash, req.Password); }
             catch (FormatException) { result = PasswordVerificationResult.Failed; }

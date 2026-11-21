@@ -112,7 +112,33 @@ call(template_path+"?tenantId=ci-tenant-b",cookie=b,expected=404)
 call(template_path+"?tenantId=ci-tenant-b","DELETE",cookie=b,expected=404)
 call(template_path+"?tenantId=ci-tenant-a","DELETE",cookie=agent,expected=403)
 call(template_path+"?tenantId=ci-tenant-a","DELETE",cookie=a)
+# Team administration: configured admins stay operator-managed; tenant admins can provision agents only.
+agent_body={"username":"ci-managed","displayName":"CI Managed","password":PASSWORD,"role":"Admin","tenantId":"ci-tenant-b"}
+call("/api/team",cookie=agent,expected=403)
+call("/api/team","POST",agent_body,cookie=agent,expected=403)
+call("/api/team","POST",dict(agent_body,username="ci-a"),cookie=a,expected=409)
+managed,_=call("/api/team","POST",agent_body,cookie=a,expected=201)
+assert managed["role"]=="Agent" and "passwordHash" not in managed
+assert [x["username"] for x in call("/api/team",cookie=a)[0]]==["ci-managed"]
+assert not call("/api/team",cookie=b)[0]
+call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=b,expected=404)
+call("/api/team/ci-managed/active","PUT",{"isActive":False},cookie=b,expected=404)
+managed_cookie=login("ci-managed")
+identity,_=call("/api/auth/me",cookie=managed_cookie)
+assert identity["tenantId"]=="ci-tenant-a" and identity["role"]=="Agent"
+call("/api/team",cookie=managed_cookie,expected=403)
+call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=a,expected=204)
+call("/api/auth/me",cookie=managed_cookie,expected=401)
+call("/api/auth/login","POST",{"username":"ci-managed","password":PASSWORD},expected=401)
+_, managed_headers=call("/api/auth/login","POST",{"username":"ci-managed","password":"different-ci-password"})
+managed_cookie=managed_headers["Set-Cookie"].split(";",1)[0]
+call("/api/team/ci-managed/active","PUT",{"isActive":False},cookie=a,expected=204)
+call("/api/auth/me",cookie=managed_cookie,expected=401)
+call("/api/team/ci-managed/active","PUT",{"isActive":True},cookie=a,expected=204)
+call("/api/auth/me",cookie=managed_cookie,expected=401)
 with sqlite3.connect(DB) as db:
+    row=db.execute("SELECT PasswordHash,TenantId FROM ManagedAgents WHERE Username='ci-managed'").fetchone()
+    assert row[0]!="different-ci-password" and row[1]=="ci-tenant-a"
     db.execute("UPDATE Tenants SET IsActive=0 WHERE Id='ci-tenant-b'")
 call("/api/auth/me",cookie=b,expected=401)
 call("/api/auth/logout","POST",cookie=a,expected=204)

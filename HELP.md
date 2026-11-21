@@ -93,3 +93,8 @@ curl -fsS https://chatplatform.fly.dev/ready
 - The first WABA phone list page is checked; missing numbers are rejected rather than following untrusted paging URLs. Connector endpoints, SignalR and embedded signup remain disabled pending review.
 
 - MessagingSmoke now invokes the real text/template controller with a synthetic tenant identity and repeats the idempotency keys; the worker must send all four expected messages only to a mocked Graph handler. The HTTP smoke suite separately checks authentication and tenant denials. Diagnostic null values mean unknown, not disconnected or verified.
+
+## Phase 4: team administration
+- Open /team.html while signed in as a configured tenant Admin. Create Agent users with lowercase unique usernames and passwords of at least 14 characters. Do not share passwords through GitHub, logs or chat. The server hashes passwords and never returns them.
+- Agents may only use the existing tenant-scoped Agent policies. Tenant administrators cannot create another administrator, move a user to another tenant, or manage configuration identities. Resetting passwords or changing activity revokes all managed-agent sessions. Configuration identities remain reserved.
+- The isolated HTTP smoke suite tests agent creation, cross-tenant access denial, role escalation attempts, password reset and session revocation. UI browser verification and a secure initial-password delivery/change workflow remain pending.

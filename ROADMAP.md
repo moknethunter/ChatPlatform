@@ -19,3 +19,13 @@
 - [ ] Test at least two tenant identities with positive same-tenant and negative cross-tenant access for every resource.
 
 Current changes are candidates, not a completed security program. The existing API and UI require coordinated auth changes before activation, so avoid breaking production with a partial shared-key gate.
+
+## Phase 4: commercial platform development
+Baseline: archive/security-baseline-20261121 at 680db70682c9377a176f0e715d04669629bd9fe4 (CI success). Development continues separately.
+- [x] Add tenant-managed Agent accounts, password reset, activation and session revocation (candidate, CI pending).
+- [ ] Verify the new team UI in a real browser, and implement a first-login password change flow.
+- [ ] Backup and restore drill on disposable SQLite; verify Docker runtime and production configuration.
+- [ ] Customer CRM, shared inbox assignment, tags, search, pagination and reporting.
+- [ ] Reviewed OAuth signup and real-time tenant groups; leave legacy unrestricted endpoints denied.
+- [ ] Subscriptions, quotas, billing and operational monitoring.
+Do not merge or deploy until reviewed, tested and explicitly approved.

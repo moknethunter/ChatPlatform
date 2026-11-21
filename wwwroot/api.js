@@ -430,6 +430,10 @@
 
             // --- Tenants / WhatsApp Accounts - بدون this لتتوافق مع whatsapp.html ---
             getWhatsAppDiagnostics(opts = {}) { return request("/api/whatsapp/diagnostics", { signal: opts.signal }); },
+            getTeam(opts = {}) { return request("/api/team", { signal: opts.signal }); },
+            createAgent(data) { return request("/api/team", { method: "POST", body: data }); },
+            setAgentActive(username, isActive) { return request("/api/team/" + encodeURIComponent(username) + "/active", { method: "PUT", body: { isActive } }); },
+            resetAgentPassword(username, password) { return request("/api/team/" + encodeURIComponent(username) + "/password", { method: "PUT", body: { password } }); },
             getIdentity(opts = {}) { return request("/api/auth/me", { signal: opts.signal }); },
             logout() { return request("/api/auth/logout", { method: "POST" }); },
             async getTenants(opts = {}) {
@@ -585,7 +589,11 @@
                     try { await defaultClient.logout(); location.assign("/login.html"); }
                     catch { label.textContent = "تعذر تسجيل الخروج؛ حاول مجددًا."; }
                 });
-                bar.append(label, logout); document.body.prepend(bar);
+                bar.append(label);
+                if (identity.role === "Admin") {
+                    const link = document.createElement("a"); link.href = "/team.html"; link.textContent = "إدارة الفريق"; bar.append(link);
+                }
+                bar.append(logout); document.body.prepend(bar);
             } catch (err) {
                 if (err.status !== 401) console.warn("Unable to verify session");
             }
