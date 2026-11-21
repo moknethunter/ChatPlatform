@@ -1,0 +1,65 @@
+name: Publish verified chat66d snapshot
+on:
+  push:
+    branches: ['release/chat66d-7ed35b3-20261122']
+    paths: ['.github/workflows/release-chat66d-7ed35b3.yml']
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/release/chat66d-7ed35b3-20261122'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IMAGE: ghcr.io/moknethunter/chat66d
+      SOURCE: 7ed35b33fbb5f6af31e0c3e7719cacdbdba17ce4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 7ed35b33fbb5f6af31e0c3e7719cacdbdba17ce4
+          persist-credentials: false
+      - name: Build exact verified main snapshot from tracked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          git archive "$SOURCE" | docker build --build-arg "APP_REVISION=$SOURCE" --label "org.opencontainers.image.revision=$SOURCE" --label "org.opencontainers.image.source=https://github.com/moknethunter/ChatPlatform" -t "$IMAGE:sha-7ed35b3" -
+      - name: Run disposable container health and readiness checks with no network
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=chat66d-smoke
+          trap 'docker logs "$name" || true; docker rm -f "$name" || true' EXIT
+          docker run -d --name "$name" --network none \
+            -e CHATPLATFORM_DATA_DIR=/app/data \
+            -e 'ConnectionStrings__DefaultConnection=Data Source=/app/data/platform.db' \
+            -e WhatsApp__AccessToken= -e WhatsApp__PhoneNumberId= \
+            -e WhatsApp__VerifyToken= -e WhatsApp__AppSecret= \
+            -e OwnModel__Enabled=false -e Campaigns__Enabled=false "$IMAGE:sha-7ed35b3"
+          check() {
+            docker exec "$name" bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080; printf "GET %s HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" "$1" >&3; head -n 1 <&3' _ "$1" | grep -q ' 200 '
+          }
+          for i in {1..45}; do
+            if check /health && check /ready; then
+              docker exec "$name" printenv CHATPLATFORM_REVISION | grep -Fx "$SOURCE"
+              echo "PASS: exact image starts and is ready, correct revision, network disabled"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish commit-specific tag and latest (no server deployment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker push "$IMAGE:sha-7ed35b3"
+          docker tag "$IMAGE:sha-7ed35b3" "$IMAGE:latest"
+          docker push "$IMAGE:latest"
+          docker buildx imagetools inspect "$IMAGE:latest"
+          echo "Published $IMAGE:latest from $SOURCE" >> "$GITHUB_STEP_SUMMARY"
