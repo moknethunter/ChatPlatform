@@ -148,6 +148,22 @@ try
         if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 6)
             throw new Exception("Duplicate queue rows detected");
         Console.WriteLine("PASS: tenant-bound controller text/template queue; repeat keys reuse original message.");
+        // Add two automated sends with ambiguous outcomes, one already claimed by a dead worker.
+        foreach (var (label, expired) in new[] { ("ambiguous smoke", false), ("expired lease smoke", true) })
+        {
+            var payload = JsonSerializer.Serialize(new { messaging_product = "whatsapp", recipient_type = "individual",
+                to = recipient, type = "text", text = new { body = label } });
+            var outgoing = new WhatsAppMessageEntity { TenantId = tenant, ConversationId = conversationId,
+                Direction = "Outbound", MessageType = "text", TextPreview = label, ContentJson = payload, Status = "Queued",
+                TimestampUtc = DateTime.UtcNow, CreatedAtUtc = DateTime.UtcNow };
+            db.WhatsAppMessages.Add(outgoing);
+            db.WhatsAppOutbox.Add(new WhatsAppOutboxEntity { TenantId = tenant, PhoneNumberId = phoneId, RecipientPhone = recipient,
+                IdempotencyKey = "automation:test:"+label, MessageId = outgoing.Id, PayloadJson = payload,
+                Status = expired ? "Processing" : "Pending", LeaseOwner = expired ? "dead-worker" : null,
+                LeaseUntilUtc = expired ? DateTime.UtcNow.AddSeconds(-5) : null,
+                Attempts = expired ? 10 : 0, MaxAttempts = 10, NextAttemptAtUtc = DateTime.UtcNow });
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     var worker = provider.GetRequiredService<WhatsAppOutboxWorker>();
@@ -161,12 +177,14 @@ try
             var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
             var rows = await db.WhatsAppOutbox.AsNoTracking().Where(x => x.TenantId == tenant).ToListAsync(ct);
             var messages = await db.WhatsAppMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).ToListAsync(ct);
-            if (rows.Count == 6 && rows.All(x => x.Status == "Sent") &&
-                messages.Count(m => m.Direction == "Outbound") == 6 && messages.Where(m => m.Direction == "Outbound").All(x => x.Status == "Sent" && x.Wamid != null))
+            if (rows.Count == 8 && rows.Count(x => x.Status == "Sent") == 6 &&
+                rows.Count(x => x.Status == "DeliveryUnknown") == 2 &&
+                messages.Count(m => m.Direction == "Outbound" && m.Status == "Sent" && m.Wamid != null) == 6 &&
+                messages.Count(m => m.Direction == "Outbound" && m.Status == "DeliveryUnknown") == 2)
             {
-                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || !requests.Contains("ci image") || !requests.Contains("bot smoke") || requests.Count != 6)
+                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || !requests.Contains("ci image") || !requests.Contains("bot smoke") || requests.Count(x => x == "ambiguous smoke") != 1 || requests.Contains("expired lease smoke") || requests.Count != 7)
                     throw new Exception("Unexpected simulated Graph requests.");
-                Console.WriteLine("PASS: manual send, auto-reply, authenticated text, template and image reached mocked Graph API; all marked Sent.");
+                Console.WriteLine("PASS: six successful sends; ambiguous automated send attempted once and expired lease never resent.");
                 break;
             }
             await Task.Delay(250, ct);
@@ -190,11 +208,14 @@ sealed class FakeGraphHandler(ConcurrentQueue<string> requests) : HttpMessageHan
             throw new InvalidOperationException("Unexpected outgoing request.");
         using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
         var root = payload.RootElement;
-        requests.Enqueue(root.GetProperty("type").GetString() switch {
+        var label = root.GetProperty("type").GetString() switch {
             "template" => root.GetProperty("template").GetProperty("name").GetString()!,
             "image" => root.GetProperty("image").GetProperty("caption").GetString()!,
             _ => root.GetProperty("text").GetProperty("body").GetString()!
-        });
+        };
+        requests.Enqueue(label);
+        if (label == "ambiguous smoke")
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("simulated ambiguous outcome") };
         // No network is used. Return a different synthetic ID for each accepted message.
         return new HttpResponseMessage(HttpStatusCode.OK)
         {

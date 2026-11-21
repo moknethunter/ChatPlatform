@@ -123,3 +123,5 @@ curl -fsS https://chatplatform.fly.dev/ready
 - This is a stateless per-message flow engine, not a multi-turn conversation state machine. The execution log shows queued/no_match/cooldown/account unavailable; queue status does not imply delivery. Browser and production integration tests remain required.
 
 - Automation reliability: stale signed message timestamps do not extend the customer-service window. The inbox uses a database transaction for ownership, bot decision and atomic queueing. Automated sends stop on ambiguous delivery (HTTP 5xx, timeout, network error, missing Meta message ID or expired processing lease); status is DeliveryUnknown, requiring operator reconciliation. Explicit HTTP 429 rejection can be retried. This favors avoiding duplicates over delivery at all costs; Meta exact-once delivery cannot be promised.
+
+- Mocked Graph tests assert a 500 response produces exactly one automated attempt, and an abandoned processing lease produces no further network request, both marked DeliveryUnknown.
