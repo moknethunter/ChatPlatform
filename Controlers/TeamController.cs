@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Security;
@@ -39,10 +40,13 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
         var displayName = req.DisplayName?.Trim();
         if (!ValidUsername(username) || string.IsNullOrWhiteSpace(displayName) || displayName.Length > 100 || !ValidPassword(req.Password))
             return BadRequest(new { error = "invalid_agent", message = "Use a lowercase username (3–64 characters), a name and a password of 14–256 characters." });
+        await using var tx=await db.Database.BeginTransactionAsync(ct);
         if (PlatformSecurity.IsReservedUsername(configuration, username!) ||
+            await db.ManagedTenantAdmins.AnyAsync(x=>x.Username==username,ct) ||
             await db.ManagedAgents.AnyAsync(x => x.Username == username, ct))
             return Conflict(new { error = "username_unavailable" });
         var now = DateTime.UtcNow;
+        if(await Entitlements.CapacityAsync(db,tenant,"agents",1,now,ct) is string denied)return Conflict(new{error=denied});
         var agent = new ManagedAgentEntity { Username = username!, TenantId = tenant, DisplayName = displayName,
             PasswordHash = PlatformSecurity.HashAgentPassword(req.Password!), CreatedAtUtc = now, UpdatedAtUtc = now };
         db.ManagedAgents.Add(agent);
@@ -53,6 +57,7 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
             if (await db.ManagedAgents.AnyAsync(x => x.Username == username, ct)) return Conflict(new { error = "username_unavailable" });
             throw;
         }
+        await tx.CommitAsync(ct);
         logger.LogInformation("Agent created: actor={Actor} tenant={Tenant} agent={Agent}", User.Identity?.Name, tenant, username);
         return StatusCode(201, new { agent.Username, agent.DisplayName, agent.IsActive, role = "Agent" });
     }
@@ -81,6 +86,7 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
         var agent = await db.ManagedAgents.SingleOrDefaultAsync(x => x.Username == username && x.TenantId == tenant, ct);
         if (agent == null) return NotFound();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if(req.IsActive&&!agent.IsActive&&await Entitlements.CapacityAsync(db,tenant,"agents",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         agent.IsActive = req.IsActive;
         agent.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);

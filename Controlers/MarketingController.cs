@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
@@ -89,6 +90,9 @@ public sealed class MarketingController(PlatformDbContext db,IConfiguration conf
         var phones=JsonSerializer.Deserialize<string[]>(list.PhonesJson)??[];
         var eligible=await db.MarketingConsents.AsNoTracking().Where(c=>c.TenantId==tenant&&c.PhoneNumberId==account.PhoneNumberId&&c.Granted&&phones.Contains(c.Phone)).Select(c=>c.Phone).OrderBy(p=>p).ToListAsync(ct);
         if(eligible.Count==0)return Conflict(new{error="no_consented_recipients"});
+        if(await Entitlements.CapacityAsync(db,tenant,"campaigns",0,date.AddSeconds((eligible.Count-1)*5),ct) is string denied)return Conflict(new{error=denied});
+        foreach(var month in Enumerable.Range(0,eligible.Count).Select(i=>date.AddSeconds(i*5)).GroupBy(d=>new{d.Year,d.Month}))
+            if(await Entitlements.CapacityAsync(db,tenant,"messages",month.Count(),month.First(),ct) is string exceeded)return Conflict(new{error=exceeded});
         var day=date.Date;var end=day.AddDays(1);
         var reserved=await (from r in db.CampaignRecipients join c in db.MarketingCampaigns on r.CampaignId equals c.Id where r.TenantId==tenant&&c.TenantId==tenant&&c.ScheduledAtUtc>=day&&c.ScheduledAtUtc<end select r).CountAsync(ct);
         if(reserved+eligible.Count>300)return Conflict(new{error="daily_campaign_limit"});

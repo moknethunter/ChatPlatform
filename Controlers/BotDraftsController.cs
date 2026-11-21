@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Bots;
 using static ChatPlatform.Infrastructure.Bots.BotFlow;
@@ -41,9 +42,11 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
         var tenant = User.TenantId();
         var error = Validate(req.Flow);
         if (error != null || string.IsNullOrWhiteSpace(req.Name) || req.Name.Length > 100) return BadRequest(new { error = error ?? "invalid_name" });
+        await using var tx=await db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(db,tenant,"bots",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         if (await db.BotDrafts.CountAsync(x => x.TenantId == tenant, ct) >= 100) return Conflict(new { error = "draft_limit" });
         var row = new BotDraftEntity { TenantId = tenant, Name = req.Name.Trim(), DefinitionJson = JsonSerializer.Serialize(req.Flow, Json), UpdatedAtUtc = DateTime.UtcNow };
-        db.BotDrafts.Add(row); await db.SaveChangesAsync(ct);
+        db.BotDrafts.Add(row); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
         return StatusCode(201, new { row.Id, row.Name, row.Version });
     }
 
@@ -95,6 +98,7 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     {
         var tenant = User.TenantId();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(db,tenant,"send",0,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         var draft = await db.BotDrafts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (draft == null) return NotFound();
         if (draft.Version != req.Version) return Conflict(new { error = "stale_version" });

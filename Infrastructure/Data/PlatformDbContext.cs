@@ -12,6 +12,10 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<WhatsAppTenantEntity> WhatsAppTenants => Set<WhatsAppTenantEntity>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<TenantEntity> Tenants => Set<TenantEntity>();
+    public DbSet<ManagedTenantAdminEntity> ManagedTenantAdmins => Set<ManagedTenantAdminEntity>();
+    public DbSet<ServicePlanEntity> ServicePlans => Set<ServicePlanEntity>();
+    public DbSet<TenantSubscriptionEntity> TenantSubscriptions => Set<TenantSubscriptionEntity>();
+    public DbSet<PlatformAdminAuditEntity> PlatformAdminAudit => Set<PlatformAdminAuditEntity>();
     public DbSet<PlatformSessionEntity> PlatformSessions => Set<PlatformSessionEntity>();
     public DbSet<ManagedAgentEntity> ManagedAgents => Set<ManagedAgentEntity>();
     public DbSet<CrmContactEntity> CrmContacts => Set<CrmContactEntity>();
@@ -36,6 +40,10 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
+        mb.Entity<ManagedTenantAdminEntity>(e=>{e.HasKey(x=>x.Username);e.HasIndex(x=>x.TenantId);e.HasOne<TenantEntity>().WithMany().HasForeignKey(x=>x.TenantId);});
+        mb.Entity<ServicePlanEntity>(e=>e.HasKey(x=>x.Id));
+        mb.Entity<TenantSubscriptionEntity>(e=>{e.HasKey(x=>x.TenantId);e.HasOne<TenantEntity>().WithMany().HasForeignKey(x=>x.TenantId);e.HasOne<ServicePlanEntity>().WithMany().HasForeignKey(x=>x.PlanId);});
+        mb.Entity<PlatformAdminAuditEntity>(e=>{e.ToTable("PlatformAdminAudit");e.HasKey(x=>x.Id);e.HasIndex(x=>x.CreatedAtUtc);});
         mb.Entity<MarketingConsentEntity>(e=>e.HasKey(x=>new{x.TenantId,x.PhoneNumberId,x.Phone}));
         mb.Entity<ConsentEventEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>new{x.TenantId,x.PhoneNumberId,x.Phone});});
         mb.Entity<CustomerListEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>x.TenantId);});

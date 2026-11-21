@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -121,6 +122,10 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             await FailPermanentAsync(db, item, "no_active_matching_tenant", ct);
             return true;
         }
+
+        var access=await Entitlements.ReadAsync(db,item.TenantId,DateTime.UtcNow,ct);
+        if(!access.Active||(marketing&&access.Managed&&!access.Plan!.Campaigns))
+        {await FailPermanentAsync(db,item,"subscription_inactive_or_feature_disabled",ct);return true;}
 
         // Recheck the customer-service window immediately before dispatching an automated reply.
         if (automated)

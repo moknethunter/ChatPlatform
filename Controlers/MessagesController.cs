@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -131,8 +132,10 @@ public sealed class MessagesController : ControllerBase
                 return Conflict(new { error = "idempotency_key_reused" });
             return Accepted(new { id = existing.MessageId, status = existing.Status });
         }
+        await using var tx=await _db.Database.BeginTransactionAsync(ct);
         var previous = await Existing();
         if (previous != null) return previous;
+        if(await Entitlements.CapacityAsync(_db,tenant,"messages",1,now,ct) is string denied)return Conflict(new{error=denied});
 
         var conversation = await _db.WhatsAppConversations.FirstOrDefaultAsync(c =>
             c.TenantId == tenant && c.PhoneNumberId == account.PhoneNumberId && c.ContactPhone == to, ct);
@@ -168,6 +171,7 @@ public sealed class MessagesController : ControllerBase
             if (duplicate != null) return duplicate;
             throw;
         }
+        await tx.CommitAsync(ct);
         return Accepted(new { id = message.Id, status = message.Status, conversationId = conversation.Id });
     }
 }

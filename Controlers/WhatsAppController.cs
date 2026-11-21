@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using ChatPlatform.Security;
 using Microsoft.AspNetCore.Authorization;
 using System.Net.Http.Headers;
@@ -111,6 +112,8 @@ public sealed class WhatsAppController : ControllerBase
             return Conflict(new { error = "account_already_registered" });
         if (!await VerifyAccount(dto.PhoneNumberId, dto.WabaId, dto.AccessToken, ct))
             return BadRequest(new { error = "account_verification_failed" });
+        await using var tx=await _db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(_db,tenant,"accounts",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         var account = new WhatsAppTenantEntity { TenantId = tenant, PhoneNumberId = dto.PhoneNumberId,
             WabaId = dto.WabaId, BusinessTokenEncrypted = _protector.Protect(dto.AccessToken), IsActive = true };
         _db.WhatsAppTenants.Add(account);
@@ -122,6 +125,7 @@ public sealed class WhatsAppController : ControllerBase
                 return Conflict(new { error = "account_already_registered" });
             throw;
         }
+        await tx.CommitAsync(ct);
         return Ok(new { id = account.Id, message = "saved" });
     }
 

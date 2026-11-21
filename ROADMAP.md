@@ -52,3 +52,6 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 - [x] Account-specific consent evidence and revocation, lists, bounded scheduled campaigns, dispatch-time template approval/consent guards and queue status reporting (candidate, CI pending).
 
 - [x] Marketing workspace and tenant-scoped date-bounded reports (candidate; CI pending).
+
+- [x] SuperAdmin control plane, immutable plans, manual subscriptions and transactional quotas (candidate, CI pending).
+- [ ] Payment collection/invoicing (only when requested), comprehensive quota coverage review, operator MFA and real-browser verification.

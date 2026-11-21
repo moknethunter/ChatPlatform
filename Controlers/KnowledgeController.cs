@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using ChatPlatform.Infrastructure.AI;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
@@ -41,6 +42,7 @@ public sealed class KnowledgeController(PlatformDbContext db, OwnModelClient mod
         if(!Valid(req))return BadRequest(new {error="invalid_article"});
         var tenant=User.TenantId();
         await using var tx=await db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(db,tenant,"articles",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         if(await db.KnowledgeArticles.CountAsync(x=>x.TenantId==tenant,ct)>=500)return Conflict(new {error="knowledge_limit"});
         var item=new KnowledgeArticleEntity {TenantId=tenant,Title=req.Title!.Trim(),Body=req.Body!.Trim(),IsPublished=req.IsPublished,UpdatedAtUtc=DateTime.UtcNow};
         db.KnowledgeArticles.Add(item);await db.SaveChangesAsync(ct);await tx.CommitAsync(ct);
@@ -85,6 +87,7 @@ public sealed class KnowledgeController(PlatformDbContext db, OwnModelClient mod
     public async Task<IActionResult> Preview(QuestionRequest req,CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(req.Question)||req.Question.Length>2000)return BadRequest();
+        if(await Entitlements.CapacityAsync(db,User.TenantId(),"own-model",0,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         if(!model.IsConfigured)return Conflict(new {error="own_model_not_configured"});
         var knowledge=await KnowledgeSearch.FindAsync(db,User.TenantId(),req.Question,ct);
         try

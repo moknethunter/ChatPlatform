@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -83,6 +84,7 @@ public static class BotRuntime
             r.RecipientPhone == conversation.ContactPhone && r.Outcome == "queued" && r.CreatedAtUtc >= since, ct))
         { run.Outcome = "cooldown"; return; }
 
+        if(!string.IsNullOrWhiteSpace(reply)&&await Entitlements.CapacityAsync(db,tenant,"messages",1,now,ct) is string denied){run.Outcome=denied;return;}
         if(evaluation!=null)
         {
             if(state==null){state=new ConversationAutomationEntity{TenantId=tenant,ConversationId=conversation.Id};db.ConversationAutomation.Add(state);}

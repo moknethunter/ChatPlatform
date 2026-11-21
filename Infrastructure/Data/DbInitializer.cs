@@ -498,6 +498,29 @@ public static class DbInitializer
                 );
                 CREATE INDEX IF NOT EXISTS IX_ManagedAgents_TenantId ON ManagedAgents(TenantId);
 
+                CREATE TABLE IF NOT EXISTS ManagedTenantAdmins (
+                    Username TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, PasswordHash TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL, CreatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY(TenantId) REFERENCES Tenants(Id)
+                );
+                CREATE INDEX IF NOT EXISTS IX_ManagedTenantAdmins_TenantId ON ManagedTenantAdmins(TenantId);
+                CREATE TABLE IF NOT EXISTS ServicePlans (
+                    Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, MonthlyMessages INTEGER NOT NULL,
+                    Agents INTEGER NOT NULL, Accounts INTEGER NOT NULL, Bots INTEGER NOT NULL, Articles INTEGER NOT NULL,
+                    Campaigns INTEGER NOT NULL, OwnModel INTEGER NOT NULL, MonthlyPriceMinor INTEGER NOT NULL,
+                    Currency TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS TenantSubscriptions (
+                    TenantId TEXT NOT NULL PRIMARY KEY, PlanId TEXT NOT NULL, Enabled INTEGER NOT NULL,
+                    EndsAtUtc TEXT NOT NULL, Version INTEGER NOT NULL, UpdatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY(TenantId) REFERENCES Tenants(Id), FOREIGN KEY(PlanId) REFERENCES ServicePlans(Id)
+                );
+                CREATE TABLE IF NOT EXISTS PlatformAdminAudit (
+                    Id TEXT NOT NULL PRIMARY KEY, Actor TEXT NOT NULL, Action TEXT NOT NULL,
+                    Target TEXT NOT NULL, Detail TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_PlatformAdminAudit_CreatedAtUtc ON PlatformAdminAudit(CreatedAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Tenant_Quota ON WhatsAppOutbox(TenantId, CreatedAtUtc, ScheduledForUtc);
                 CREATE TABLE IF NOT EXISTS PlatformSessions (
                     Id TEXT NOT NULL PRIMARY KEY,
                     Username TEXT NOT NULL,
