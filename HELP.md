@@ -72,3 +72,12 @@ fly logs -a chatplatform --no-tail
 curl -fsS https://chatplatform.fly.dev/ready
 ``
 من لوحة Fly.io افتح Monitoring ثم Live Logs قبل إعادة طلب accounts. لا تحذف مجلد /data أو قاعدة البيانات. وجود configured=true يثبت وجود الإعدادات فقط، وليس صلاحية التوكن أو اشتراك messages لدى Meta. اختبار CI يحاكي قاعدة قديمة وتوكنات وهمية، ويتحقق من القراءة والتشفير دون إرسال حقيقي.
+
+## إثبات نشر الإصدار الصحيح
+```bash
+# يتطلب Python 3 واتصالاً بالخادم؛ يفحص مسارات الصحة فقط ولا يرسل رسائل.
+python3 scripts/check_deployment.py
+# فحص نسخة محددة بعد النشر، استبدل COMMIT_SHA بمعرف النسخة المنشورة.
+python3 scripts/check_deployment.py --expected-revision COMMIT_SHA
+```
+نجاح الفحص يثبت استجابة النسخة واتصال قاعدة البيانات، ولا يثبت وصول رسائل Meta. رمز 404 على ready قد يدل على نسخة قديمة أو مسار غير موجود، و503 يدل على عدم الجاهزية. فشل التحقق بعد النشر يُظهر فشل العملية في Actions ولا يحذف البيانات أو ينفذ تراجعاً تلقائياً.

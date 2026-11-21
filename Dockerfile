@@ -15,6 +15,10 @@ RUN dotnet publish ChatPlatform.csproj \
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
+# Public build provenance, not a secret. Supplied by deployment CI.
+ARG APP_REVISION=unknown
+ENV CHATPLATFORM_REVISION=${APP_REVISION}
+
 WORKDIR /app
 
 COPY --from=build /app/publish .
