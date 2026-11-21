@@ -28,8 +28,11 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 options.ForwardedHeaders =
 ForwardedHeaders.XForwardedFor
 | ForwardedHeaders.XForwardedProto;
-options.KnownNetworks.Clear();
-options.KnownProxies.Clear();
+// Trust loopback by default; accept additional proxies only when explicitly configured.
+foreach (var address in builder.Configuration.GetSection("Security:TrustedProxies").Get<string[]>() ?? Array.Empty<string>())
+{
+    options.KnownProxies.Add(System.Net.IPAddress.Parse(address));
+}
 });
 // ============================================================
 // 1. WhatsApp Configuration
@@ -80,7 +83,7 @@ Console.WriteLine($"✅ إعدادات واتساب موجودة - ApiVersion: {
 }
 if (string.IsNullOrWhiteSpace(whatsAppAppSecret))
 {
-Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. لن يتم التحقق من توقيع X-Hub-Signature-256 من Meta.");
+Console.WriteLine("⚠️ تحذير: WhatsApp:AppSecret غير معين. راجع إعدادات التحقق من توقيع Meta قبل التشغيل.");
 }
 // ============================================================
 // 2. Database - /data/platform.db
