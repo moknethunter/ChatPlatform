@@ -41,6 +41,7 @@ jobs:
           done
           test "$ready" = true
           base=http://127.0.0.1:5080
+          curl -fsS "$base/ready" > /dev/null
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/dev/seed/list")" = 404
           test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$base/dev/seed/init-tenants")" = 404
           test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
