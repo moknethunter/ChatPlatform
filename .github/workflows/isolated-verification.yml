@@ -1,5 +1,7 @@
 name: Isolated build and smoke checks
 on:
+  push:
+    branches: ['development/**']
   pull_request:
     branches: [main]
 permissions:
@@ -17,6 +19,8 @@ jobs:
         run: docker compose -f docker-compose.yml config --quiet
       - name: Restore
         run: dotnet restore ChatPlatform.csproj
+      - name: Audit dependency vulnerabilities (report)
+        run: dotnet list ChatPlatform.csproj package --vulnerable --include-transitive
       - name: Build
         run: dotnet build ChatPlatform.csproj -c Release --no-restore
       - name: Smoke checks (disposable database; no external credentials)
