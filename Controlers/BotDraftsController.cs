@@ -1,4 +1,6 @@
 using System.Text.Json;
+using ChatPlatform.Infrastructure.Bots;
+using static ChatPlatform.Infrastructure.Bots.BotFlow;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Security;
@@ -13,41 +15,9 @@ namespace ChatPlatform.Controllers;
 [RequestSizeLimit(65536)]
 public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
 {
-    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y);
-    public record Definition(string? Start, Node[]? Nodes);
     public record SaveRequest(string? Name, Definition? Flow, int Version);
     public record SimulateRequest(Definition? Flow, string? Input);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    private static bool ValidId(string? id) => id is { Length: >= 1 and <= 40 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-');
-
-    private static string? Validate(Definition? flow)
-    {
-        if (flow?.Nodes is not { Length: >= 2 and <= 40 } nodes || !ValidId(flow.Start)) return "invalid_graph";
-        var map = new Dictionary<string, Node>(StringComparer.Ordinal);
-        foreach (var n in nodes)
-        {
-            if (n == null || !ValidId(n.Id) || !map.TryAdd(n.Id!, n) || n.X is < 0 or > 3000 || n.Y is < 0 or > 3000)
-                return "invalid_node";
-            if (n.Type is not ("start" or "contains" or "reply" or "end")) return "invalid_type";
-            if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
-            if (n.Type == "contains" && (!ValidId(n.Next) || !ValidId(n.Otherwise))) return "invalid_branch";
-            if (n.Type is "start" or "reply" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
-            if (n.Type == "end" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
-        }
-        if (!map.TryGetValue(flow.Start!, out var start) || start.Type != "start" || nodes.Count(n => n.Type == "start") != 1) return "invalid_start";
-        var visiting = new HashSet<string>(); var visited = new HashSet<string>();
-        bool Walk(string? id)
-        {
-            if (string.IsNullOrEmpty(id)) return true;
-            if (!map.TryGetValue(id, out var node) || visiting.Contains(id)) return false;
-            if (visited.Contains(id)) return true;
-            visiting.Add(id);
-            if (!Walk(node.Next) || !Walk(node.Otherwise)) return false;
-            visiting.Remove(id); visited.Add(id); return true;
-        }
-        return Walk(flow.Start) && visited.Count == nodes.Length ? null : "cycle_or_unreachable_node";
-    }
-
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
@@ -98,18 +68,56 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     {
         var error = Validate(req.Flow);
         if (error != null || (req.Input?.Length ?? 0) > 4000) return BadRequest(new { error = error ?? "input_too_long" });
-        var map = req.Flow!.Nodes!.ToDictionary(n => n.Id!);
-        var path = new List<string>(); var replies = new List<string>();
-        string? cursor = req.Flow.Start;
-        for (int i = 0; cursor != null && i < 40; i++)
-        {
-            var node = map[cursor]; path.Add(cursor);
-            if (node.Type == "end") break;
-            if (node.Type == "reply") replies.Add(node.Text!);
-            cursor = node.Type == "contains" && !(req.Input ?? "").Contains(node.Text!, StringComparison.OrdinalIgnoreCase)
-                ? node.Otherwise : node.Next;
-        }
-        // Draft simulation has no messaging, AI, HTTP or event-bus side effects.
-        return Ok(new { path, replies });
+        return Ok(Evaluate(req.Flow!, req.Input ?? ""));
+    }
+
+    public record PublishRequest(int Version);
+
+    [HttpGet("active")]
+    public async Task<IActionResult> Active(CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        var active = await db.BotReleases.AsNoTracking().Where(x => x.TenantId == tenant)
+            .Select(x => new { x.DraftId, x.Name, x.Version, x.ActivationId, x.PublishedAtUtc }).SingleOrDefaultAsync(ct);
+        return Ok(new { active });
+    }
+
+    [HttpPost("{id:guid}/publish")]
+    public async Task<IActionResult> Publish(Guid id, PublishRequest req, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var draft = await db.BotDrafts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
+        if (draft == null) return NotFound();
+        if (draft.Version != req.Version) return Conflict(new { error = "stale_version" });
+        var definition = JsonSerializer.Deserialize<Definition>(draft.DefinitionJson, Json);
+        var error = Validate(definition);
+        if (error != null) return BadRequest(new { error });
+        var replies = definition!.Nodes!.Where(n => n.Type == "reply").ToArray();
+        if (replies.Length == 0 || replies.Length > 3 || replies.Sum(n => n.Text!.Length) + 2 * (replies.Length - 1) > 4000)
+            return BadRequest(new { error = "publish_reply_limit" });
+        var row = await db.BotReleases.SingleOrDefaultAsync(x => x.TenantId == tenant, ct);
+        if (row == null) { row = new BotReleaseEntity { TenantId = tenant }; db.BotReleases.Add(row); }
+        row.DraftId = draft.Id; row.Name = draft.Name; row.Version = draft.Version; row.DefinitionJson = draft.DefinitionJson;
+        row.PublishedAtUtc = DateTime.UtcNow; row.ActivationId = Guid.NewGuid();
+        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        return Ok(new { row.DraftId, row.Name, row.Version, row.ActivationId, row.PublishedAtUtc });
+    }
+
+    [HttpDelete("{id:guid}/publish/{activationId:guid}")]
+    public async Task<IActionResult> Stop(Guid id, Guid activationId, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        var affected = await db.BotReleases.Where(x => x.TenantId == tenant && x.DraftId == id && x.ActivationId == activationId).ExecuteDeleteAsync(ct);
+        return affected == 0 ? NotFound() : NoContent();
+    }
+
+    [HttpGet("runs")]
+    public async Task<IActionResult> Runs(int limit = 50, CancellationToken ct = default)
+    {
+        var tenant = User.TenantId();
+        return Ok(await db.AutomationRuns.AsNoTracking().Where(r => r.TenantId == tenant).OrderByDescending(r => r.CreatedAtUtc)
+            .Take(Math.Clamp(limit, 1, 100)).Select(r => new { r.InboundMessageId, r.ConversationId, r.BotId, r.BotVersion,
+                r.RuleId, r.Outcome, r.OutboundMessageId, r.CreatedAtUtc }).ToListAsync(ct));
     }
 }

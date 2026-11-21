@@ -112,6 +112,19 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             return true;
         }
 
+        // Recheck the customer-service window immediately before dispatching an automated reply.
+        if (item.IdempotencyKey.StartsWith("automation:", StringComparison.Ordinal))
+        {
+            var at = await db.WhatsAppConversations.AsNoTracking().Where(c => c.TenantId == item.TenantId &&
+                c.PhoneNumberId == item.PhoneNumberId && c.ContactPhone == item.RecipientPhone)
+                .Select(c => c.LastInboundAtUtc).FirstOrDefaultAsync(ct);
+            if (at == null || at > now || now - at.Value >= TimeSpan.FromHours(24))
+            {
+                await FailPermanentAsync(db, item, "automation_window_closed", ct);
+                return true;
+            }
+        }
+
         // 4. فك تشفير رمز الوصول
         string token;
         try

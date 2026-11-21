@@ -1,6 +1,7 @@
 using System.Net;
 using System.Security.Claims;
 using ChatPlatform.Controllers;
+using ChatPlatform.Infrastructure.Bots;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -129,7 +130,22 @@ try
             throw new Exception("Media tenant isolation failed");
         context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", tenant) }, "smoke"));
         Console.WriteLine("PASS: mocked media upload, download, tenant-bound ticket and idempotent queue.");
-        if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 5)
+        var conv = await db.WhatsAppConversations.SingleAsync(c => c.Id == conversationId, ct);
+        var definition = new BotFlow.Definition("s", new BotFlow.Node[] {
+            new("s","start",null,"r",null,0,0), new("r","reply","bot smoke","e",null,180,0), new("e","end",null,null,null,360,0) });
+        db.BotReleases.Add(new BotReleaseEntity { TenantId = tenant, DraftId = Guid.NewGuid(), ActivationId = Guid.NewGuid(),
+            Version = 1, Name = "Smoke bot", DefinitionJson = JsonSerializer.Serialize(definition,new JsonSerializerOptions(JsonSerializerDefaults.Web)), PublishedAtUtc = DateTime.UtcNow });
+        await db.SaveChangesAsync(ct);
+        var inbound = new WhatsAppMessageEntity { TenantId = tenant, ConversationId = conversationId,
+            Wamid = "wamid.runtime.smoke", Direction = "Inbound", MessageType = "text", TextPreview = "ping", ContentJson = "{}",
+            Status = "Received", TimestampUtc = DateTime.UtcNow, CreatedAtUtc = DateTime.UtcNow };
+        db.WhatsAppMessages.Add(inbound);
+        await BotRuntime.StageAsync(db,conv,inbound,"ping",DateTime.UtcNow,ct);
+        await BotRuntime.StageAsync(db,conv,inbound,"ping",DateTime.UtcNow,ct);
+        await db.SaveChangesAsync(ct);
+        if (await db.AutomationRuns.CountAsync(r => r.InboundMessageId == inbound.Id && r.Outcome == "queued",ct) != 1)
+            throw new Exception("Durable automation receipt missing or duplicated");
+        if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 6)
             throw new Exception("Duplicate queue rows detected");
         Console.WriteLine("PASS: tenant-bound controller text/template queue; repeat keys reuse original message.");
     }
@@ -145,10 +161,10 @@ try
             var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
             var rows = await db.WhatsAppOutbox.AsNoTracking().Where(x => x.TenantId == tenant).ToListAsync(ct);
             var messages = await db.WhatsAppMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).ToListAsync(ct);
-            if (rows.Count == 5 && rows.All(x => x.Status == "Sent") &&
-                messages.Count == 5 && messages.All(x => x.Status == "Sent" && x.Wamid != null))
+            if (rows.Count == 6 && rows.All(x => x.Status == "Sent") &&
+                messages.Count(m => m.Direction == "Outbound") == 6 && messages.Where(m => m.Direction == "Outbound").All(x => x.Status == "Sent" && x.Wamid != null))
             {
-                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || !requests.Contains("ci image") || requests.Count != 5)
+                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || !requests.Contains("ci image") || !requests.Contains("bot smoke") || requests.Count != 6)
                     throw new Exception("Unexpected simulated Graph requests.");
                 Console.WriteLine("PASS: manual send, auto-reply, authenticated text, template and image reached mocked Graph API; all marked Sent.");
                 break;

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChatPlatform.Infrastructure.Bots;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
@@ -205,7 +206,8 @@ public sealed class WhatsAppInboxWorker : BackgroundService
 
         db.WhatsAppMessages.Add(message);
 
-        // 🚀 تحسين ذكي: حفظ المحادثة والرسالة معاً في خطوة واحدة (Transaction ضمني)
+        // All durable automation rows commit with the incoming message, before any in-memory notification.
+        await BotRuntime.StageAsync(db, conversation, message, text, now, ct);
         await db.SaveChangesAsync(ct);
 
         // نشر الحدث (Event)
@@ -217,6 +219,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 Source = "whatsapp",
                 Payload = JsonSerializer.SerializeToElement(new
                 {
+                    automationHandled = true,
                     conversationId = conversation.Id,
                     messageId = message.Id,
                     tenantId = row.TenantId,

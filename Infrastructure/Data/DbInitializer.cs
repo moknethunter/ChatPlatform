@@ -309,6 +309,29 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TABLE IF NOT EXISTS BotReleases (
+                    TenantId TEXT NOT NULL PRIMARY KEY,
+                    DraftId TEXT NOT NULL,
+                    ActivationId TEXT NOT NULL,
+                    Name TEXT NOT NULL,
+                    Version INTEGER NOT NULL,
+                    DefinitionJson TEXT NOT NULL,
+                    PublishedAtUtc TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS AutomationRuns (
+                    InboundMessageId TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    ConversationId TEXT NOT NULL,
+                    RecipientPhone TEXT NOT NULL,
+                    BotId TEXT NULL,
+                    BotVersion INTEGER NULL,
+                    RuleId TEXT NULL,
+                    Outcome TEXT NOT NULL,
+                    OutboundMessageId TEXT NULL,
+                    CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_AutomationRuns_Tenant_Phone_Created ON AutomationRuns(TenantId, RecipientPhone, CreatedAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_AutomationRuns_Tenant_Created ON AutomationRuns(TenantId, CreatedAtUtc);
                 CREATE TRIGGER IF NOT EXISTS Rev_WhatsAppConversations_INSERT AFTER INSERT ON WhatsAppConversations
                 BEGIN
                     INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)

@@ -343,6 +343,10 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            activeBot() { return request("/api/bots/active"); },
+            publishBot(id,version) { return request("/api/bots/"+encodeURIComponent(id)+"/publish",{method:"POST",body:{version}}); },
+            stopBot(id,activationId) { return request("/api/bots/"+encodeURIComponent(id)+"/publish/"+encodeURIComponent(activationId),{method:"DELETE"}); },
+            botRuns() { return request("/api/bots/runs"); },
             listBots() { return request("/api/bots"); },
             getBot(id) { return request("/api/bots/" + encodeURIComponent(id)); },
             saveBot(id,data) { return request("/api/bots" + (id ? "/" + encodeURIComponent(id) : ""), {method:id?"PUT":"POST",body:data}); },

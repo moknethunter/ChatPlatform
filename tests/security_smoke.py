@@ -216,6 +216,49 @@ assert len(closed)==1 and closed[0]["unreadCount"]==0 and closed[0]["tags"]=="pr
 assert not call("/api/conversations?status=open",cookie=a)[0]
 call(root+"/status","PUT",{"status":"open"},cookie=a,expected=204)
 print("PASS: CRM import, same-phone tenant isolation, assignment, filters, status and unread updates")
+# Real webhook path with intentionally invalid encrypted token: queues are observable but no Meta call can succeed.
+# A separate in-process mocked Graph test verifies actual delivery.
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='invalid-ci-ciphertext' WHERE Id='ci-account-a'")
+fallback,_=call("/api/autoreply","POST",{"name":"Fallback","matchType":"any","replyText":"Legacy fallback","cooldownSeconds":0,"isActive":True},cookie=a)
+call(botpath+"/publish","POST",{"version":2},cookie=b,expected=404)
+call(botpath+"/publish","POST",{"version":2},cookie=agent,expected=403)
+call(botpath+"/publish","POST",{"version":1},cookie=a,expected=409)
+pub,_=call(botpath+"/publish","POST",{"version":2},cookie=a)
+assert call("/api/bots/active",cookie=b)[0]["active"] is None
+changed_flow=json.loads(json.dumps(flow));changed_flow["nodes"][2]["text"]="Unpublished edit"
+call(botpath,"PUT",{"name":"Updated draft","flow":changed_flow,"version":2},cookie=a)
+assert call("/api/bots/active",cookie=a)[0]["active"]["version"]==2
+def automate(wamid,text):
+    bdy={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":wamid,"from":"15550000001","type":"text","text":{"body":text}}]}}]}]}
+    signature="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(bdy).encode(),hashlib.sha256).hexdigest()
+    for _ in range(2): call("/webhook","POST",bdy,extra={"X-Hub-Signature-256":signature})
+    for _ in range(30):
+        with sqlite3.connect(DB) as db:
+            result=db.execute("SELECT r.Outcome,r.BotVersion,r.RuleId,m.TextPreview FROM AutomationRuns r JOIN WhatsAppMessages i ON i.Id=r.InboundMessageId LEFT JOIN WhatsAppMessages m ON m.Id=r.OutboundMessageId WHERE i.Wamid=?",(wamid,)).fetchall()
+            if result:
+                assert len(result)==1
+                return result[0]
+        time.sleep(1)
+    raise AssertionError("No automation execution receipt")
+assert automate("wamid.ci.bot.1","hello")==("queued",2,None,"CI reply")
+assert automate("wamid.ci.bot.2","unmatched")==("no_match",2,None,None)
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT COUNT(*) FROM WhatsAppOutbox WHERE TenantId='ci-tenant-a' AND IdempotencyKey LIKE 'automation:%'").fetchone()[0]==1
+    assert db.execute("SELECT COUNT(*) FROM WhatsAppMessages WHERE TenantId='ci-tenant-a' AND Direction='Outbound'").fetchone()[0]==1
+stop_path=botpath+"/publish/"+pub["activationId"]
+call(stop_path,"DELETE",cookie=b,expected=404)
+call(stop_path,"DELETE",cookie=a,expected=204)
+assert call("/api/bots/active",cookie=a)[0]["active"] is None
+outcome,ver,rule_id,reply=automate("wamid.ci.legacy.1","anything")
+assert outcome=="queued" and ver is None and rule_id and reply=="Legacy fallback"
+assert not call("/api/bots/runs",cookie=b)[0]
+runs,_=call("/api/bots/runs",cookie=a)
+assert any(r["botVersion"]==2 and r["outcome"]=="queued" for r in runs)
+call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
+print("PASS: published snapshot, exclusive bot priority, duplicate webhook, stop and durable legacy fallback")
 call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=a,expected=204)
 call("/api/auth/me",cookie=managed_cookie,expected=401)
 call("/api/auth/login","POST",{"username":"ci-managed","password":PASSWORD},expected=401)

@@ -35,3 +35,6 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 
 - [x] Authenticated inbox SSE invalidation stream and visual bot draft editor/simulator (candidate; CI pending).
 - [ ] Browser drag/touch validation, reconnect load test, bot publication/activation, durable execution, event deduplication and quotas.
+
+- [x] Published immutable bot snapshots, tenant-exclusive durable automation, legacy fallback and execution history (candidate; CI pending).
+- [ ] Stateful bot conversations, handoff nodes, scheduled actions, platform quotas and external delivery ambiguity review.
