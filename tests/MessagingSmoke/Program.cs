@@ -40,7 +40,13 @@ try
     using (var scope = provider.CreateScope())
     {
         var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
-        var protector = provider.GetRequiredService<IDataProtectionProvider>().CreateProtector("BusinessToken");
+        var dataProtection = provider.GetRequiredService<IDataProtectionProvider>();
+        var protector = dataProtection.CreateProtector("WhatsApp.AccessTokens");
+        var compatible = new WhatsAppTokenProtection(dataProtection);
+        if (compatible.Unprotect(compatible.Protect("current-token")) != "current-token" ||
+            compatible.Unprotect(protector.Protect("legacy-token")) != "legacy-token")
+            throw new Exception("Token protection compatibility failed.");
+        Console.WriteLine("PASS: current and legacy encrypted token formats are readable.");
         db.Tenants.Add(new TenantEntity { Id = tenant, Name = "Smoke test" });
         db.WhatsAppTenants.Add(new WhatsAppTenantEntity { TenantId = tenant, PhoneNumberId = phoneId,
             BusinessTokenEncrypted = protector.Protect("fake-token") });
