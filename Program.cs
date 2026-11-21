@@ -187,6 +187,26 @@ DbInitializer.EnsureCreated(connectionString);
 var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
 await db.Database.CanConnectAsync();
 var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+// Repair an empty token for the explicitly configured phone only, without overwriting
+// existing credentials or activating/reassigning another organization's account.
+var configuredPhone = whatsAppPhoneId.Trim();
+if (!string.IsNullOrWhiteSpace(configuredPhone) && !string.IsNullOrWhiteSpace(whatsAppToken))
+{
+    var configuredTenant = Environment.GetEnvironmentVariable("WHATSAPP_TENANT_ID");
+    if (string.IsNullOrWhiteSpace(configuredTenant))
+        configuredTenant = "tenant-alhawbani-001";
+
+    var account = await db.WhatsAppTenants.Include(a => a.Tenant)
+        .SingleOrDefaultAsync(a => a.PhoneNumberId == configuredPhone && a.TenantId == configuredTenant
+            && a.IsActive && a.Tenant != null && a.Tenant.IsActive);
+    if (account != null && string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
+    {
+        var protector = new WhatsAppTokenProtection(scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>());
+        account.BusinessTokenEncrypted = protector.Protect(whatsAppToken);
+        await db.SaveChangesAsync();
+        logger.LogInformation("Initialized encrypted token for configured WhatsApp account.");
+    }
+}
 logger.LogInformation("ChatPlatform database initialized successfully.");
 }
 catch (Exception ex)
