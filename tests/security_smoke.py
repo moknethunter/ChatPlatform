@@ -311,7 +311,28 @@ with sqlite3.connect(DB) as db:
 assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
 assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
 assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+# Simulate a scheduled, not-yet-claimed automation reply. The invalid test token
+# and future scheduled date ensure the worker never sends the synthetic message.
+import uuid
+with sqlite3.connect(DB) as db:
+    conversation_id=db.execute("SELECT Id FROM WhatsAppConversations WHERE lower(Id)=?",(cid.lower(),)).fetchone()[0]
+    pending_message=str(uuid.uuid4()).upper()
+    pending_outbox=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppMessages(Id,TenantId,ConversationId,Direction,MessageType,ContentJson,
+        TextPreview,Status,TimestampUtc,CreatedAtUtc)
+        VALUES(?,?,?,'Outbound','text','{}','scheduled CI reply','Queued','2026-01-01','2026-01-01')""",
+        (pending_message,"ci-tenant-a",conversation_id))
+    db.execute("""INSERT INTO WhatsAppOutbox(Id,TenantId,CorrelationId,IdempotencyKey,MessageId,PhoneNumberId,
+        RecipientPhone,MessageType,PayloadJson,Status,Attempts,MaxAttempts,CreatedAtUtc,NextAttemptAtUtc,
+        ScheduledForUtc,UpdatedAtUtc)
+        VALUES(?,?,?,?,?,'999999999999','15550000001','text','{}','Pending',0,10,'2026-01-01','2099-01-01',
+        '2099-01-01','2026-01-01')""",
+        (pending_outbox,"ci-tenant-a",pending_outbox,"automation:ci-scheduled",pending_message))
 call(root+"/automation","PUT",{"mode":"human"},cookie=managed_cookie,expected=204)
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT Status,LastError FROM WhatsAppOutbox WHERE Id=?",(pending_outbox,)).fetchone()==("Cancelled","human_handoff")
+    assert db.execute("SELECT Status FROM WhatsAppMessages WHERE Id=?",(pending_message,)).fetchone()==("Cancelled",)
+print("PASS: human takeover cancels pending automated outbox and message atomically")
 call(mp+"/publish/"+published["activationId"],"DELETE",cookie=a,expected=204)
 assert automate("wamid.ci.multi.6","hi")==("human_mode",None,None,None)
 call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)

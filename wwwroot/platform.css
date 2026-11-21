@@ -61,3 +61,13 @@
 .cp-public a{color:#126b58}
 .cp-public .cp-legal-bar{max-width:1000px;margin:0 auto 20px;padding:12px 16px;border-bottom:1px solid var(--cp-line);font-weight:700}
 @media(max-width:760px){.cp-legacy main{padding:16px 12px}.cp-legacy .card{padding:16px}.cp-shell{position:sticky}.cp-app .handoff-bar{align-items:flex-start}}
+
+.cp-app .inbox-back{display:none}
+@media(max-width:720px){
+ .cp-app .inbox-layout:not(.has-selection) .inbox-detail{display:none}
+ .cp-app .inbox-layout.has-selection .inbox-list{display:none}
+ .cp-app .inbox-layout.has-selection .inbox-back{display:block;margin-bottom:14px}
+ .cp-app .inbox-layout{grid-template-columns:minmax(0,1fr)}
+ .cp-app .inbox-layout .messages{height: min(48dvh,420px);min-height:240px}
+ .cp-app .cp-shell{grid-template-columns:minmax(0,1fr) auto auto}
+}
