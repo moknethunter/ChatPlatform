@@ -47,3 +47,18 @@ jobs:
           test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
           test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345")" = 401
           test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' "$base/webhook")" = 401
+
+          # Seed fake account in the disposable database through the existing API.
+          # Verify a second organization cannot overwrite its ownership.
+          python3 - "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.executemany("INSERT INTO Tenants (Id, Name, IsActive, CreatedAtUtc) VALUES (?, ?, 1, '2026-01-01')", [('ci-tenant-a','CI A'),('ci-tenant-b','CI B')])
+          PY
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"tenantId":"ci-tenant-a","phoneNumberId":"999999999999","accessToken":"fake-ci-token"}' "$base/api/whatsapp/tenants")" = 200
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"tenantId":"ci-tenant-b","phoneNumberId":"999999999999","accessToken":"fake-ci-token-b"}' "$base/api/whatsapp/tenants")" = 409
+          python3 - "$CHATPLATFORM_DATA_DIR/platform.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              assert db.execute("SELECT TenantId FROM WhatsAppTenants WHERE PhoneNumberId = ?", ('999999999999',)).fetchone() == ('ci-tenant-a',)
+          PY
