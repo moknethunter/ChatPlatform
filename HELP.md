@@ -125,3 +125,6 @@ curl -fsS https://chatplatform.fly.dev/ready
 - Automation reliability: stale signed message timestamps do not extend the customer-service window. The inbox uses a database transaction for ownership, bot decision and atomic queueing. Automated sends stop on ambiguous delivery (HTTP 5xx, timeout, network error, missing Meta message ID or expired processing lease); status is DeliveryUnknown, requiring operator reconciliation. Explicit HTTP 429 rejection can be retried. This favors avoiding duplicates over delivery at all costs; Meta exact-once delivery cannot be promised.
 
 - Mocked Graph tests assert a 500 response produces exactly one automated attempt, and an abandoned processing lease produces no further network request, both marked DeliveryUnknown.
+
+## Merge and release separation
+- Merging into main runs CI only. Repository Fly.io and GHCR release workflows now run only by explicit workflow_dispatch from main. This prevents a code merge from automatically deploying authentication changes or overwriting production images. Do not dispatch before explicit production approval, verified administrator account provisioning, proxy/HTTPS configuration and tested database backup/restore. External hosting auto-deploy settings are outside this repository workflow control; verify separately before release.
