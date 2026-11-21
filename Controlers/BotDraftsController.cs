@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Bots;
 using static ChatPlatform.Infrastructure.Bots.BotFlow;
@@ -16,7 +17,7 @@ namespace ChatPlatform.Controllers;
 public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
 {
     public record SaveRequest(string? Name, Definition? Flow, int Version);
-    public record SimulateRequest(Definition? Flow, string? Input);
+    public record SimulateRequest(Definition? Flow, string? Input, string[]? Inputs = null);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
@@ -41,9 +42,11 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
         var tenant = User.TenantId();
         var error = Validate(req.Flow);
         if (error != null || string.IsNullOrWhiteSpace(req.Name) || req.Name.Length > 100) return BadRequest(new { error = error ?? "invalid_name" });
+        await using var tx=await db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(db,tenant,"bots",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         if (await db.BotDrafts.CountAsync(x => x.TenantId == tenant, ct) >= 100) return Conflict(new { error = "draft_limit" });
         var row = new BotDraftEntity { TenantId = tenant, Name = req.Name.Trim(), DefinitionJson = JsonSerializer.Serialize(req.Flow, Json), UpdatedAtUtc = DateTime.UtcNow };
-        db.BotDrafts.Add(row); await db.SaveChangesAsync(ct);
+        db.BotDrafts.Add(row); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
         return StatusCode(201, new { row.Id, row.Name, row.Version });
     }
 
@@ -68,7 +71,15 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     {
         var error = Validate(req.Flow);
         if (error != null || (req.Input?.Length ?? 0) > 4000) return BadRequest(new { error = error ?? "input_too_long" });
-        return Ok(Evaluate(req.Flow!, req.Input ?? ""));
+        if(req.Inputs==null)return Ok(Evaluate(req.Flow!,req.Input??""));
+        if(req.Inputs.Length is <1 or >12 || req.Inputs.Any(x=>x==null||x.Length>4000))return BadRequest(new{error="invalid_turns"});
+        var turns=new List<Evaluation>();string? next=null;
+        foreach(var input in req.Inputs)
+        {
+            var result=Evaluate(req.Flow!,input,next);turns.Add(result);next=result.NextNode;
+            if(result.Handoff||next==null)break;
+        }
+        return Ok(new{turns,nextNode=next});
     }
 
     public record PublishRequest(int Version);
@@ -87,14 +98,15 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     {
         var tenant = User.TenantId();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if(await Entitlements.CapacityAsync(db,tenant,"send",0,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         var draft = await db.BotDrafts.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (draft == null) return NotFound();
         if (draft.Version != req.Version) return Conflict(new { error = "stale_version" });
         var definition = JsonSerializer.Deserialize<Definition>(draft.DefinitionJson, Json);
         var error = Validate(definition);
         if (error != null) return BadRequest(new { error });
-        var replies = definition!.Nodes!.Where(n => n.Type == "reply").ToArray();
-        if (replies.Length == 0 || replies.Length > 3 || replies.Sum(n => n.Text!.Length) + 2 * (replies.Length - 1) > 4000)
+        var replies = definition!.Nodes!.Where(n => n.Type is "reply" or "wait").ToArray();
+        if ((replies.Length == 0 && !definition.Nodes!.Any(n=>n.Type=="handoff")) || replies.Length > 12 || replies.Sum(n => n.Text!.Length) + 2 * Math.Max(0,replies.Length - 1) > 4000)
             return BadRequest(new { error = "publish_reply_limit" });
         var row = await db.BotReleases.SingleOrDefaultAsync(x => x.TenantId == tenant, ct);
         if (row == null) { row = new BotReleaseEntity { TenantId = tenant }; db.BotReleases.Add(row); }

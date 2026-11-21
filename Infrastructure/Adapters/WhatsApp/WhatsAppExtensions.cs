@@ -49,6 +49,7 @@ public static class WhatsAppExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddScoped<WhatsAppMediaService>();
+        services.AddScoped<ChatPlatform.Infrastructure.Marketing.TemplateApproval>();
         services.AddScoped<IWhatsAppTenantResolver, WhatsAppTenantResolver>();
         services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
         services.AddScoped<WhatsAppOnboardingService>();
@@ -56,6 +57,7 @@ public static class WhatsAppExtensions
         services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
 
         services.AddHostedService<WhatsAppInboxWorker>();
+        services.AddHostedService<WhatsAppReceiptWorker>();
         services.AddHostedService<WhatsAppOutboxWorker>();
 
         return services;

@@ -1,3 +1,4 @@
+using ChatPlatform.Infrastructure.Subscriptions;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -74,7 +75,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             .Where(x => ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                          (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
                         && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
-                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && x.IdempotencyKey.StartsWith("automation:"))))
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => new { x.Id, x.Status })
             .FirstOrDefaultAsync(ct);
@@ -86,7 +87,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             .Where(x => x.Id == candidate.Id && x.Status == candidate.Status
                         && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                             (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
-                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && x.IdempotencyKey.StartsWith("automation:"))))
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.Status, StatusProcessing)
                 .SetProperty(x => x.LeaseUntilUtc, now.AddSeconds(LeaseSeconds))
@@ -100,9 +101,11 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         var item = await db.WhatsAppOutbox.AsNoTracking().FirstOrDefaultAsync(x => x.Id == candidate.Id, ct);
         if (item == null) return true;
         var automated = item.IdempotencyKey.StartsWith("automation:", StringComparison.Ordinal);
+        var marketing = item.IdempotencyKey.StartsWith("campaign:",StringComparison.Ordinal);
+        var guarded = automated || marketing;
         // A previous worker might have sent successfully and died before saving the result.
         // Do not resend an automated reply after an expired processing lease.
-        if (automated && candidate.Status == StatusProcessing)
+        if (guarded && candidate.Status == StatusProcessing)
         {
             await MarkUncertainAsync(db, item, "automation_expired_lease", ct);
             return true;
@@ -119,6 +122,10 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             await FailPermanentAsync(db, item, "no_active_matching_tenant", ct);
             return true;
         }
+
+        var access=await Entitlements.ReadAsync(db,item.TenantId,DateTime.UtcNow,ct);
+        if(!access.Active||(marketing&&access.Managed&&!access.Plan!.Campaigns))
+        {await FailPermanentAsync(db,item,"subscription_inactive_or_feature_disabled",ct);return true;}
 
         // Recheck the customer-service window immediately before dispatching an automated reply.
         if (automated)
@@ -148,11 +155,46 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             return true;
         }
 
+        // A takeover cancels pending automation and blocks claimed-but-not-yet-sent replies.
+        // A request already in flight cannot be recalled.
+        if(automated && await db.ConversationAutomation.AsNoTracking().AnyAsync(s=>s.TenantId==item.TenantId && s.Mode=="human" &&
+            db.WhatsAppMessages.Any(m=>m.Id==item.MessageId && m.TenantId==item.TenantId && m.ConversationId==s.ConversationId),ct))
+        {
+            await FailPermanentAsync(db,item,"human_handoff",ct);return true;
+        }
+
+        if(marketing)
+        {
+            var config=scope.ServiceProvider.GetService<IConfiguration>();
+            var allowed=await (from r in db.CampaignRecipients.AsNoTracking()
+                join c in db.MarketingCampaigns.AsNoTracking() on r.CampaignId equals c.Id
+                join t in db.WhatsAppTemplates.AsNoTracking() on c.TemplateId equals t.Id
+                where r.OutboxId==item.Id&&r.TenantId==item.TenantId&&c.TenantId==item.TenantId&&t.TenantId==item.TenantId
+                &&c.Status=="Scheduled"&&c.PhoneNumberId==item.PhoneNumberId&&r.Phone==item.RecipientPhone
+                select t).SingleOrDefaultAsync(ct);
+            if(config?.GetValue<bool>("Campaigns:Enabled")!=true||allowed==null||
+                !await scope.ServiceProvider.GetRequiredService<ChatPlatform.Infrastructure.Marketing.TemplateApproval>().VerifyAsync(account,allowed,token,ct)||
+                !await db.MarketingConsents.AsNoTracking().AnyAsync(c=>c.TenantId==item.TenantId&&c.PhoneNumberId==item.PhoneNumberId&&c.Phone==item.RecipientPhone&&c.Granted,ct)||
+                !await db.CampaignRecipients.AnyAsync(r=>r.OutboxId==item.Id&&r.TenantId==item.TenantId&&db.MarketingCampaigns.Any(c=>c.Id==r.CampaignId&&c.TenantId==item.TenantId&&c.Status=="Scheduled"),ct))
+            {await FailPermanentAsync(db,item,"campaign_guard_rejected",ct);return true;}
+            // Ensure the queued template did not change between scheduling and dispatch.
+            var expected=System.Text.Json.JsonSerializer.Serialize(new{messaging_product="whatsapp",recipient_type="individual",to=item.RecipientPhone,type="template",template=new{name=allowed.Name,language=new{code=allowed.Language}}});
+            if(item.PayloadJson!=expected || !await db.WhatsAppTemplates.AnyAsync(t=>t.Id==allowed.Id&&t.TenantId==item.TenantId&&t.IsActive&&t.Category=="MARKETING"&&t.Body==allowed.Body&&t.Name==allowed.Name&&t.Language==allowed.Language,ct)){await FailPermanentAsync(db,item,"campaign_template_changed",ct);return true;}
+        }
+
+        // Revalidate tenant/account/entitlement after any remote template approval lookup.
+        // Once a network request has begun it cannot be recalled.
+        var latest=await Entitlements.ReadAsync(db,item.TenantId,DateTime.UtcNow,ct);
+        if(!latest.Active||(marketing&&latest.Managed&&!latest.Plan!.Campaigns)||
+            !await db.WhatsAppTenants.AnyAsync(a=>a.Id==account.Id&&a.TenantId==item.TenantId&&a.IsActive&&
+                a.BusinessTokenEncrypted==account.BusinessTokenEncrypted&&db.Tenants.Any(t=>t.Id==item.TenantId&&t.IsActive),ct))
+        {await FailPermanentAsync(db,item,"subscription_or_account_changed",ct);return true;}
+
         // 5. إرسال الرسالة عبر WhatsApp Cloud API
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 
         // 6. معالجة نتيجة الإرسال
-        if (automated && ((result.IsSuccess && string.IsNullOrWhiteSpace(result.MetaMessageId))
+        if (guarded && ((result.IsSuccess && string.IsNullOrWhiteSpace(result.MetaMessageId))
             || (result.IsTransient && !(result.Raw?.StartsWith("http_429:", StringComparison.Ordinal) ?? false))))
         {
             // HTTP 5xx, network/timeout and malformed successful responses can be ambiguous;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Bots;
+using ChatPlatform.Infrastructure.Marketing;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Data;
@@ -225,7 +226,9 @@ public sealed class WhatsAppInboxWorker : BackgroundService
         db.WhatsAppMessages.Add(message);
 
         // All durable automation rows commit with the incoming message, before any in-memory notification.
-        await BotRuntime.StageAsync(db, conversation, message, text, now, ct);
+        if(type=="text"&&Consent.ValidPhone(from)&&Consent.IsStop(text))
+            await Consent.SetAsync(db,row.TenantId,row.PhoneNumberId,from,false,"Inbound opt-out: "+wamid,"customer",now,ct);
+        else await BotRuntime.StageAsync(db, conversation, message, text, now, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
 

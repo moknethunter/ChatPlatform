@@ -3,7 +3,7 @@ import base64, hashlib, hmac, json, os, shlex, sqlite3, struct, sys, time
 import urllib.request, urllib.error
 PASSWORD = "ci-only-password-not-for-production"
 USERS = [("ci-legacy", "tenant-alhawbani-001", "Admin"), ("ci-a", "ci-tenant-a", "Admin"),
-         ("ci-b", "ci-tenant-b", "Admin"), ("ci-agent", "ci-tenant-a", "Agent")]
+         ("ci-b", "ci-tenant-b", "Admin"), ("ci-agent", "ci-tenant-a", "Agent"), ("ci-owner","__platform_owner__","SuperAdmin")]
 if "--environment" in sys.argv:
     for i, (name, tenant, role) in enumerate(USERS):
         salt = os.urandom(16)
@@ -49,13 +49,52 @@ call("/api/media/00000000-0000-0000-0000-000000000001",expected=401)
 call("/api/whatsapp/accounts",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":PASSWORD},expected=403,csrf=False)
-legacy, a, b, agent = (login(name) for name,_,_ in USERS)
+legacy, a, b, agent, owner = (login(name) for name,_,_ in USERS)
 accounts,_=call("/api/whatsapp/accounts",cookie=legacy)
 assert accounts[0]["phoneNumberId"]=="999999999998" and accounts[0]["hasToken"]
 with sqlite3.connect(DB) as db:
     row=db.execute("SELECT BusinessTokenEncrypted,TenantId,AppId FROM WhatsAppTenants WHERE Id='ci-legacy-account'").fetchone()
     assert row[0] and row[0]!="ci-only-bootstrap-token" and row[1:]==("tenant-alhawbani-001","")
 assert call("/api/auth/me",cookie=a)[0]["tenantId"]=="ci-tenant-a"
+assert call("/api/auth/me",cookie=owner)[0]["role"]=="SuperAdmin"
+call("/api/platform-admin/plans",expected=401)
+call("/api/platform-admin/plans",cookie=a,expected=403)
+call("/api/platform-admin/plans",cookie=agent,expected=403)
+for path in ["/api/conversations","/api/dashboard","/api/team","/api/subscription","/api/knowledge","/api/reports","/api/whatsapp/accounts","/api/live/inbox"]:
+    call(path,cookie=owner,expected=403)
+plan,_=call("/api/platform-admin/plans","POST",{"name":"CI limited","monthlyMessages":1,"agents":0,"accounts":1,"bots":0,"articles":0,"campaigns":False,"ownModel":False,"monthlyPriceMinor":0,"currency":"USD"},cookie=owner,expected=201)
+assert call("/api/subscription",cookie=a)[0]["managed"] is False
+call("/api/platform-admin/tenants","POST",{"name":"CI new","username":"ci-new-admin","password":PASSWORD,"planId":plan["id"],"endsAt":"2099-01-01T00:00:00Z"},cookie=owner,expected=400)
+from datetime import datetime,timezone,timedelta
+expires=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()
+new_tenant,_=call("/api/platform-admin/tenants","POST",{"name":"CI new","username":"ci-new-admin","password":PASSWORD,"planId":plan["id"],"endsAt":expires},cookie=owner,expected=201)
+assert "passwordHash" not in new_tenant and "password" not in new_tenant
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=a,expected=403)
+assert any(t["id"]==new_tenant["id"] for t in call("/api/platform-admin/tenants",cookie=owner)[0])
+assert any(x["action"]=="tenant_created" for x in call("/api/platform-admin/audit",cookie=owner)[0])
+print("PASS: isolated platform owner, immutable plan and tenant provisioning")
+call("/api/dashboard",expected=401)
+assert call("/api/dashboard",cookie=a)[0]["metrics"]["contacts"]==0
+assert call("/api/dashboard",cookie=b)[0]["metrics"]["openConversations"]==0
+call("/api/knowledge",expected=401)
+call("/api/knowledge",cookie=agent,expected=403)
+article={"title":"CI warranty","body":"Warranty period is 12 months","isPublished":True,"version":0,"tenantId":"ci-tenant-b"}
+kb,_=call("/api/knowledge","POST",article,cookie=a,expected=201)
+kp="/api/knowledge/"+kb["id"]
+assert kb["tenantId"]=="ci-tenant-a"
+assert not call("/api/knowledge",cookie=b)[0]
+call(kp,cookie=b,expected=404)
+call(kp,"PUT",dict(article,version=1),cookie=b,expected=404)
+call(kp+"?version=1","DELETE",cookie=b,expected=404)
+assert call("/api/knowledge/search","POST",{"question":"warranty"},cookie=a)[0][0]["id"]==kb["id"]
+assert not call("/api/knowledge/search","POST",{"question":"warranty"},cookie=b)[0]
+call(kp,"PUT",dict(article,version=1,isPublished=False),cookie=a)
+assert not call("/api/knowledge/search","POST",{"question":"warranty"},cookie=a)[0]
+call(kp,"PUT",dict(article,version=1),cookie=a,expected=409)
+assert call("/api/knowledge/model",cookie=a)[0]["configured"] is False
+call("/api/knowledge/preview","POST",{"question":"warranty"},cookie=a,expected=409)
+call(kp+"?version=2","DELETE",cookie=a,expected=204)
+print("PASS: isolated knowledge articles, published-only search, stale version and disabled own-model preview")
 assert not call("/api/whatsapp/accounts",cookie=b)[0]
 call("/api/live/inbox",cookie=a,expected=403,extra={"Origin":"https://untrusted.example"})
 call("/api/bots",cookie=agent,expected=403)
@@ -132,6 +171,10 @@ for _ in range(30):
     time.sleep(1)
 else: raise AssertionError("Inbound message not persisted")
 assert match["lastMessage"]["text"]=="CI inbound message"
+summary,_=call("/api/dashboard",cookie=a)
+assert summary["metrics"]["contacts"]==1 and summary["metrics"]["openConversations"]==1
+assert summary["recent"][0]["contactPhone"]=="15550000001"
+assert call("/api/dashboard",cookie=b)[0]["recent"]==[]
 path="/api/conversations/"+match["id"]+"/messages"
 messages,_=call(path,cookie=a)
 assert sum(m.get("wamid")=="wamid.ci.inbound.1" for m in messages)==1
@@ -257,10 +300,162 @@ assert outcome=="queued" and ver is None and rule_id and reply=="Legacy fallback
 assert not call("/api/bots/runs",cookie=b)[0]
 runs,_=call("/api/bots/runs",cookie=a)
 assert any(r["botVersion"]==2 and r["outcome"]=="queued" for r in runs)
+# Multi-turn state survives separate signed webhook deliveries and takes priority over legacy rules.
+multi={"start":"s","nodes":[{"id":"s","type":"start","next":"w","x":0,"y":0},
+ {"id":"w","type":"wait","text":"Choose support or price","next":"c","x":180,"y":0},
+ {"id":"c","type":"contains","text":"support","next":"h","otherwise":"r","x":360,"y":0},
+ {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"reply","text":"Price is 10","next":"e","x":540,"y":180},
+ {"id":"e","type":"end","x":720,"y":180}]}
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","support"]},cookie=a)
+assert multi_sim["turns"][0]["nextNode"]=="c" and multi_sim["turns"][1]["handoff"]
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price"]},cookie=a)
+assert multi_sim["turns"][1]["replies"]==["Price is 10"]
+created_multi,_=call("/api/bots","POST",{"name":"Multi","flow":multi,"version":0},cookie=a,expected=201)
+mp="/api/bots/"+created_multi["id"]
+published,_=call(mp+"/publish","POST",{"version":1},cookie=a)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
+assert automate("wamid.ci.multi.1","hi")==("queued",1,None,"Choose support or price")
+assert call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+assert automate("wamid.ci.multi.2","support")==("human_handoff",1,None,None)
+assert call("/api/conversations?automation=human",cookie=a)[0][0]["id"]==cid
+assert call("/api/conversations?automation=human",cookie=b)[0]==[]
+assert automate("wamid.ci.multi.3","hi")==("human_mode",1,None,None)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=b,expected=404)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=managed_cookie,expected=204)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
+assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
+assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
+assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+# Simulate a scheduled, not-yet-claimed automation reply. The invalid test token
+# and future scheduled date ensure the worker never sends the synthetic message.
+import uuid
+with sqlite3.connect(DB) as db:
+    conversation_id=db.execute("SELECT Id FROM WhatsAppConversations WHERE lower(Id)=?",(cid.lower(),)).fetchone()[0]
+    pending_message=str(uuid.uuid4()).upper()
+    pending_outbox=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppMessages(Id,TenantId,ConversationId,Direction,MessageType,ContentJson,
+        TextPreview,Status,TimestampUtc,CreatedAtUtc)
+        VALUES(?,?,?,'Outbound','text','{}','scheduled CI reply','Queued','2026-01-01','2026-01-01')""",
+        (pending_message,"ci-tenant-a",conversation_id))
+    db.execute("""INSERT INTO WhatsAppOutbox(Id,TenantId,CorrelationId,IdempotencyKey,MessageId,PhoneNumberId,
+        RecipientPhone,MessageType,PayloadJson,Status,Attempts,MaxAttempts,CreatedAtUtc,NextAttemptAtUtc,
+        ScheduledForUtc,UpdatedAtUtc)
+        VALUES(?,?,?,?,?,'999999999999','15550000001','text','{}','Pending',0,10,'2026-01-01','2099-01-01',
+        '2099-01-01','2026-01-01')""",
+        (pending_outbox,"ci-tenant-a",pending_outbox,"automation:ci-scheduled",pending_message))
+call(root+"/automation","PUT",{"mode":"human"},cookie=managed_cookie,expected=204)
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT Status,LastError FROM WhatsAppOutbox WHERE Id=?",(pending_outbox,)).fetchone()==("Cancelled","human_handoff")
+    assert db.execute("SELECT Status FROM WhatsAppMessages WHERE Id=?",(pending_message,)).fetchone()==("Cancelled",)
+print("PASS: human takeover cancels pending automated outbox and message atomically")
+call(mp+"/publish/"+published["activationId"],"DELETE",cookie=a,expected=204)
+assert automate("wamid.ci.multi.6","hi")==("human_mode",None,None,None)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
+assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
+print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
+# Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/marketing/lists",expected=401)
+call("/api/marketing/lists",cookie=agent,expected=403)
+consent={"phoneNumberId":"999999999999","phone":"15550000001","granted":True,"evidence":"CI-only synthetic consent receipt"}
+call("/api/marketing/consent","PUT",dict(consent,phoneNumberId="999999999999"),cookie=b,expected=404)
+call("/api/marketing/consent","PUT",dict(consent,evidence=""),cookie=a,expected=400)
+call("/api/marketing/consent","PUT",consent,cookie=a,expected=204)
+lst,_=call("/api/marketing/lists","POST",{"name":"CI list","phones":["15550000001","15550000001"],"version":0},cookie=a)
+assert len(lst["phones"])==1 and call("/api/marketing/lists",cookie=b)[0]==[]
+call("/api/marketing/lists/"+lst["id"],"PUT",{"name":"Foreign","phones":["15550000001"],"version":1},cookie=b,expected=404)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET WabaId='999999999997' WHERE Id='ci-account-a'")
+    db.execute("""INSERT INTO WhatsAppTemplates(Id,TenantId,WhatsAppTenantId,Name,Category,Language,Body,Status,IsActive,CreatedAtUtc,UpdatedAtUtc)
+        VALUES('ci-marketing','ci-tenant-a','ci-account-a','ci_marketing','MARKETING','en','CI offer','LOCAL',1,'2026-01-01','2026-01-01')""")
+from datetime import datetime,timezone,timedelta
+schedule={"id":str(uuid.uuid4()),"name":"CI campaign","listId":lst["id"],"templateId":"ci-marketing","scheduledAt":(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}
+call("/api/marketing/campaigns","POST",schedule,cookie=b,expected=404)
+result,_=call("/api/marketing/campaigns","POST",schedule,cookie=a,expected=202)
+assert result["eligible"]==1
+call("/api/marketing/campaigns","POST",schedule,cookie=a)
+assert call("/api/marketing/campaigns",cookie=a)[0][0]["counts"]=={"Pending":1}
+assert not call("/api/marketing/campaigns",cookie=b)[0]
+call("/api/marketing/campaigns/"+schedule["id"]+"/cancel","POST",{},cookie=b,expected=404)
+# Signed inbound STOP, not a fabricated marketing opt-in.
+stop_body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.stop","from":"15550000001","type":"text","text":{"body":"STOP"}}]}}]}]}
+sig="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(stop_body).encode(),hashlib.sha256).hexdigest()
+call("/webhook","POST",stop_body,extra={"X-Hub-Signature-256":sig})
+for _ in range(30):
+    campaigns,_=call("/api/marketing/campaigns",cookie=a)
+    if campaigns[0]["counts"]=={"Cancelled":1}:break
+    time.sleep(1)
+else:raise AssertionError("Opt-out did not cancel scheduled campaign")
+assert not call("/api/marketing/consents?phoneNumberId=999999999999",cookie=a)[0][0]["granted"]
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT COUNT(*) FROM ConsentEvents WHERE TenantId='ci-tenant-a'").fetchone()[0]==2
+call("/api/marketing/campaigns","POST",dict(schedule,id=str(uuid.uuid4())),cookie=a,expected=409)
+print("PASS: campaign scheduling, deduplication, tenant isolation and signed opt-out cancellation")
+call("/api/reports",expected=401)
+call("/api/reports",cookie=agent,expected=403)
+ra,_=call("/api/reports?days=7",cookie=a)
+rb,_=call("/api/reports?days=7",cookie=b)
+assert len(ra["daily"])==7 and sum(d["inbound"] for d in ra["daily"])>0
+assert sum(d["outbound"] for d in rb["daily"])==0 and rb["consent"]==[]
+assert any(x["granted"]==False and x["count"]==1 for x in ra["consent"])
+print("PASS: tenant-scoped date-bounded reports and consent aggregates")
+# Signed status notices apply only to outbound message/account/tenant/recipient matches.
+with sqlite3.connect(DB) as db:
+    receipt_message=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppMessages(Id,TenantId,ConversationId,Wamid,Direction,MessageType,ContentJson,TextPreview,Status,TimestampUtc,CreatedAtUtc)
+        VALUES(?,?,?,'wamid.ci.receipt','Outbound','text','{}','CI receipt','Sent',?,?)""",
+        (receipt_message,"ci-tenant-a",conversation_id,datetime.now(timezone.utc).isoformat(),datetime.now(timezone.utc).isoformat()))
+def receipt(status,phone_id="999999999999",recipient="15550000001"):
+    body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":phone_id},"statuses":[{"id":"wamid.ci.receipt","recipient_id":recipient,"status":status,"timestamp":str(int(time.time()))}]}}]}]}
+    signed="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(body).encode(),hashlib.sha256).hexdigest()
+    call("/webhook","POST",body,extra={"X-Hub-Signature-256":signed})
+def wait_receipt(expected):
+    for _ in range(20):
+        with sqlite3.connect(DB) as db:
+            if db.execute("SELECT Status FROM WhatsAppMessages WHERE Id=?",(receipt_message,)).fetchone()[0]==expected:return
+        time.sleep(.5)
+    raise AssertionError("Missing delivery receipt status "+expected)
+receipt("delivered")
+wait_receipt("Delivered")
+receipt("read")
+wait_receipt("Read")
+receipt("failed")
+for _ in range(20):
+    with sqlite3.connect(DB) as db:
+        if db.execute("SELECT COUNT(*) FROM WhatsAppStatusInbox WHERE Wamid='wamid.ci.receipt' AND Status='failed' AND Processed=1").fetchone()[0]:break
+    time.sleep(.5)
+else:raise AssertionError("Late failed receipt not processed")
+wait_receipt("Read")
+receipt("delivered",recipient="15559999999")
+assert any(x["status"]=="Read" for x in call("/api/reports?days=7",cookie=a)[0]["delivery"])
+print("PASS: signed delivered/read receipts, late failure cannot downgrade read")
 call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
 print("PASS: published snapshot, exclusive bot priority, duplicate webhook, stop and durable legacy fallback")
+# Enforce a lower plan after previous regression tests, preserving their fixture.
+subscription_path="/api/platform-admin/tenants/ci-tenant-a/subscription"
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":True,"endsAt":expires,"version":0},cookie=owner)
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":True,"endsAt":expires,"version":0},cookie=owner,expected=409)
+sub,_=call("/api/subscription",cookie=a)
+assert sub["managed"] and sub["active"] and sub["usage"]["messages"]>=1 and sub["plan"]["monthlyMessages"]==1
+call("/api/team","POST",{"username":"ci-limit","displayName":"Quota","password":PASSWORD},cookie=a,expected=409)
+call("/api/bots","POST",{"name":"Quota","flow":flow,"version":0},cookie=a,expected=409)
+call("/api/knowledge","POST",article,cookie=a,expected=409)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='invalid-ci-ciphertext' WHERE Id='ci-account-a'")
+call("/api/messages/send-template","POST",send_template,cookie=a,expected=409)
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":False,"endsAt":expires,"version":1},cookie=owner)
+assert not call("/api/subscription",cookie=a)[0]["active"]
+call("/api/messages/send-template","POST",send_template,cookie=a,expected=409)
+call("/api/knowledge/preview","POST",{"question":"CI test"},cookie=a,expected=409)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
+# Restore a larger plan for subsequent account lifecycle tests.
+larger,_=call("/api/platform-admin/plans","POST",{"name":"CI larger","monthlyMessages":1000,"agents":5,"accounts":5,"bots":20,"articles":50,"campaigns":True,"ownModel":True,"monthlyPriceMinor":0,"currency":"USD"},cookie=owner,expected=201)
+call(subscription_path,"PUT",{"planId":larger["id"],"enabled":True,"endsAt":expires,"version":2},cookie=owner)
+print("PASS: plan quotas, stale subscription revision and disabled sending")
 call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=a,expected=204)
 call("/api/auth/me",cookie=managed_cookie,expected=401)
 call("/api/auth/login","POST",{"username":"ci-managed","password":PASSWORD},expected=401)
@@ -275,6 +470,32 @@ with sqlite3.connect(DB) as db:
     assert row[0]!="different-ci-password" and row[1]=="ci-tenant-a"
     db.execute("UPDATE Tenants SET IsActive=0 WHERE Id='ci-tenant-b'")
 call("/api/auth/me",cookie=b,expected=401)
+new_cookie=login("ci-new-admin")
+assert call("/api/auth/me",cookie=new_cookie)[0]["tenantId"]==new_tenant["id"]
+assert call("/api/subscription",cookie=new_cookie)[0]["plan"]["id"]==plan["id"]
+# Synthetic invalid token prevents network access while exercising one reserved slot.
+with sqlite3.connect(DB) as db:
+    db.execute("""INSERT INTO WhatsAppTenants(Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc,WabaId,AppId,BusinessTokenEncrypted,CreatedAt)
+       VALUES('ci-new-account',?,'999999999996',1,'2026-01-01','999999999995','','invalid-ci-ciphertext','2026-01-01')""",(new_tenant["id"],))
+new_send={"to":"15550000009","phoneNumberId":"999999999996","template":{"name":"ci_example","language":{"code":"ar"}}}
+first,_=call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=202,extra={"Idempotency-Key":"ci-quota-first"})
+repeat,_=call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=202,extra={"Idempotency-Key":"ci-quota-first"})
+assert first["id"]==repeat["id"]
+assert call("/api/subscription",cookie=new_cookie)[0]["usage"]["messages"]==1
+call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=409,extra={"Idempotency-Key":"ci-quota-second"})
+with sqlite3.connect(DB) as db:
+    # A second synthetic future row represents a reservation made before a plan reduction.
+    scheduled_id=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppOutbox(Id,TenantId,CorrelationId,IdempotencyKey,PhoneNumberId,RecipientPhone,MessageType,PayloadJson,Status,Attempts,MaxAttempts,CreatedAtUtc,NextAttemptAtUtc,ScheduledForUtc,UpdatedAtUtc)
+       VALUES(?,?,?,'ci-future-reservation','999999999996','15550000009','template','{}','Pending',0,10,'2026-01-01','2099-01-01','2099-01-01','2026-01-01')""",(scheduled_id,new_tenant["id"],scheduled_id))
+print("PASS: one outgoing reservation, same-key replay free, distinct second send blocked")
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=owner,expected=204)
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT Status,LastError FROM WhatsAppOutbox WHERE Id=?",(scheduled_id,)).fetchone()==("Cancelled","tenant_suspended")
+call("/api/auth/me",cookie=new_cookie,expected=401)
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":True},cookie=owner,expected=204)
+call("/api/auth/me",cookie=new_cookie,expected=401)
+print("PASS: provisioned administrator scope and tenant suspension revokes sessions")
 with open_live(a) as stream:
     assert next_event(stream)[0]=="inbox"
     call("/api/auth/logout","POST",cookie=a,expected=204)

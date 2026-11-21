@@ -1,4 +1,6 @@
 using ChatPlatform.Security;
+using ChatPlatform.Infrastructure.Bots;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Authorization;
 using ChatPlatform.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -23,12 +25,14 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> List(
         [FromQuery] string? tenantId,
         [FromQuery] string? search, [FromQuery] string? status, [FromQuery] string? assigned,
-        [FromQuery] int page = 1, [FromQuery] int limit = 50, CancellationToken ct = default)
+        [FromQuery] string? automation, [FromQuery] int page = 1, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
         var identityTenant = User.TenantId();
         if (!string.IsNullOrEmpty(tenantId) && tenantId != identityTenant) return Forbid();
         var q = _db.WhatsAppConversations.AsNoTracking().Where(c => c.TenantId == identityTenant);
 
+        if(automation=="human")q=q.Where(c=>_db.ConversationAutomation.Any(s=>s.TenantId==identityTenant && s.ConversationId==c.Id && s.Mode=="human"));
+        else if(!string.IsNullOrEmpty(automation))return BadRequest(new {error="invalid_automation_filter"});
         if (!string.IsNullOrWhiteSpace(status))
         {
             if (status is not ("open" or "closed")) return BadRequest(new { error = "invalid_status" });
@@ -60,6 +64,8 @@ public class ConversationsController : ControllerBase
                 unreadCount = c.UnreadCount,
                 assignedToUserId = c.AssignedToUserId,
                 tags = c.Tags,
+                automationMode = _db.ConversationAutomation.Where(s=>s.TenantId==identityTenant && s.ConversationId==c.Id).Select(s=>s.Mode).FirstOrDefault() ?? "bot",
+                waitingForInput = _db.ConversationAutomation.Any(s=>s.TenantId==identityTenant && s.ConversationId==c.Id && s.Mode=="bot" && s.NextNode!=null && s.ExpiresAtUtc>DateTime.UtcNow && _db.BotReleases.Any(r=>r.TenantId==identityTenant && r.ActivationId==s.ActivationId)),
                 lastInboundAtUtc = c.LastInboundAtUtc,
                 windowExpiresAtUtc = c.WindowExpiresAtUtc,
                 isWindowOpen = c.WindowExpiresAtUtc.HasValue
@@ -80,6 +86,26 @@ public class ConversationsController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(list);
+    }
+
+    public record AutomationRequest(string? Mode);
+
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
+    [HttpPut("{id:guid}/automation")]
+    public async Task<IActionResult> SetAutomation(Guid id,AutomationRequest req,CancellationToken ct)
+    {
+        if(req.Mode is not ("human" or "bot"))return BadRequest();
+        var tenant=User.TenantId();
+        await using var tx=await _db.Database.BeginTransactionAsync(ct);
+        var conversation=await _db.WhatsAppConversations.SingleOrDefaultAsync(c=>c.TenantId==tenant&&c.Id==id,ct);
+        if(conversation==null)return NotFound();
+        var s=await _db.ConversationAutomation.SingleOrDefaultAsync(x=>x.TenantId==tenant&&x.ConversationId==id,ct);
+        if(s==null){s=new ConversationAutomationEntity{TenantId=tenant,ConversationId=id};_db.ConversationAutomation.Add(s);}
+        s.Mode=req.Mode;s.NextNode=null;s.ActivationId=null;s.ExpiresAtUtc=null;
+        s.LastInputAtUtc=conversation.LastInboundAtUtc;s.UpdatedAtUtc=DateTime.UtcNow;s.UpdatedBy=User.Identity!.Name??"unknown";
+        if(req.Mode=="human")await HumanHandoff.CancelPendingAsync(_db,conversation,s.UpdatedAtUtc,ct);
+        await _db.SaveChangesAsync(ct);await tx.CommitAsync(ct);
+        return NoContent();
     }
 
     public record StatusRequest(string? Status);

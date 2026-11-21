@@ -132,6 +132,9 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // ============================================================
 builder.Services.AddControllers();
 builder.Services.AddPlatformSecurity();
+builder.Services.AddScoped<ChatPlatform.Infrastructure.AI.OwnModelClient>();
+builder.Services.AddHttpClient("own-model",c=>c.Timeout=TimeSpan.FromSeconds(30))
+    .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler {AllowAutoRedirect=false, UseCookies=false});
 builder.Services.AddHttpClient("ResilientClient")
 .AddPolicyHandler(
 HttpPolicyExtensions.HandleTransientHttpError()

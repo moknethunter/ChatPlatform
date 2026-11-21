@@ -38,3 +38,20 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 
 - [x] Published immutable bot snapshots, tenant-exclusive durable automation, legacy fallback and execution history (candidate; CI pending).
 - [ ] Stateful bot conversations, handoff nodes, scheduled actions, platform quotas and external delivery ambiguity review.
+
+## Phase 5: Owner's AI and professional design
+- [x] Local tenant knowledge CRUD/search and disabled-by-default owner-model preview contract (candidate).
+- [ ] Professional unified Arabic RTL UI, accessibility/mobile browser tests.
+- [ ] Multi-turn flow state, human handoff, model integration tests, explicit AI reply opt-in, knowledge retrieval quality.
+- [ ] Dependency security remediation, backup/restore, production configuration before release.
+
+- [x] Unified design foundation, authenticated dashboard and knowledge-management UI (candidate; browser validation pending).
+
+- [x] Multi-turn wait nodes, persistent cursor, human handoff and resume controls (candidate, CI pending).
+
+- [x] Account-specific consent evidence and revocation, lists, bounded scheduled campaigns, dispatch-time template approval/consent guards and queue status reporting (candidate, CI pending).
+
+- [x] Marketing workspace and tenant-scoped date-bounded reports (candidate; CI pending).
+
+- [x] SuperAdmin control plane, immutable plans, manual subscriptions and transactional quotas (candidate, CI pending).
+- [ ] Payment collection/invoicing (only when requested), comprehensive quota coverage review, operator MFA and real-browser verification.

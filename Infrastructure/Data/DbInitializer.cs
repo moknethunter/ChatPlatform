@@ -234,6 +234,8 @@ public static class DbInitializer
                     ProcessedAtUtc TEXT NULL
                 );
 
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Pending ON WhatsAppStatusInbox(Processed, ReceivedAtUtc);
+
                 CREATE TABLE IF NOT EXISTS WhatsAppConversations (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,
@@ -309,6 +311,63 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TABLE IF NOT EXISTS MarketingConsents (
+                    TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Phone TEXT NOT NULL,
+                    Granted INTEGER NOT NULL, Evidence TEXT NOT NULL, UpdatedBy TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY(TenantId,PhoneNumberId,Phone)
+                );
+                CREATE TABLE IF NOT EXISTS ConsentEvents (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Phone TEXT NOT NULL,
+                    Granted INTEGER NOT NULL, Evidence TEXT NOT NULL, UpdatedBy TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_ConsentEvents_Tenant_Phone ON ConsentEvents(TenantId,PhoneNumberId,Phone);
+                CREATE TABLE IF NOT EXISTS CustomerLists (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, Name TEXT NOT NULL, PhonesJson TEXT NOT NULL, Version INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_CustomerLists_TenantId ON CustomerLists(TenantId);
+                CREATE TABLE IF NOT EXISTS MarketingCampaigns (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, Name TEXT NOT NULL, ListId TEXT NOT NULL,
+                    TemplateId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Status TEXT NOT NULL,
+                    ScheduledAtUtc TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, CreatedBy TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_MarketingCampaigns_TenantId ON MarketingCampaigns(TenantId);
+                CREATE TABLE IF NOT EXISTS CampaignRecipients (
+                    TenantId TEXT NOT NULL, CampaignId TEXT NOT NULL, Phone TEXT NOT NULL, OutboxId TEXT NOT NULL,
+                    PRIMARY KEY(TenantId,CampaignId,Phone)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_CampaignRecipients_OutboxId ON CampaignRecipients(OutboxId);
+                CREATE TABLE IF NOT EXISTS KnowledgeArticles (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Title TEXT NOT NULL,
+                    Body TEXT NOT NULL,
+                    IsPublished INTEGER NOT NULL,
+                    Version INTEGER NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_KnowledgeArticles_TenantId ON KnowledgeArticles(TenantId);
+                CREATE TABLE IF NOT EXISTS ConversationAutomation (
+                    ConversationId TEXT NOT NULL,
+                    TenantId TEXT NOT NULL,
+                    Mode TEXT NOT NULL,
+                    ActivationId TEXT NULL,
+                    NextNode TEXT NULL,
+                    LastInputAtUtc TEXT NULL,
+                    ExpiresAtUtc TEXT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    UpdatedBy TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, ConversationId)
+                );
+                CREATE TRIGGER IF NOT EXISTS Rev_ConversationAutomation_Insert AFTER INSERT ON ConversationAutomation
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_ConversationAutomation_Update AFTER UPDATE ON ConversationAutomation
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
                 CREATE TABLE IF NOT EXISTS BotReleases (
                     TenantId TEXT NOT NULL PRIMARY KEY,
                     DraftId TEXT NOT NULL,
@@ -439,6 +498,29 @@ public static class DbInitializer
                 );
                 CREATE INDEX IF NOT EXISTS IX_ManagedAgents_TenantId ON ManagedAgents(TenantId);
 
+                CREATE TABLE IF NOT EXISTS ManagedTenantAdmins (
+                    Username TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, PasswordHash TEXT NOT NULL,
+                    IsActive INTEGER NOT NULL, CreatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY(TenantId) REFERENCES Tenants(Id)
+                );
+                CREATE INDEX IF NOT EXISTS IX_ManagedTenantAdmins_TenantId ON ManagedTenantAdmins(TenantId);
+                CREATE TABLE IF NOT EXISTS ServicePlans (
+                    Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, MonthlyMessages INTEGER NOT NULL,
+                    Agents INTEGER NOT NULL, Accounts INTEGER NOT NULL, Bots INTEGER NOT NULL, Articles INTEGER NOT NULL,
+                    Campaigns INTEGER NOT NULL, OwnModel INTEGER NOT NULL, MonthlyPriceMinor INTEGER NOT NULL,
+                    Currency TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS TenantSubscriptions (
+                    TenantId TEXT NOT NULL PRIMARY KEY, PlanId TEXT NOT NULL, Enabled INTEGER NOT NULL,
+                    EndsAtUtc TEXT NOT NULL, Version INTEGER NOT NULL, UpdatedAtUtc TEXT NOT NULL,
+                    FOREIGN KEY(TenantId) REFERENCES Tenants(Id), FOREIGN KEY(PlanId) REFERENCES ServicePlans(Id)
+                );
+                CREATE TABLE IF NOT EXISTS PlatformAdminAudit (
+                    Id TEXT NOT NULL PRIMARY KEY, Actor TEXT NOT NULL, Action TEXT NOT NULL,
+                    Target TEXT NOT NULL, Detail TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_PlatformAdminAudit_CreatedAtUtc ON PlatformAdminAudit(CreatedAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Tenant_Quota ON WhatsAppOutbox(TenantId, CreatedAtUtc, ScheduledForUtc);
                 CREATE TABLE IF NOT EXISTS PlatformSessions (
                     Id TEXT NOT NULL PRIMARY KEY,
                     Username TEXT NOT NULL,

@@ -339,10 +339,36 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
-                for (const key of ["search","status","assigned"]) if (opts[key]) q.set(key, opts[key]);
+                for (const key of ["search","status","assigned","automation"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            subscription() { return request("/api/subscription"); },
+            platformPlans() { return request("/api/platform-admin/plans"); },
+            platformCreatePlan(data) { return request("/api/platform-admin/plans",{method:"POST",body:data,retries:0}); },
+            platformTenants(page=1) { return request("/api/platform-admin/tenants?page="+encodeURIComponent(page)); },
+            platformCreateTenant(data) { return request("/api/platform-admin/tenants",{method:"POST",body:data,retries:0}); },
+            platformAssign(id,data) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/subscription",{method:"PUT",body:data,retries:0}); },
+            platformActive(id,isActive) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/active",{method:"PUT",body:{isActive},retries:0}); },
+            platformReset(id,username,password) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/admins/"+encodeURIComponent(username)+"/password",{method:"PUT",body:{password},retries:0}); },
+            platformAudit() { return request("/api/platform-admin/audit"); },
+            reports(days=7) { return request("/api/reports?days="+encodeURIComponent(days)); },
+            marketingOptions() { return request("/api/marketing/options"); },
+            marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
+            marketingConsent(data) { return request("/api/marketing/consent",{method:"PUT",body:data}); },
+            marketingLists() { return request("/api/marketing/lists"); },
+            marketingSaveList(id,data) { return request("/api/marketing/lists"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
+            marketingCampaigns() { return request("/api/marketing/campaigns"); },
+            marketingSchedule(data) { return request("/api/marketing/campaigns",{method:"POST",body:data,retries:0}); },
+            marketingCancel(id) { return request("/api/marketing/campaigns/"+encodeURIComponent(id)+"/cancel",{method:"POST",body:{}}); },
+            dashboard() { return request('/api/dashboard'); },
+            knowledgeList() { return request("/api/knowledge"); },
+            knowledgeGet(id) { return request("/api/knowledge/"+encodeURIComponent(id)); },
+            knowledgeSave(id,data) { return request("/api/knowledge"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
+            knowledgeDelete(id,version) { return request("/api/knowledge/"+encodeURIComponent(id)+"?version="+encodeURIComponent(version),{method:"DELETE"}); },
+            knowledgeSearch(question) { return request("/api/knowledge/search",{method:"POST",body:{question}}); },
+            modelStatus() { return request("/api/knowledge/model"); },
+            modelPreview(question) { return request("/api/knowledge/preview",{method:"POST",body:{question},timeout:35000,retries:0}); },
             activeBot() { return request("/api/bots/active"); },
             publishBot(id,version) { return request("/api/bots/"+encodeURIComponent(id)+"/publish",{method:"POST",body:{version}}); },
             stopBot(id,activationId) { return request("/api/bots/"+encodeURIComponent(id)+"/publish/"+encodeURIComponent(activationId),{method:"DELETE"}); },
@@ -350,6 +376,7 @@
             listBots() { return request("/api/bots"); },
             getBot(id) { return request("/api/bots/" + encodeURIComponent(id)); },
             saveBot(id,data) { return request("/api/bots" + (id ? "/" + encodeURIComponent(id) : ""), {method:id?"PUT":"POST",body:data}); },
+            simulateBotTurns(flow,inputs) { return request("/api/bots/simulate",{method:"POST",body:{flow,inputs}}); },
             simulateBot(flow,input) { return request("/api/bots/simulate",{method:"POST",body:{flow,input}}); },
             getContacts(opts = {}) {
                 const q = new URLSearchParams();
@@ -360,7 +387,7 @@
             createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
             updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
             updateConversation(id, action, body = {}) {
-                if (!["status","read","assign","tags"].includes(action)) throw new ApiError("Invalid action");
+                if (!["status","read","assign","tags","automation"].includes(action)) throw new ApiError("Invalid action");
                 return request(API.conversations + "/" + encodeURIComponent(id) + "/" + action, { method: "PUT", body });
             },
             uploadMedia(conversationId, file) {
@@ -606,22 +633,28 @@
         document.addEventListener("DOMContentLoaded", async () => {
             try {
                 const identity = await defaultClient.getIdentity();
-                const bar = document.createElement("div");
+                if (location.pathname === "/login.html") return;
+                if(identity.role==="SuperAdmin"&&location.pathname!=="/platform-admin.html"){location.replace("/platform-admin.html");return;}
+                const bar = document.createElement("header");
+                bar.className = "cp-shell";
                 bar.setAttribute("dir", "rtl");
-                bar.style.cssText = "padding:10px 16px;background:#f0f7f4;color:#173b32;display:flex;align-items:center;gap:12px;flex-wrap:wrap";
-                const label = document.createElement("span");
-                label.textContent = identity.username + " | " + identity.tenantId + " | " + (identity.role === "Admin" ? "مدير" : "موظف");
-                const logout = document.createElement("button");
-                logout.textContent = "تسجيل الخروج";
-                logout.addEventListener("click", async () => {
-                    try { await defaultClient.logout(); location.assign("/login.html"); }
-                    catch { label.textContent = "تعذر تسجيل الخروج؛ حاول مجددًا."; }
-                });
-                bar.append(label);
-                if (identity.role === "Admin") {
-                    const link = document.createElement("a"); link.href = "/team.html"; link.textContent = "إدارة الفريق"; bar.append(link);
-                }
-                bar.append(logout); document.body.prepend(bar);
+                const brand = document.createElement("a"); brand.className="cp-brand"; brand.href=identity.role==="SuperAdmin"?"/platform-admin.html":"/index.html";
+                brand.textContent="ChatPlatform";
+                const identityText=document.createElement("span");identityText.className="cp-identity";
+                identityText.textContent=identity.username+" · "+(identity.role==="SuperAdmin"?"مدير المنصة":identity.role==="Admin"?"مدير المؤسسة":"موظف");
+                identityText.title=identity.tenantId;
+                const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
+                const menu=identity.role==="SuperAdmin"?[["/platform-admin.html","إدارة المنصة"]]:[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/subscription.html","الباقة والحصص"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
+                for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
+                    if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
+                    links.append(link);}
+                const logout=document.createElement("button");logout.className="cp-logout";logout.textContent="خروج";
+                logout.addEventListener("click",async()=>{try{await defaultClient.logout();location.assign("/login.html");}catch{identityText.textContent="تعذر تسجيل الخروج";}});
+                bar.append(brand,identityText,logout,links);
+                if(!document.querySelector('link[href="/platform.css"]')){const css=document.createElement("link");css.rel="stylesheet";css.href="/platform.css";document.head.append(css);}
+                document.body.prepend(bar);
+                document.body.classList.add('cp-shell-ready');
             } catch (err) {
                 if (err.status !== 401) console.warn("Unable to verify session");
             }

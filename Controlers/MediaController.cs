@@ -28,6 +28,7 @@ public sealed class MediaController(PlatformDbContext db, WhatsAppMediaService m
         if (conv == null) return NotFound();
         if (file == null || file.Length <= 0 || file.Length > WhatsAppMediaService.MaxBytes) return BadRequest(new { error = "invalid_media_size" });
         var now = DateTime.UtcNow;
+        if(await ChatPlatform.Infrastructure.Subscriptions.Entitlements.CapacityAsync(db,tenant,"messages",1,now,ct) is string denied)return Conflict(new{error=denied});
         if (conv.LastInboundAtUtc is not DateTime inbound || inbound > now || now-inbound >= TimeSpan.FromHours(24))
             return Conflict(new { error = "window_closed_use_template" });
         var account = await db.WhatsAppTenants.AsNoTracking().SingleOrDefaultAsync(a => a.TenantId == tenant && a.PhoneNumberId == conv.PhoneNumberId && a.IsActive, ct);

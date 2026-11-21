@@ -12,12 +12,23 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<WhatsAppTenantEntity> WhatsAppTenants => Set<WhatsAppTenantEntity>();
     public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
     public DbSet<TenantEntity> Tenants => Set<TenantEntity>();
+    public DbSet<ManagedTenantAdminEntity> ManagedTenantAdmins => Set<ManagedTenantAdminEntity>();
+    public DbSet<ServicePlanEntity> ServicePlans => Set<ServicePlanEntity>();
+    public DbSet<TenantSubscriptionEntity> TenantSubscriptions => Set<TenantSubscriptionEntity>();
+    public DbSet<PlatformAdminAuditEntity> PlatformAdminAudit => Set<PlatformAdminAuditEntity>();
     public DbSet<PlatformSessionEntity> PlatformSessions => Set<PlatformSessionEntity>();
     public DbSet<ManagedAgentEntity> ManagedAgents => Set<ManagedAgentEntity>();
     public DbSet<CrmContactEntity> CrmContacts => Set<CrmContactEntity>();
     public DbSet<InboxRevisionEntity> InboxRevisions => Set<InboxRevisionEntity>();
     public DbSet<BotDraftEntity> BotDrafts => Set<BotDraftEntity>();
+    public DbSet<MarketingConsentEntity> MarketingConsents => Set<MarketingConsentEntity>();
+    public DbSet<ConsentEventEntity> ConsentEvents => Set<ConsentEventEntity>();
+    public DbSet<CustomerListEntity> CustomerLists => Set<CustomerListEntity>();
+    public DbSet<MarketingCampaignEntity> MarketingCampaigns => Set<MarketingCampaignEntity>();
+    public DbSet<CampaignRecipientEntity> CampaignRecipients => Set<CampaignRecipientEntity>();
+    public DbSet<KnowledgeArticleEntity> KnowledgeArticles => Set<KnowledgeArticleEntity>();
     public DbSet<BotReleaseEntity> BotReleases => Set<BotReleaseEntity>();
+    public DbSet<ConversationAutomationEntity> ConversationAutomation => Set<ConversationAutomationEntity>();
     public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
     public DbSet<WhatsAppWebhookInboxEntity> WhatsAppWebhookInbox => Set<WhatsAppWebhookInboxEntity>();
     public DbSet<WhatsAppStatusInboxEntity> WhatsAppStatusInbox => Set<WhatsAppStatusInboxEntity>();
@@ -29,6 +40,17 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     protected override void OnModelCreating(ModelBuilder mb)
     {
         base.OnModelCreating(mb);
+        mb.Entity<ManagedTenantAdminEntity>(e=>{e.HasKey(x=>x.Username);e.HasIndex(x=>x.TenantId);e.HasOne<TenantEntity>().WithMany().HasForeignKey(x=>x.TenantId);});
+        mb.Entity<ServicePlanEntity>(e=>e.HasKey(x=>x.Id));
+        mb.Entity<TenantSubscriptionEntity>(e=>{e.HasKey(x=>x.TenantId);e.HasOne<TenantEntity>().WithMany().HasForeignKey(x=>x.TenantId);e.HasOne<ServicePlanEntity>().WithMany().HasForeignKey(x=>x.PlanId);});
+        mb.Entity<PlatformAdminAuditEntity>(e=>{e.ToTable("PlatformAdminAudit");e.HasKey(x=>x.Id);e.HasIndex(x=>x.CreatedAtUtc);});
+        mb.Entity<MarketingConsentEntity>(e=>e.HasKey(x=>new{x.TenantId,x.PhoneNumberId,x.Phone}));
+        mb.Entity<ConsentEventEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>new{x.TenantId,x.PhoneNumberId,x.Phone});});
+        mb.Entity<CustomerListEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>x.TenantId);});
+        mb.Entity<MarketingCampaignEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>x.TenantId);});
+        mb.Entity<CampaignRecipientEntity>(e=>{e.HasKey(x=>new{x.TenantId,x.CampaignId,x.Phone});e.HasIndex(x=>x.OutboxId).IsUnique();});
+        mb.Entity<ConversationAutomationEntity>(e => e.HasKey(x => new { x.TenantId, x.ConversationId }));
+        mb.Entity<KnowledgeArticleEntity>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.TenantId); });
         mb.Entity<InboxRevisionEntity>(e => e.HasKey(x => x.TenantId));
         mb.Entity<BotDraftEntity>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.TenantId); });
         mb.Entity<BotReleaseEntity>(e => e.HasKey(x => x.TenantId));

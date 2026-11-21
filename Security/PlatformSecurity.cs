@@ -25,6 +25,9 @@ public static class PlatformSecurity
 {
     public const string ReadPolicy = "TenantRead";
     public const string AdminPolicy = "TenantAdmin";
+    public const string SuperPolicy = "PlatformOwner";
+    public const string SessionPolicy = "PlatformSession";
+    public const string PlatformScope = "__platform_owner__";
     private const string Scheme = CookieAuthenticationDefaults.AuthenticationScheme;
     private const string Stamp = "security_stamp";
     private const string Session = "platform_session";
@@ -47,6 +50,8 @@ public static class PlatformSecurity
         {
             // Configuration identities remain reserved even if their spelling differs.
             if (IsReservedUsername(cfg, username)) return null;
+            var admin = await db.ManagedTenantAdmins.AsNoTracking().SingleOrDefaultAsync(x=>x.Username==username&&x.IsActive,ct);
+            if(admin!=null)return new PlatformAccount{Username=admin.Username,TenantId=admin.TenantId,Role="Admin",PasswordHash=admin.PasswordHash};
             var agent = await db.ManagedAgents.AsNoTracking().SingleOrDefaultAsync(x => x.Username == username && x.IsActive, ct);
             if (agent == null) return null;
             return new PlatformAccount { Username = agent.Username, TenantId = agent.TenantId,
@@ -54,7 +59,9 @@ public static class PlatformSecurity
         }
         if (matches.Length != 1) return null;
         var a = matches[0];
-        return !string.IsNullOrWhiteSpace(a.TenantId) && !string.IsNullOrWhiteSpace(a.PasswordHash)
+        if(string.IsNullOrWhiteSpace(a.PasswordHash))return null;
+        if(a.Role=="SuperAdmin")return a.TenantId==PlatformScope?a:null;
+        return !string.IsNullOrWhiteSpace(a.TenantId) && a.TenantId!=PlatformScope
             && a.Role is "Admin" or "Agent" ? a : null;
     }
 
@@ -73,7 +80,7 @@ public static class PlatformSecurity
             principal?.FindFirstValue("tenant_id") == account.TenantId &&
             principal?.FindFirstValue(ClaimTypes.Role) == account.Role &&
             principal?.FindFirstValue(Stamp) == Fingerprint(account) &&
-            await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, ct) &&
+            (account.Role=="SuperAdmin" || await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, ct)) &&
             await db.PlatformSessions.AnyAsync(s => s.Id == sessionId && s.Username == account.Username
                 && s.TenantId == account.TenantId && s.ExpiresAtUtc > now, ct);
     }
@@ -108,6 +115,8 @@ public static class PlatformSecurity
             options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => false).Build();
             options.AddPolicy(ReadPolicy, p => p.RequireAuthenticatedUser().RequireClaim("tenant_id").RequireRole("Admin", "Agent"));
             options.AddPolicy(AdminPolicy, p => p.RequireAuthenticatedUser().RequireClaim("tenant_id").RequireRole("Admin"));
+            options.AddPolicy(SuperPolicy,p=>p.RequireAuthenticatedUser().RequireRole("SuperAdmin").RequireClaim("tenant_id",PlatformScope));
+            options.AddPolicy(SessionPolicy,p=>p.RequireAuthenticatedUser().RequireRole("SuperAdmin","Admin","Agent"));
         });
         services.AddRateLimiter(options =>
         {
@@ -118,6 +127,8 @@ public static class PlatformSecurity
             options.AddPolicy("media", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new FixedWindowRateLimiterOptions {
                     PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            options.AddPolicy("own-model", context => RateLimitPartition.GetConcurrencyLimiter(
+                context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 1, QueueLimit = 0 }));
             options.AddPolicy("inbox-live", context => RateLimitPartition.GetConcurrencyLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 2, QueueLimit = 0 }));
             options.AddFixedWindowLimiter("oauth-policy", o => { o.PermitLimit = 10; o.Window = TimeSpan.FromMinutes(1); o.QueueLimit = 0; });
@@ -161,7 +172,7 @@ public static class PlatformSecurity
             try { result = Hasher.VerifyHashedPassword(a ?? Dummy, a?.PasswordHash ?? DummyHash, req.Password); }
             catch (FormatException) { result = PasswordVerificationResult.Failed; }
             if (a == null || result == PasswordVerificationResult.Failed
-                || !await db.Tenants.AnyAsync(t => t.Id == a.TenantId && t.IsActive, ct))
+                || (a.Role!="SuperAdmin" && !await db.Tenants.AnyAsync(t => t.Id == a.TenantId && t.IsActive, ct)))
             {
                 logger.LogWarning("Rejected login attempt.");
                 return Results.Unauthorized();
@@ -192,7 +203,7 @@ public static class PlatformSecurity
         app.MapGet("/api/auth/me", (ClaimsPrincipal user) => Results.Ok(new
         {
             username = user.Identity!.Name, tenantId = user.TenantId(), role = user.FindFirstValue(ClaimTypes.Role)
-        })).RequireAuthorization(ReadPolicy);
+        })).RequireAuthorization(SessionPolicy);
 
         app.MapPost("/api/auth/logout", async (HttpContext ctx, PlatformDbContext db, CancellationToken ct) =>
         {
@@ -200,6 +211,6 @@ public static class PlatformSecurity
             await db.PlatformSessions.Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
             await ctx.SignOutAsync(Scheme);
             return Results.NoContent();
-        }).RequireAuthorization(ReadPolicy);
+        }).RequireAuthorization(SessionPolicy);
     }
 }
