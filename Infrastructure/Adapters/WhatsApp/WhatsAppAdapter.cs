@@ -286,6 +286,7 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
 
+        await using var transaction=await db.Database.BeginTransactionAsync(ct);
         // ═══ 1) حل المستأجر من WhatsAppTenants ═══
         var account = await db.WhatsAppTenants.AsNoTracking()
             .FirstOrDefaultAsync(a => a.PhoneNumberId == phoneId && a.IsActive, ct);
@@ -304,6 +305,7 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
                                    && c.ContactPhone == to, ct);
 
         var now = DateTime.UtcNow;
+        if(await ChatPlatform.Infrastructure.Subscriptions.Entitlements.CapacityAsync(db,account.TenantId,"messages",1,now,ct) is string denied){await PublishFailedAsync(to,denied,ct);return;}
         var windowOpen = conv?.LastInboundAtUtc.HasValue == true
                       && (now - conv.LastInboundAtUtc.Value) < TimeSpan.FromHours(24);
 
@@ -355,7 +357,6 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
             Wamid = null
         };
         db.WhatsAppMessages.Add(message);
-        await db.SaveChangesAsync(ct);
 
         // ═══ 6) إنشاء OutboxEntity مرتبطة بالرسالة ═══
         db.WhatsAppOutbox.Add(new WhatsAppOutboxEntity
@@ -378,6 +379,7 @@ public sealed class WhatsAppAdapter : IIntegrationAdapter
         try
         {
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             _log.LogInformation(
                 "whatsapp.send {EvtId} → Message {Mid} + Outbox (to={To})",
                 evt.Id, message.Id, to);

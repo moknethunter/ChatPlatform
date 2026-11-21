@@ -3,7 +3,7 @@ import base64, hashlib, hmac, json, os, shlex, sqlite3, struct, sys, time
 import urllib.request, urllib.error
 PASSWORD = "ci-only-password-not-for-production"
 USERS = [("ci-legacy", "tenant-alhawbani-001", "Admin"), ("ci-a", "ci-tenant-a", "Admin"),
-         ("ci-b", "ci-tenant-b", "Admin"), ("ci-agent", "ci-tenant-a", "Agent")]
+         ("ci-b", "ci-tenant-b", "Admin"), ("ci-agent", "ci-tenant-a", "Agent"), ("ci-owner","__platform_owner__","SuperAdmin")]
 if "--environment" in sys.argv:
     for i, (name, tenant, role) in enumerate(USERS):
         salt = os.urandom(16)
@@ -49,13 +49,30 @@ call("/api/media/00000000-0000-0000-0000-000000000001",expected=401)
 call("/api/whatsapp/accounts",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":PASSWORD},expected=403,csrf=False)
-legacy, a, b, agent = (login(name) for name,_,_ in USERS)
+legacy, a, b, agent, owner = (login(name) for name,_,_ in USERS)
 accounts,_=call("/api/whatsapp/accounts",cookie=legacy)
 assert accounts[0]["phoneNumberId"]=="999999999998" and accounts[0]["hasToken"]
 with sqlite3.connect(DB) as db:
     row=db.execute("SELECT BusinessTokenEncrypted,TenantId,AppId FROM WhatsAppTenants WHERE Id='ci-legacy-account'").fetchone()
     assert row[0] and row[0]!="ci-only-bootstrap-token" and row[1:]==("tenant-alhawbani-001","")
 assert call("/api/auth/me",cookie=a)[0]["tenantId"]=="ci-tenant-a"
+assert call("/api/auth/me",cookie=owner)[0]["role"]=="SuperAdmin"
+call("/api/platform-admin/plans",expected=401)
+call("/api/platform-admin/plans",cookie=a,expected=403)
+call("/api/platform-admin/plans",cookie=agent,expected=403)
+for path in ["/api/conversations","/api/dashboard","/api/team","/api/subscription","/api/knowledge","/api/reports","/api/whatsapp/accounts","/api/live/inbox"]:
+    call(path,cookie=owner,expected=403)
+plan,_=call("/api/platform-admin/plans","POST",{"name":"CI limited","monthlyMessages":1,"agents":0,"accounts":1,"bots":0,"articles":0,"campaigns":False,"ownModel":False,"monthlyPriceMinor":0,"currency":"USD"},cookie=owner,expected=201)
+assert call("/api/subscription",cookie=a)[0]["managed"] is False
+call("/api/platform-admin/tenants","POST",{"name":"CI new","username":"ci-new-admin","password":PASSWORD,"planId":plan["id"],"endsAt":"2099-01-01T00:00:00Z"},cookie=owner,expected=400)
+from datetime import datetime,timezone,timedelta
+expires=(datetime.now(timezone.utc)+timedelta(days=30)).isoformat()
+new_tenant,_=call("/api/platform-admin/tenants","POST",{"name":"CI new","username":"ci-new-admin","password":PASSWORD,"planId":plan["id"],"endsAt":expires},cookie=owner,expected=201)
+assert "passwordHash" not in new_tenant and "password" not in new_tenant
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=a,expected=403)
+assert any(t["id"]==new_tenant["id"] for t in call("/api/platform-admin/tenants",cookie=owner)[0])
+assert any(x["action"]=="tenant_created" for x in call("/api/platform-admin/audit",cookie=owner)[0])
+print("PASS: isolated platform owner, immutable plan and tenant provisioning")
 call("/api/dashboard",expected=401)
 assert call("/api/dashboard",cookie=a)[0]["metrics"]["contacts"]==0
 assert call("/api/dashboard",cookie=b)[0]["metrics"]["openConversations"]==0
@@ -417,6 +434,28 @@ call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
 print("PASS: published snapshot, exclusive bot priority, duplicate webhook, stop and durable legacy fallback")
+# Enforce a lower plan after previous regression tests, preserving their fixture.
+subscription_path="/api/platform-admin/tenants/ci-tenant-a/subscription"
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":True,"endsAt":expires,"version":0},cookie=owner)
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":True,"endsAt":expires,"version":0},cookie=owner,expected=409)
+sub,_=call("/api/subscription",cookie=a)
+assert sub["managed"] and sub["active"] and sub["usage"]["messages"]>=1 and sub["plan"]["monthlyMessages"]==1
+call("/api/team","POST",{"username":"ci-limit","displayName":"Quota","password":PASSWORD},cookie=a,expected=409)
+call("/api/bots","POST",{"name":"Quota","flow":flow,"version":0},cookie=a,expected=409)
+call("/api/knowledge","POST",article,cookie=a,expected=409)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='invalid-ci-ciphertext' WHERE Id='ci-account-a'")
+call("/api/messages/send-template","POST",send_template,cookie=a,expected=409)
+call(subscription_path,"PUT",{"planId":plan["id"],"enabled":False,"endsAt":expires,"version":1},cookie=owner)
+assert not call("/api/subscription",cookie=a)[0]["active"]
+call("/api/messages/send-template","POST",send_template,cookie=a,expected=409)
+call("/api/knowledge/preview","POST",{"question":"CI test"},cookie=a,expected=409)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
+# Restore a larger plan for subsequent account lifecycle tests.
+larger,_=call("/api/platform-admin/plans","POST",{"name":"CI larger","monthlyMessages":1000,"agents":5,"accounts":5,"bots":20,"articles":50,"campaigns":True,"ownModel":True,"monthlyPriceMinor":0,"currency":"USD"},cookie=owner,expected=201)
+call(subscription_path,"PUT",{"planId":larger["id"],"enabled":True,"endsAt":expires,"version":2},cookie=owner)
+print("PASS: plan quotas, stale subscription revision and disabled sending")
 call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=a,expected=204)
 call("/api/auth/me",cookie=managed_cookie,expected=401)
 call("/api/auth/login","POST",{"username":"ci-managed","password":PASSWORD},expected=401)
@@ -431,6 +470,14 @@ with sqlite3.connect(DB) as db:
     assert row[0]!="different-ci-password" and row[1]=="ci-tenant-a"
     db.execute("UPDATE Tenants SET IsActive=0 WHERE Id='ci-tenant-b'")
 call("/api/auth/me",cookie=b,expected=401)
+new_cookie=login("ci-new-admin")
+assert call("/api/auth/me",cookie=new_cookie)[0]["tenantId"]==new_tenant["id"]
+assert call("/api/subscription",cookie=new_cookie)[0]["plan"]["id"]==plan["id"]
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=owner,expected=204)
+call("/api/auth/me",cookie=new_cookie,expected=401)
+call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":True},cookie=owner,expected=204)
+call("/api/auth/me",cookie=new_cookie,expected=401)
+print("PASS: provisioned administrator scope and tenant suspension revokes sessions")
 with open_live(a) as stream:
     assert next_event(stream)[0]=="inbox"
     call("/api/auth/logout","POST",cookie=a,expected=204)

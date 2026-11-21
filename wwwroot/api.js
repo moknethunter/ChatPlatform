@@ -343,6 +343,15 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            subscription() { return request("/api/subscription"); },
+            platformPlans() { return request("/api/platform-admin/plans"); },
+            platformCreatePlan(data) { return request("/api/platform-admin/plans",{method:"POST",body:data,retries:0}); },
+            platformTenants(page=1) { return request("/api/platform-admin/tenants?page="+encodeURIComponent(page)); },
+            platformCreateTenant(data) { return request("/api/platform-admin/tenants",{method:"POST",body:data,retries:0}); },
+            platformAssign(id,data) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/subscription",{method:"PUT",body:data,retries:0}); },
+            platformActive(id,isActive) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/active",{method:"PUT",body:{isActive},retries:0}); },
+            platformReset(id,username,password) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/admins/"+encodeURIComponent(username)+"/password",{method:"PUT",body:{password},retries:0}); },
+            platformAudit() { return request("/api/platform-admin/audit"); },
             reports(days=7) { return request("/api/reports?days="+encodeURIComponent(days)); },
             marketingOptions() { return request("/api/marketing/options"); },
             marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
@@ -625,17 +634,18 @@
             try {
                 const identity = await defaultClient.getIdentity();
                 if (location.pathname === "/login.html") return;
+                if(identity.role==="SuperAdmin"&&location.pathname!=="/platform-admin.html"){location.replace("/platform-admin.html");return;}
                 const bar = document.createElement("header");
                 bar.className = "cp-shell";
                 bar.setAttribute("dir", "rtl");
-                const brand = document.createElement("a"); brand.className="cp-brand"; brand.href="/index.html";
+                const brand = document.createElement("a"); brand.className="cp-brand"; brand.href=identity.role==="SuperAdmin"?"/platform-admin.html":"/index.html";
                 brand.textContent="ChatPlatform";
                 const identityText=document.createElement("span");identityText.className="cp-identity";
-                identityText.textContent=identity.username+" · "+(identity.role==="Admin"?"مدير":"موظف");
+                identityText.textContent=identity.username+" · "+(identity.role==="SuperAdmin"?"مدير المنصة":identity.role==="Admin"?"مدير المؤسسة":"موظف");
                 identityText.title=identity.tenantId;
                 const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
-                const menu=[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
-                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
+                const menu=identity.role==="SuperAdmin"?[["/platform-admin.html","إدارة المنصة"]]:[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/subscription.html","الباقة والحصص"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
                 for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
                     if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
                     links.append(link);}

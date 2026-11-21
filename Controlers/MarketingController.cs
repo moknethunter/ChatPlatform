@@ -67,8 +67,9 @@ public sealed class MarketingController(PlatformDbContext db,IConfiguration conf
     public async Task<IActionResult> Options(CancellationToken ct)
     {
         var tenant=User.TenantId();
+        var access=await Entitlements.ReadAsync(db,tenant,DateTime.UtcNow,ct);
         var templates=await db.WhatsAppTemplates.AsNoTracking().Where(t=>t.TenantId==tenant&&t.IsActive&&t.Category=="MARKETING").Take(200).ToListAsync(ct);
-        return Ok(new{enabled=config.GetValue<bool>("Campaigns:Enabled"),templates=templates.Where(TemplateApproval.Eligible).Select(t=>new{t.Id,t.Name,t.Language,t.Body,t.WhatsAppTenantId})});
+        return Ok(new{enabled=config.GetValue<bool>("Campaigns:Enabled")&&access.Active&&(!access.Managed||access.Plan!.Campaigns),templates=templates.Where(TemplateApproval.Eligible).Select(t=>new{t.Id,t.Name,t.Language,t.Body,t.WhatsAppTenantId})});
     }
     [HttpPost("campaigns")]
     public async Task<IActionResult> Schedule(ScheduleRequest req,CancellationToken ct)
@@ -90,6 +91,7 @@ public sealed class MarketingController(PlatformDbContext db,IConfiguration conf
         var phones=JsonSerializer.Deserialize<string[]>(list.PhonesJson)??[];
         var eligible=await db.MarketingConsents.AsNoTracking().Where(c=>c.TenantId==tenant&&c.PhoneNumberId==account.PhoneNumberId&&c.Granted&&phones.Contains(c.Phone)).Select(c=>c.Phone).OrderBy(p=>p).ToListAsync(ct);
         if(eligible.Count==0)return Conflict(new{error="no_consented_recipients"});
+        if(await Entitlements.CapacityAsync(db,tenant,"campaigns",0,now,ct) is string disabled)return Conflict(new{error=disabled});
         if(await Entitlements.CapacityAsync(db,tenant,"campaigns",0,date.AddSeconds((eligible.Count-1)*5),ct) is string denied)return Conflict(new{error=denied});
         foreach(var month in Enumerable.Range(0,eligible.Count).Select(i=>date.AddSeconds(i*5)).GroupBy(d=>new{d.Year,d.Month}))
             if(await Entitlements.CapacityAsync(db,tenant,"messages",month.Count(),month.First(),ct) is string exceeded)return Conflict(new{error=exceeded});

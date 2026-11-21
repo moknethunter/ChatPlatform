@@ -15,7 +15,7 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
 {
     public sealed record CreateAgentRequest(string? Username, string? DisplayName, string? Password);
     public sealed record ResetPasswordRequest(string? Password);
-    public sealed record SetActiveRequest(bool IsActive);
+    public sealed record SetActiveRequest(bool? IsActive);
 
     private static bool ValidUsername(string? username) => username is { Length: >= 3 and <= 64 }
         && username.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '_' or '-');
@@ -86,8 +86,9 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
         var agent = await db.ManagedAgents.SingleOrDefaultAsync(x => x.Username == username && x.TenantId == tenant, ct);
         if (agent == null) return NotFound();
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        if(req.IsActive&&!agent.IsActive&&await Entitlements.CapacityAsync(db,tenant,"agents",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
-        agent.IsActive = req.IsActive;
+        if(req.IsActive==null)return BadRequest();
+        if(req.IsActive.Value&&!agent.IsActive&&await Entitlements.CapacityAsync(db,tenant,"agents",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
+        agent.IsActive = req.IsActive.Value;
         agent.UpdatedAtUtc = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
         // Re-enabling must never revive a previously issued session.

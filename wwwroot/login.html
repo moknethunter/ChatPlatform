@@ -8,7 +8,7 @@ document.getElementById("login").addEventListener("submit", async e => {
  button.disabled = true; status.textContent = "";
  try {
  const r = await fetch("/api/auth/login", {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json","X-ChatPlatform-CSRF":"1"},body:JSON.stringify({username:form.username.value,password:form.password.value})});
- if(r.ok){location.assign("/index.html");return;}
+ if(r.ok){const identity=await r.json();location.assign(identity.role==="SuperAdmin"?"/platform-admin.html":"/index.html");return;}
  status.textContent = r.status===429?"محاولات كثيرة. حاول لاحقًا.":"تعذر تسجيل الدخول. تحقق من بياناتك.";
  } catch {status.textContent="تعذر الاتصال بالخادم.";} finally {form.password.value="";button.disabled=false;}
 });
