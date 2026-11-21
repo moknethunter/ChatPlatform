@@ -39,7 +39,7 @@ with tempfile.TemporaryFile() as log:
             if any(r.get("lastMessage",{}).get("text")=="Preview inbound smoke" for r in current):break
             time.sleep(1)
         else:raise RuntimeError("Simulated incoming not processed")
-        sent,_=call("/api/messages/send-text","POST",{"to":c["contactPhone"],"phoneNumberId":"999999999991","text":"Preview outgoing smoke"},202)
+        sent,_=call("/api/messages/send","POST",{"to":c["contactPhone"],"phoneNumberId":"999999999991","text":"Preview outgoing smoke"},202)
         import sqlite3
         for _ in range(30):
             with sqlite3.connect("/tmp/chatplatform-preview/platform.db") as db:
