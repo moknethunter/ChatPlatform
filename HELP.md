@@ -80,7 +80,9 @@ curl -fsS https://chatplatform.fly.dev/ready
 
 ## Authentication candidate (development branch only)
 - Set `Security__Accounts__0__Username`, `Security__Accounts__0__TenantId`, `Security__Accounts__0__Role` (Admin/Agent) and `Security__Accounts__0__PasswordHash` through secret configuration. Use ASP.NET Identity PasswordHasher V3 output; never commit a password/hash. Each username must be unique and the referenced tenant active.
-- Login at /login.html (HTTPS required by the secure cookie); /api/auth/me returns identity. Cookie lifetime 30 minutes; logging out clears the browser cookie, but a copied cookie can remain valid until expiry or account config change. Do not deploy until durable server-side session revocation and account provisioning are implemented.
+- Login at /login.html (HTTPS required by the secure cookie); /api/auth/me returns identity. Cookie lifetime 30 minutes; sessions are checked in SQLite and logout deletes the server-side session. Account provisioning is still operator-managed and must be configured before production.
 - Writes require X-ChatPlatform-CSRF: 1. Admin can manage local templates and auto-reply rules; Agent reads only. Conversations and account listings are scoped by the authenticated tenant.
-- Unreviewed API endpoints and SignalR are intentionally denied (401/403). No real sending, onboarding, connector administration or registration has been enabled by this change. Existing UI flows require further integration and testing before release.
+- Unreviewed API endpoints and SignalR are intentionally denied (401/403). Text sending uses a tenant-scoped durable message/outbox transaction and a request idempotency key; approved-template sending, onboarding, connector administration and account registration remain disabled until reviewed. Existing UI flows require further integration and testing before release.
 - CI uses synthetic credentials and a disposable database. Run tests/security_smoke.py against the isolated service configured by the workflow; never run against production.
+
+- Template schema migration adds missing MetaTemplateId and UpdatedAtUtc without deleting rows. Back up the production volume and test restore before applying migrations. Security smoke tests use fake accounts and assert foreign account/invalid session requests never reach outbound delivery.

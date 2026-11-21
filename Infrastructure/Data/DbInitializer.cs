@@ -319,6 +319,14 @@ public static class DbInitializer
                     CreatedAtUtc TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS PlatformSessions (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    Username TEXT NOT NULL,
+                    TenantId TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_PlatformSessions_ExpiresAtUtc ON PlatformSessions(ExpiresAtUtc);
+
                 CREATE TABLE IF NOT EXISTS Users (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',

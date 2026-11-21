@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.RateLimiting;
 using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -26,6 +27,7 @@ public static class PlatformSecurity
     public const string AdminPolicy = "TenantAdmin";
     private const string Scheme = CookieAuthenticationDefaults.AuthenticationScheme;
     private const string Stamp = "security_stamp";
+    private const string Session = "platform_session";
     private static readonly PasswordHasher<PlatformAccount> Hasher = new();
     private static readonly PlatformAccount Dummy = new();
     private static readonly string DummyHash = Hasher.HashPassword(Dummy, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
@@ -65,10 +67,14 @@ public static class PlatformSecurity
                 var cfg = c.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
                 var account = Find(cfg, c.Principal?.Identity?.Name);
                 var db = c.HttpContext.RequestServices.GetRequiredService<PlatformDbContext>();
+                var sessionId = c.Principal?.FindFirstValue(Session);
+                var now = DateTime.UtcNow;
                 if (account == null || c.Principal?.FindFirstValue("tenant_id") != account.TenantId
                     || c.Principal?.FindFirstValue(ClaimTypes.Role) != account.Role
                     || c.Principal?.FindFirstValue(Stamp) != Fingerprint(account)
-                    || !await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, c.HttpContext.RequestAborted))
+                    || !await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, c.HttpContext.RequestAborted)
+                    || !await db.PlatformSessions.AnyAsync(s => s.Id == sessionId && s.Username == account.Username
+                        && s.TenantId == account.TenantId && s.ExpiresAtUtc > now, c.HttpContext.RequestAborted))
                 {
                     c.RejectPrincipal();
                     await c.HttpContext.SignOutAsync(Scheme);
@@ -134,15 +140,25 @@ public static class PlatformSecurity
                 logger.LogWarning("Rejected login attempt.");
                 return Results.Unauthorized();
             }
+            var now = DateTime.UtcNow;
+            var sessionId = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            // Expired sessions are not valid, even if their old cookies are replayed.
+            await db.PlatformSessions.Where(s => s.ExpiresAtUtc <= now).ExecuteDeleteAsync(ct);
+            db.PlatformSessions.Add(new PlatformSessionEntity
+            {
+                Id = sessionId, Username = a.Username, TenantId = a.TenantId, ExpiresAtUtc = now.AddMinutes(30)
+            });
+            await db.SaveChangesAsync(ct);
             var identity = new ClaimsIdentity(new[]
             {
                 new Claim(ClaimTypes.NameIdentifier, a.Username),
                 new Claim(ClaimTypes.Name, a.Username),
                 new Claim(ClaimTypes.Role, a.Role),
                 new Claim("tenant_id", a.TenantId),
-                new Claim(Stamp, Fingerprint(a))
+                new Claim(Stamp, Fingerprint(a)),
+                new Claim(Session, sessionId)
             }, Scheme);
-            await ctx.SignInAsync(Scheme, new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false, AllowRefresh = false });
+            await ctx.SignInAsync(Scheme, new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false, AllowRefresh = false, ExpiresUtc = new DateTimeOffset(now.AddMinutes(30)) });
             logger.LogInformation("Login succeeded for {User} in tenant {Tenant}.", a.Username, a.TenantId);
             return Results.Ok(new { username = a.Username, tenantId = a.TenantId, role = a.Role });
         }).AllowAnonymous().RequireRateLimiting("login");
@@ -152,8 +168,10 @@ public static class PlatformSecurity
             username = user.Identity!.Name, tenantId = user.TenantId(), role = user.FindFirstValue(ClaimTypes.Role)
         })).RequireAuthorization(ReadPolicy);
 
-        app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
+        app.MapPost("/api/auth/logout", async (HttpContext ctx, PlatformDbContext db, CancellationToken ct) =>
         {
+            var sessionId = ctx.User.FindFirstValue(Session);
+            await db.PlatformSessions.Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
             await ctx.SignOutAsync(Scheme);
             return Results.NoContent();
         }).RequireAuthorization(ReadPolicy);
