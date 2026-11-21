@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
 using Microsoft.AspNetCore.DataProtection;
@@ -17,7 +18,7 @@ public sealed class WhatsAppController : ControllerBase
     private readonly PlatformDbContext _db;
     private readonly IHttpClientFactory _httpFactory;
     private readonly IWhatsAppTenantResolver _tenantResolver;
-    private readonly IDataProtector _protector;
+    private readonly WhatsAppTokenProtection _protector;
     private readonly ILogger<WhatsAppController> _logger;
 
     public WhatsAppController(
@@ -30,7 +31,7 @@ public sealed class WhatsAppController : ControllerBase
         _db = db;
         _httpFactory = httpFactory;
         _tenantResolver = tenantResolver;
-        _protector = dataProtectionProvider.CreateProtector("WhatsApp.AccessTokens");
+        _protector = new WhatsAppTokenProtection(dataProtectionProvider);
         _logger = logger;
     }
 
