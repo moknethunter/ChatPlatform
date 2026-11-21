@@ -101,8 +101,11 @@ public static class PlatformSecurity
             && !HttpMethods.IsHead(request.Method) && !HttpMethods.IsOptions(request.Method))
         {
             var site = request.Headers["Sec-Fetch-Site"].ToString();
+            var origin = request.Headers["Origin"].ToString();
+            var expectedOrigin = $"{request.Scheme}://{request.Host}";
             if (request.Headers["X-ChatPlatform-CSRF"].ToString() != "1"
-                || site == "cross-site" || site == "same-site")
+                || site == "cross-site" || site == "same-site"
+                || (!string.IsNullOrEmpty(origin) && !string.Equals(origin, expectedOrigin, StringComparison.OrdinalIgnoreCase)))
             {
                 context.Response.StatusCode = 403;
                 return;
