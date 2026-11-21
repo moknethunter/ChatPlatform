@@ -87,6 +87,19 @@ assert not call("/api/autoreply",cookie=b)[0]
 call("/api/autoreply/"+created["id"],"DELETE",cookie=b,expected=404)
 call("/api/autoreply/"+created["id"],"DELETE",cookie=a)
 call("/api/templates?tenantId=ci-tenant-a",cookie=b,expected=403)
+template={"tenantId":"ci-tenant-a","whatsAppTenantId":"ci-account-a","name":"ci_local","category":"UTILITY","language":"ar","body":"CI only"}
+call("/api/templates","POST",template,cookie=agent,expected=403)
+call("/api/templates","POST",template,cookie=a,expected=403,extra={"Origin":"https://untrusted.example"})
+created_template,_=call("/api/templates","POST",template,cookie=a,expected=201)
+template_path="/api/templates/"+created_template["template"]["id"]
+assert call(template_path+"?tenantId=ci-tenant-a",cookie=a)[0]["tenantId"]=="ci-tenant-a"
+call(template_path+"?tenantId=ci-tenant-b",cookie=b,expected=404)
+call(template_path+"?tenantId=ci-tenant-b","DELETE",cookie=b,expected=404)
+call(template_path+"?tenantId=ci-tenant-a","DELETE",cookie=agent,expected=403)
+call(template_path+"?tenantId=ci-tenant-a","DELETE",cookie=a)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE Tenants SET IsActive=0 WHERE Id='ci-tenant-b'")
+call("/api/auth/me",cookie=b,expected=401)
 call("/api/auth/logout","POST",cookie=a,expected=204)
 call("/api/auth/me",expected=401)
 print("PASS: authenticated reads, cookie flags, role checks, CSRF, tenant isolation, signed inbound and deduplication")
