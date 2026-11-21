@@ -39,6 +39,8 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
 
         mb.Entity<WhatsAppTenantEntity>(e =>
         {
+            // Use the original required database column; the compatibility migration ensures it exists.
+            e.Property(x => x.CreatedAt).HasColumnName("CreatedAtUtc");
             e.HasIndex(x => x.PhoneNumberId).IsUnique();
             e.HasOne(x => x.Tenant)
                 .WithMany()

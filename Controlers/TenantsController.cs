@@ -62,7 +62,7 @@ public class TenantsController : ControllerBase
 
         // تحقق من وجود المستأجر لتجنب خطأ المفتاح الخارجي عند الحفظ.
         var tenantExists = await _db.Tenants
-            .AnyAsync(t => t.Id == req.TenantId, ct);
+            .AnyAsync(t => t.Id == req.TenantId && t.IsActive, ct);
 
         if (!tenantExists)
         {
@@ -78,7 +78,9 @@ public class TenantsController : ControllerBase
 
         if (existing != null)
         {
-            existing.TenantId = req.TenantId;
+            // Reassigning an existing number requires a separate authorized transfer.
+            if (!string.Equals(existing.TenantId, req.TenantId, StringComparison.Ordinal))
+                return Conflict(new { error = "account_already_registered" });
             existing.BusinessTokenEncrypted = encryptedToken;
             existing.IsActive = true;
         }

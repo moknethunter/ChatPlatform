@@ -340,6 +340,16 @@ public static class DbInitializer
                 connection,
                 transaction);
 
+            // Keep existing auto-reply rules while adding fields used by EF Core.
+            EnsureColumnExists(connection, transaction, "AutoReplyRules", "CooldownSeconds",
+                "INTEGER NOT NULL DEFAULT 60");
+            EnsureColumnExists(connection, transaction, "AutoReplyRules", "UpdatedAtUtc",
+                "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
+            Execute(connection, transaction, """
+                UPDATE AutoReplyRules SET UpdatedAtUtc = CreatedAtUtc
+                WHERE UpdatedAtUtc = '2026-01-01 00:00:00';
+                """);
+
             // إنشاء المؤسسات الافتراضية.
             EnsureDefaultTenant(connection, transaction);
 
