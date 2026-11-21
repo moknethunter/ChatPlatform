@@ -39,7 +39,7 @@ public static class EndpointMapper
             });
         }).RequireAuthorization("TenantRead");
 
-        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow })).AllowAnonymous();
+        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow, revision = Environment.GetEnvironmentVariable("CHATPLATFORM_REVISION") ?? "unknown" })).AllowAnonymous();
 
         // Readiness checks storage separately from the liveness endpoint.
         app.MapGet("/ready", async (PlatformDbContext db, CancellationToken ct) =>
