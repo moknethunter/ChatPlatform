@@ -4,7 +4,7 @@ public static class BotFlow
 {
     public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y);
     public record Definition(string? Start, Node[]? Nodes);
-    public record Evaluation(List<string> Path, List<string> Replies);
+    public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff);
 
     private static bool ValidId(string? id) => id is { Length: >= 1 and <= 40 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-');
 
@@ -16,11 +16,11 @@ public static class BotFlow
         {
             if (n == null || !ValidId(n.Id) || !map.TryAdd(n.Id!, n) || n.X is < 0 or > 3000 || n.Y is < 0 or > 3000)
                 return "invalid_node";
-            if (n.Type is not ("start" or "contains" or "reply" or "end")) return "invalid_type";
-            if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
+            if (n.Type is not ("start" or "contains" or "reply" or "wait" or "handoff" or "end")) return "invalid_type";
+            if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" or "wait" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
             if (n.Type == "contains" && (!ValidId(n.Next) || !ValidId(n.Otherwise))) return "invalid_branch";
-            if (n.Type is "start" or "reply" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
-            if (n.Type == "end" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
+            if (n.Type is "start" or "reply" or "wait" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
+            if (n.Type is "end" or "handoff" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
         }
         if (!map.TryGetValue(flow.Start!, out var start) || start.Type != "start" || nodes.Count(n => n.Type == "start") != 1) return "invalid_start";
         var visiting = new HashSet<string>(); var visited = new HashSet<string>();
@@ -37,19 +37,21 @@ public static class BotFlow
     }
 
 
-    public static Evaluation Evaluate(Definition flow, string input)
+    public static Evaluation Evaluate(Definition flow, string input, string? resumeAt = null)
     {
         var map = flow.Nodes!.ToDictionary(n => n.Id!);
         var path = new List<string>(); var replies = new List<string>();
-        string? cursor = flow.Start;
+        string? cursor = resumeAt ?? flow.Start;
         for (int i = 0; cursor != null && i < 40; i++)
         {
             var node = map[cursor]; path.Add(cursor);
             if (node.Type == "end") break;
+            if (node.Type == "handoff") return new(path, new(), null, true);
+            if (node.Type == "wait") { replies.Add(node.Text!); return new(path, replies, node.Next, false); }
             if (node.Type == "reply") replies.Add(node.Text!);
             cursor = node.Type == "contains" && !input.Contains(node.Text!, StringComparison.OrdinalIgnoreCase)
                 ? node.Otherwise : node.Next;
         }
-        return new(path, replies);
+        return new(path, replies, null, false);
     }
 }

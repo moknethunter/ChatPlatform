@@ -46,3 +46,5 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 - [ ] Dependency security remediation, backup/restore, production configuration before release.
 
 - [x] Unified design foundation, authenticated dashboard and knowledge-management UI (candidate; browser validation pending).
+
+- [x] Multi-turn wait nodes, persistent cursor, human handoff and resume controls (candidate, CI pending).

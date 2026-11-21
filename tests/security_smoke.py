@@ -283,6 +283,40 @@ assert outcome=="queued" and ver is None and rule_id and reply=="Legacy fallback
 assert not call("/api/bots/runs",cookie=b)[0]
 runs,_=call("/api/bots/runs",cookie=a)
 assert any(r["botVersion"]==2 and r["outcome"]=="queued" for r in runs)
+# Multi-turn state survives separate signed webhook deliveries and takes priority over legacy rules.
+multi={"start":"s","nodes":[{"id":"s","type":"start","next":"w","x":0,"y":0},
+ {"id":"w","type":"wait","text":"Choose support or price","next":"c","x":180,"y":0},
+ {"id":"c","type":"contains","text":"support","next":"h","otherwise":"r","x":360,"y":0},
+ {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"reply","text":"Price is 10","next":"e","x":540,"y":180},
+ {"id":"e","type":"end","x":720,"y":180}]}
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","support"]},cookie=a)
+assert multi_sim["turns"][0]["nextNode"]=="c" and multi_sim["turns"][1]["handoff"]
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price"]},cookie=a)
+assert multi_sim["turns"][1]["replies"]==["Price is 10"]
+created_multi,_=call("/api/bots","POST",{"name":"Multi","flow":multi,"version":0},cookie=a,expected=201)
+mp="/api/bots/"+created_multi["id"]
+published,_=call(mp+"/publish","POST",{"version":1},cookie=a)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
+assert automate("wamid.ci.multi.1","hi")==("queued",1,None,"Choose support or price")
+assert call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+assert automate("wamid.ci.multi.2","support")==("human_handoff",1,None,None)
+assert call("/api/conversations?automation=human",cookie=a)[0][0]["id"]==cid
+assert call("/api/conversations?automation=human",cookie=b)[0]==[]
+assert automate("wamid.ci.multi.3","hi")==("human_mode",1,None,None)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=b,expected=404)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=managed_cookie,expected=204)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
+assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
+assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
+assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+call(root+"/automation","PUT",{"mode":"human"},cookie=managed_cookie,expected=204)
+call(mp+"/publish/"+published["activationId"],"DELETE",cookie=a,expected=204)
+assert automate("wamid.ci.multi.6","hi")==("human_mode",None,None,None)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
+assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
+print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
 call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")

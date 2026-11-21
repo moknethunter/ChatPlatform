@@ -319,6 +319,28 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_KnowledgeArticles_TenantId ON KnowledgeArticles(TenantId);
+                CREATE TABLE IF NOT EXISTS ConversationAutomation (
+                    ConversationId TEXT NOT NULL,
+                    TenantId TEXT NOT NULL,
+                    Mode TEXT NOT NULL,
+                    ActivationId TEXT NULL,
+                    NextNode TEXT NULL,
+                    LastInputAtUtc TEXT NULL,
+                    ExpiresAtUtc TEXT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    UpdatedBy TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, ConversationId)
+                );
+                CREATE TRIGGER IF NOT EXISTS Rev_ConversationAutomation_Insert AFTER INSERT ON ConversationAutomation
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
+                CREATE TRIGGER IF NOT EXISTS Rev_ConversationAutomation_Update AFTER UPDATE ON ConversationAutomation
+                BEGIN
+                    INSERT INTO InboxRevisions(TenantId, Revision) VALUES (NEW.TenantId, 1)
+                    ON CONFLICT(TenantId) DO UPDATE SET Revision = Revision + 1;
+                END;
                 CREATE TABLE IF NOT EXISTS BotReleases (
                     TenantId TEXT NOT NULL PRIMARY KEY,
                     DraftId TEXT NOT NULL,

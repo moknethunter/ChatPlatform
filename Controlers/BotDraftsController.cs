@@ -16,7 +16,7 @@ namespace ChatPlatform.Controllers;
 public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
 {
     public record SaveRequest(string? Name, Definition? Flow, int Version);
-    public record SimulateRequest(Definition? Flow, string? Input);
+    public record SimulateRequest(Definition? Flow, string? Input, string[]? Inputs = null);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
@@ -68,7 +68,15 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     {
         var error = Validate(req.Flow);
         if (error != null || (req.Input?.Length ?? 0) > 4000) return BadRequest(new { error = error ?? "input_too_long" });
-        return Ok(Evaluate(req.Flow!, req.Input ?? ""));
+        if(req.Inputs==null)return Ok(Evaluate(req.Flow!,req.Input??""));
+        if(req.Inputs.Length is <1 or >12 || req.Inputs.Any(x=>x==null||x.Length>4000))return BadRequest(new{error="invalid_turns"});
+        var turns=new List<Evaluation>();string? next=null;
+        foreach(var input in req.Inputs)
+        {
+            var result=Evaluate(req.Flow!,input,next);turns.Add(result);next=result.NextNode;
+            if(result.Handoff||next==null)break;
+        }
+        return Ok(new{turns,nextNode=next});
     }
 
     public record PublishRequest(int Version);
@@ -93,8 +101,8 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
         var definition = JsonSerializer.Deserialize<Definition>(draft.DefinitionJson, Json);
         var error = Validate(definition);
         if (error != null) return BadRequest(new { error });
-        var replies = definition!.Nodes!.Where(n => n.Type == "reply").ToArray();
-        if (replies.Length == 0 || replies.Length > 3 || replies.Sum(n => n.Text!.Length) + 2 * (replies.Length - 1) > 4000)
+        var replies = definition!.Nodes!.Where(n => n.Type is "reply" or "wait").ToArray();
+        if ((replies.Length == 0 && !definition.Nodes!.Any(n=>n.Type=="handoff")) || replies.Length > 12 || replies.Sum(n => n.Text!.Length) + 2 * Math.Max(0,replies.Length - 1) > 4000)
             return BadRequest(new { error = "publish_reply_limit" });
         var row = await db.BotReleases.SingleOrDefaultAsync(x => x.TenantId == tenant, ct);
         if (row == null) { row = new BotReleaseEntity { TenantId = tenant }; db.BotReleases.Add(row); }

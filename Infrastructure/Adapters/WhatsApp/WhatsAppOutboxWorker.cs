@@ -148,6 +148,14 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             return true;
         }
 
+        // A takeover cancels pending automation and blocks claimed-but-not-yet-sent replies.
+        // A request already in flight cannot be recalled.
+        if(automated && await db.ConversationAutomation.AsNoTracking().AnyAsync(s=>s.TenantId==item.TenantId && s.Mode=="human" &&
+            db.WhatsAppMessages.Any(m=>m.Id==item.MessageId && m.TenantId==item.TenantId && m.ConversationId==s.ConversationId),ct))
+        {
+            await FailPermanentAsync(db,item,"human_handoff",ct);return true;
+        }
+
         // 5. إرسال الرسالة عبر WhatsApp Cloud API
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 

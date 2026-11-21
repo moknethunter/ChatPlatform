@@ -339,7 +339,7 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
-                for (const key of ["search","status","assigned"]) if (opts[key]) q.set(key, opts[key]);
+                for (const key of ["search","status","assigned","automation"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
@@ -358,6 +358,7 @@
             listBots() { return request("/api/bots"); },
             getBot(id) { return request("/api/bots/" + encodeURIComponent(id)); },
             saveBot(id,data) { return request("/api/bots" + (id ? "/" + encodeURIComponent(id) : ""), {method:id?"PUT":"POST",body:data}); },
+            simulateBotTurns(flow,inputs) { return request("/api/bots/simulate",{method:"POST",body:{flow,inputs}}); },
             simulateBot(flow,input) { return request("/api/bots/simulate",{method:"POST",body:{flow,input}}); },
             getContacts(opts = {}) {
                 const q = new URLSearchParams();
@@ -368,7 +369,7 @@
             createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
             updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
             updateConversation(id, action, body = {}) {
-                if (!["status","read","assign","tags"].includes(action)) throw new ApiError("Invalid action");
+                if (!["status","read","assign","tags","automation"].includes(action)) throw new ApiError("Invalid action");
                 return request(API.conversations + "/" + encodeURIComponent(id) + "/" + action, { method: "PUT", body });
             },
             uploadMedia(conversationId, file) {
