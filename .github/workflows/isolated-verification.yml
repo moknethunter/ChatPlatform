@@ -34,6 +34,7 @@ jobs:
           mkdir -p "$CHATPLATFORM_DATA_DIR"
           export ConnectionStrings__DefaultConnection="Data Source=$CHATPLATFORM_DATA_DIR/platform.db"
           export ASPNETCORE_ENVIRONMENT=Production
+          export Campaigns__Enabled=true # disposable CI only; future-scheduled fake recipients
           export ASPNETCORE_URLS=http://127.0.0.1:5080
           export WHATSAPP_VERIFY_TOKEN=ci-only-test-token
           export WHATSAPP_APP_SECRET=ci-only-test-secret

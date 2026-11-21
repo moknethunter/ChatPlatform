@@ -338,6 +338,43 @@ assert automate("wamid.ci.multi.6","hi")==("human_mode",None,None,None)
 call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
 print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
+# Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/marketing/lists",expected=401)
+call("/api/marketing/lists",cookie=agent,expected=403)
+consent={"phoneNumberId":"999999999999","phone":"15550000001","granted":True,"evidence":"CI-only synthetic consent receipt"}
+call("/api/marketing/consent","PUT",dict(consent,phoneNumberId="999999999999"),cookie=b,expected=404)
+call("/api/marketing/consent","PUT",dict(consent,evidence=""),cookie=a,expected=400)
+call("/api/marketing/consent","PUT",consent,cookie=a,expected=204)
+lst,_=call("/api/marketing/lists","POST",{"name":"CI list","phones":["15550000001","15550000001"],"version":0},cookie=a)
+assert len(lst["phones"])==1 and call("/api/marketing/lists",cookie=b)[0]==[]
+call("/api/marketing/lists/"+lst["id"],"PUT",{"name":"Foreign","phones":["15550000001"],"version":1},cookie=b,expected=404)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE WhatsAppTenants SET WabaId='999999999997' WHERE Id='ci-account-a'")
+    db.execute("""INSERT INTO WhatsAppTemplates(Id,TenantId,WhatsAppTenantId,Name,Category,Language,Body,Status,IsActive,CreatedAtUtc,UpdatedAtUtc)
+        VALUES('ci-marketing','ci-tenant-a','ci-account-a','ci_marketing','MARKETING','en','CI offer','LOCAL',1,'2026-01-01','2026-01-01')""")
+from datetime import datetime,timezone,timedelta
+schedule={"id":str(uuid.uuid4()),"name":"CI campaign","listId":lst["id"],"templateId":"ci-marketing","scheduledAt":(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}
+call("/api/marketing/campaigns","POST",schedule,cookie=b,expected=404)
+result,_=call("/api/marketing/campaigns","POST",schedule,cookie=a,expected=202)
+assert result["eligible"]==1
+call("/api/marketing/campaigns","POST",schedule,cookie=a)
+assert call("/api/marketing/campaigns",cookie=a)[0][0]["counts"]=={"Pending":1}
+assert not call("/api/marketing/campaigns",cookie=b)[0]
+call("/api/marketing/campaigns/"+schedule["id"]+"/cancel","POST",{},cookie=b,expected=404)
+# Signed inbound STOP, not a fabricated marketing opt-in.
+stop_body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.stop","from":"15550000001","type":"text","text":{"body":"STOP"}}]}}]}]}
+sig="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(stop_body).encode(),hashlib.sha256).hexdigest()
+call("/webhook","POST",stop_body,extra={"X-Hub-Signature-256":sig})
+for _ in range(30):
+    campaigns,_=call("/api/marketing/campaigns",cookie=a)
+    if campaigns[0]["counts"]=={"Cancelled":1}:break
+    time.sleep(1)
+else:raise AssertionError("Opt-out did not cancel scheduled campaign")
+assert not call("/api/marketing/consents?phoneNumberId=999999999999",cookie=a)[0][0]["granted"]
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT COUNT(*) FROM ConsentEvents WHERE TenantId='ci-tenant-a'").fetchone()[0]==2
+call("/api/marketing/campaigns","POST",dict(schedule,id=str(uuid.uuid4())),cookie=a,expected=409)
+print("PASS: campaign scheduling, deduplication, tenant isolation and signed opt-out cancellation")
 call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")

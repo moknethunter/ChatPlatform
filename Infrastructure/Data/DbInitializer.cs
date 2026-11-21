@@ -309,6 +309,31 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TABLE IF NOT EXISTS MarketingConsents (
+                    TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Phone TEXT NOT NULL,
+                    Granted INTEGER NOT NULL, Evidence TEXT NOT NULL, UpdatedBy TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY(TenantId,PhoneNumberId,Phone)
+                );
+                CREATE TABLE IF NOT EXISTS ConsentEvents (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Phone TEXT NOT NULL,
+                    Granted INTEGER NOT NULL, Evidence TEXT NOT NULL, UpdatedBy TEXT NOT NULL, UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_ConsentEvents_Tenant_Phone ON ConsentEvents(TenantId,PhoneNumberId,Phone);
+                CREATE TABLE IF NOT EXISTS CustomerLists (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, Name TEXT NOT NULL, PhonesJson TEXT NOT NULL, Version INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_CustomerLists_TenantId ON CustomerLists(TenantId);
+                CREATE TABLE IF NOT EXISTS MarketingCampaigns (
+                    Id TEXT PRIMARY KEY NOT NULL, TenantId TEXT NOT NULL, Name TEXT NOT NULL, ListId TEXT NOT NULL,
+                    TemplateId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL, Status TEXT NOT NULL,
+                    ScheduledAtUtc TEXT NOT NULL, CreatedAtUtc TEXT NOT NULL, CreatedBy TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_MarketingCampaigns_TenantId ON MarketingCampaigns(TenantId);
+                CREATE TABLE IF NOT EXISTS CampaignRecipients (
+                    TenantId TEXT NOT NULL, CampaignId TEXT NOT NULL, Phone TEXT NOT NULL, OutboxId TEXT NOT NULL,
+                    PRIMARY KEY(TenantId,CampaignId,Phone)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS IX_CampaignRecipients_OutboxId ON CampaignRecipients(OutboxId);
                 CREATE TABLE IF NOT EXISTS KnowledgeArticles (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,

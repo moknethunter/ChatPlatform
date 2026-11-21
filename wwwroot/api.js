@@ -343,6 +343,14 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            marketingOptions() { return request("/api/marketing/options"); },
+            marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
+            marketingConsent(data) { return request("/api/marketing/consent",{method:"PUT",body:data}); },
+            marketingLists() { return request("/api/marketing/lists"); },
+            marketingSaveList(id,data) { return request("/api/marketing/lists"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
+            marketingCampaigns() { return request("/api/marketing/campaigns"); },
+            marketingSchedule(data) { return request("/api/marketing/campaigns",{method:"POST",body:data,retries:0}); },
+            marketingCancel(id) { return request("/api/marketing/campaigns/"+encodeURIComponent(id)+"/cancel",{method:"POST",body:{}}); },
             dashboard() { return request('/api/dashboard'); },
             knowledgeList() { return request("/api/knowledge"); },
             knowledgeGet(id) { return request("/api/knowledge/"+encodeURIComponent(id)); },
@@ -626,7 +634,7 @@
                 identityText.title=identity.tenantId;
                 const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
                 const menu=[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
-                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
                 for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
                     if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
                     links.append(link);}
