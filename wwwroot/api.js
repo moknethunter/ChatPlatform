@@ -339,8 +339,21 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
+                for (const key of ["search","status","assigned"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
+            },
+            getContacts(opts = {}) {
+                const q = new URLSearchParams();
+                for (const key of ["search","stage","page","limit"]) if (opts[key]) q.set(key, String(opts[key]));
+                return request("/api/contacts?" + q, { signal: opts.signal });
+            },
+            getContact(phone) { return request("/api/contacts/" + encodeURIComponent(phone)); },
+            createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
+            updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
+            updateConversation(id, action, body = {}) {
+                if (!["status","read","assign","tags"].includes(action)) throw new ApiError("Invalid action");
+                return request(API.conversations + "/" + encodeURIComponent(id) + "/" + action, { method: "PUT", body });
             },
             getConversationMessages(id, take = 100, opts = {}) {
                 id = validateId(id, "معرّف المحادثة");

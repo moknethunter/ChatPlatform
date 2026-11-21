@@ -127,6 +127,38 @@ managed_cookie=login("ci-managed")
 identity,_=call("/api/auth/me",cookie=managed_cookie)
 assert identity["tenantId"]=="ci-tenant-a" and identity["role"]=="Agent"
 call("/api/team",cookie=managed_cookie,expected=403)
+# CRM profiles are automatically created from incoming conversations, and isolated by tenant.
+contacts,_=call("/api/contacts",cookie=a)
+assert contacts["total"]==1 and contacts["items"][0]["phone"]=="15550000001"
+assert call("/api/contacts",cookie=b)[0]["total"]==0
+call("/api/contacts/15550000001",cookie=b,expected=404)
+contact={"phone":"15550000001","displayName":"CI Lead","email":"ci@example.invalid","notes":"private CI note","tags":"vip","stage":"lead"}
+call("/api/contacts/15550000001","PUT",contact,cookie=b,expected=404)
+call("/api/contacts/15550000001","PUT",contact,cookie=managed_cookie)
+assert call("/api/contacts?search=CI&stage=lead",cookie=a)[0]["items"][0]["displayName"]=="CI Lead"
+call("/api/contacts","POST",contact,cookie=a,expected=409)
+other,_=call("/api/contacts","POST",dict(contact,displayName="Other tenant"),cookie=b,expected=201)
+assert other["tenantId"]=="ci-tenant-b"
+assert call("/api/contacts/15550000001",cookie=a)[0]["displayName"]=="CI Lead"
+cid=match["id"]
+root="/api/conversations/"+cid
+call(root+"/assign","PUT",{"username":"ci-managed"},cookie=managed_cookie,expected=403)
+call(root+"/assign","PUT",{"username":"ci-managed"},cookie=b,expected=404)
+call(root+"/assign","PUT",{"username":"ci-b"},cookie=a,expected=400)
+call(root+"/assign","PUT",{"username":"ci-managed"},cookie=a,expected=204)
+assert call("/api/conversations?assigned=me",cookie=managed_cookie)[0][0]["id"]==cid
+assert not call("/api/conversations?assigned=unassigned",cookie=a)[0]
+call(root+"/status","PUT",{"status":"closed"},cookie=b,expected=404)
+call(root+"/tags","PUT",{"tags":"priority"},cookie=b,expected=404)
+call(root+"/read","PUT",{},cookie=b,expected=404)
+call(root+"/status","PUT",{"status":"closed"},cookie=managed_cookie,expected=204)
+call(root+"/read","PUT",{},cookie=managed_cookie,expected=204)
+call(root+"/tags","PUT",{"tags":"priority"},cookie=managed_cookie,expected=204)
+closed,_=call("/api/conversations?status=closed&search=CI",cookie=a)
+assert len(closed)==1 and closed[0]["unreadCount"]==0 and closed[0]["tags"]=="priority"
+assert not call("/api/conversations?status=open",cookie=a)[0]
+call(root+"/status","PUT",{"status":"open"},cookie=a,expected=204)
+print("PASS: CRM import, same-phone tenant isolation, assignment, filters, status and unread updates")
 call("/api/team/ci-managed/password","PUT",{"password":"different-ci-password"},cookie=a,expected=204)
 call("/api/auth/me",cookie=managed_cookie,expected=401)
 call("/api/auth/login","POST",{"username":"ci-managed","password":PASSWORD},expected=401)

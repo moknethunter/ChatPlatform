@@ -251,6 +251,31 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS CrmContacts (
+                    TenantId TEXT NOT NULL,
+                    Phone TEXT NOT NULL,
+                    DisplayName TEXT NOT NULL DEFAULT '',
+                    Email TEXT NOT NULL DEFAULT '',
+                    Notes TEXT NOT NULL DEFAULT '',
+                    Tags TEXT NOT NULL DEFAULT '',
+                    Stage TEXT NOT NULL DEFAULT 'new',
+                    CreatedAtUtc TEXT NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, Phone)
+                );
+                CREATE INDEX IF NOT EXISTS IX_CrmContacts_Tenant_Stage ON CrmContacts(TenantId, Stage);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppConversations_Tenant_Updated ON WhatsAppConversations(TenantId, UpdatedAtUtc);
+                -- Import existing conversations without overwriting a CRM profile.
+                INSERT OR IGNORE INTO CrmContacts (TenantId, Phone, DisplayName, CreatedAtUtc, UpdatedAtUtc)
+                SELECT TenantId, ContactPhone, COALESCE(ContactName,''), CreatedAtUtc, UpdatedAtUtc
+                FROM WhatsAppConversations ORDER BY UpdatedAtUtc DESC;
+                CREATE TRIGGER IF NOT EXISTS CRM_Conversation_Insert
+                AFTER INSERT ON WhatsAppConversations
+                BEGIN
+                    INSERT OR IGNORE INTO CrmContacts (TenantId, Phone, DisplayName, CreatedAtUtc, UpdatedAtUtc)
+                    VALUES (NEW.TenantId, NEW.ContactPhone, COALESCE(NEW.ContactName,''), NEW.CreatedAtUtc, NEW.UpdatedAtUtc);
+                END;
+
                 CREATE TABLE IF NOT EXISTS WhatsAppMessages (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,

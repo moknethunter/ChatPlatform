@@ -22,10 +22,11 @@ Current changes are candidates, not a completed security program. The existing A
 
 ## Phase 4: commercial platform development
 Baseline: archive/security-baseline-20261121 at 680db70682c9377a176f0e715d04669629bd9fe4 (CI success). Development continues separately.
-- [x] Add tenant-managed Agent accounts, password reset, activation and session revocation (candidate, CI pending).
+- [x] Add tenant-managed Agent accounts, password reset, activation and session revocation (CI passed at 261f3d3).
 - [ ] Verify the new team UI in a real browser, and implement a first-login password change flow.
 - [ ] Backup and restore drill on disposable SQLite; verify Docker runtime and production configuration.
-- [ ] Customer CRM, shared inbox assignment, tags, search, pagination and reporting.
+- [x] CRM contacts and shared inbox assignment, tags, search and pagination (candidate; CI pending).
+- [ ] CRM activity history, reporting, media, template composer, live updates and browser accessibility tests.
 - [ ] Reviewed OAuth signup and real-time tenant groups; leave legacy unrestricted endpoints denied.
 - [ ] Subscriptions, quotas, billing and operational monitoring.
 Do not merge or deploy until reviewed, tested and explicitly approved.
