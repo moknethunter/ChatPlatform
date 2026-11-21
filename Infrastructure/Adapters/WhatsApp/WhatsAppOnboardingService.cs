@@ -180,6 +180,9 @@ public sealed class WhatsAppOnboardingService
             return TenantSaveResult.Fail("missing_fields");
         }
 
+        if (!await db.Tenants.AnyAsync(t => t.Id == tenantId && t.IsActive, ct))
+            return TenantSaveResult.Fail("invalid_tenant");
+
         var encrypted =
             _protector.Protect(accessToken);
 
@@ -190,7 +193,9 @@ public sealed class WhatsAppOnboardingService
 
         if (existing != null)
         {
-            existing.TenantId = tenantId;
+            // Never silently transfer an account to another organization.
+            if (!string.Equals(existing.TenantId, tenantId, StringComparison.Ordinal))
+                return TenantSaveResult.Fail("account_already_registered");
             existing.WabaId = wabaId;
             existing.BusinessTokenEncrypted = encrypted;
             existing.IsActive = true;
