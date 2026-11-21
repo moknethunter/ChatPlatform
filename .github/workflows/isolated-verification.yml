@@ -1,0 +1,44 @@
+name: Isolated build and smoke checks
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore ChatPlatform.csproj
+      - name: Build
+        run: dotnet build ChatPlatform.csproj -c Release --no-restore
+      - name: Smoke checks (disposable database; no external credentials)
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CHATPLATFORM_DATA_DIR="$RUNNER_TEMP/chatplatform-smoke"
+          mkdir -p "$CHATPLATFORM_DATA_DIR"
+          export ConnectionStrings__DefaultConnection="Data Source=$CHATPLATFORM_DATA_DIR/platform.db"
+          export ASPNETCORE_ENVIRONMENT=Production
+          export ASPNETCORE_URLS=http://127.0.0.1:5080
+          export WHATSAPP_VERIFY_TOKEN=ci-only-test-token
+          export WHATSAPP_APP_SECRET=ci-only-test-secret
+          dotnet run --project ChatPlatform.csproj -c Release --no-build --no-launch-profile > "$RUNNER_TEMP/chatplatform-smoke.log" 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; cat "$RUNNER_TEMP/chatplatform-smoke.log"' EXIT
+          ready=false
+          for i in {1..45}; do
+            if curl --fail --silent http://127.0.0.1:5080/health > /dev/null; then ready=true; break; fi
+            if ! kill -0 "$pid" 2>/dev/null; then break; fi
+            sleep 2
+          done
+          test "$ready" = true
+          base=http://127.0.0.1:5080
+          test "$(curl -fsS "$base/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")" = 12345
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$base/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345")" = 401
+          test "$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{}' "$base/webhook")" = 401
