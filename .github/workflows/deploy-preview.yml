@@ -1,0 +1,79 @@
+name: Isolated Fly preview
+on:
+  push:
+    branches: ['development/fly-preview-20261121']
+    paths:
+      - 'fly.preview.toml'
+      - '.github/workflows/deploy-preview.yml'
+      - 'Infrastructure/Preview/**'
+      - 'tests/preview_smoke.py'
+      - 'Controlers/PreviewController.cs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: isolated-fly-preview
+  cancel-in-progress: true
+jobs:
+  credential-check:
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_PREVIEW_API_TOKEN }}
+    steps:
+      - name: Check dedicated repository secret without displaying it
+        shell: bash
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_PREVIEW_API_TOKEN is not available to this run. Add it as a Repository secret under Settings > Secrets and variables > Actions (not Variables, Dependabot or an unattached Environment)."
+            exit 1
+          fi
+          echo "Dedicated deployment secret is present; authorization will be verified by flyctl."
+  verify:
+    needs: credential-check
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    uses: ./.github/workflows/isolated-verification.yml
+  preview-smoke:
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Verify actual preview startup, login, simulated inbound and outbound
+        run: python3 tests/preview_smoke.py
+  preview:
+    if: github.ref == 'refs/heads/development/fly-preview-20261121'
+    needs: preview-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP: chatplatform-preview-moknethunter-20261121
+      FLY_API_TOKEN: ${{ secrets.FLY_PREVIEW_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Check isolated target or create it in existing app organization
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APP" = chatplatform-preview-moknethunter-20261121
+          if [ -z "$FLY_API_TOKEN" ]; then echo "::error::Missing FLY_PREVIEW_API_TOKEN repository secret; do not use a production deployment token"; exit 1; fi
+          if ! flyctl status --app "$APP" >/dev/null 2>&1; then
+            # Only read the organization of the existing production app; never deploy to it.
+            org="$(flyctl apps list --json | jq -r '.[] | select((.Name // .name) == "chatplatform") | (.Organization // .organization) | if type == "object" then (.Slug // .slug // empty) else . end' | head -n1)"
+            if [ -z "$org" ] || [ "$org" = null ]; then echo "::error::Create the dedicated preview app and provide its app-scoped token."; exit 1; fi
+            flyctl apps create "$APP" --org "$org"
+          fi
+      - name: Deploy only isolated preview (one machine, no production volumes)
+        run: flyctl deploy --remote-only --ha=false --yes --app "$APP" --config fly.preview.toml
+      - name: Confirm preview health
+        run: |
+          curl --fail --retry 10 --retry-all-errors --retry-delay 5 --max-time 20 "https://$APP.fly.dev/health"
+          curl --fail --retry 5 --max-time 20 "https://$APP.fly.dev/ready"
+          curl --fail --max-time 20 "https://$APP.fly.dev/login.html" > /dev/null
+          echo "Preview: https://$APP.fly.dev/login.html" >> "$GITHUB_STEP_SUMMARY"

@@ -24,6 +24,8 @@ using Polly;
 using Polly.Extensions.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 var builder = WebApplication.CreateBuilder(args);
+var preview = builder.Environment.IsEnvironment("Preview");
+if(preview) ChatPlatform.Infrastructure.Preview.PreviewSetup.Configure(builder);
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
 options.ForwardedHeaders =
@@ -182,8 +184,16 @@ StringComparer.OrdinalIgnoreCase);
 // ============================================================
 // 8. Build Application
 // ============================================================
+if(preview) ChatPlatform.Infrastructure.Preview.PreviewSetup.Register(builder.Services);
 var app = builder.Build();
 app.UseForwardedHeaders();
+if(preview)app.Use(async (ctx,next)=>{
+    // Fly enforces HTTPS at the edge on this exact dedicated demo hostname.
+    if(Environment.GetEnvironmentVariable("FLY_APP_NAME")==ChatPlatform.Infrastructure.Preview.PreviewSetup.AppName &&
+        ctx.Request.Host.Host==ChatPlatform.Infrastructure.Preview.PreviewSetup.AppName+".fly.dev")ctx.Request.Scheme="https";
+    if(ctx.Request.Path.StartsWithSegments("/webhook")){ctx.Response.StatusCode=404;return;}
+    await next(ctx);
+});
 // ============================================================
 // 9. Database Initialization
 // ============================================================
@@ -215,6 +225,7 @@ if (!string.IsNullOrWhiteSpace(configuredPhone) && !string.IsNullOrWhiteSpace(wh
         logger.LogInformation("Initialized encrypted token for configured WhatsApp account.");
     }
 }
+if(preview)await ChatPlatform.Infrastructure.Preview.PreviewSetup.SeedAsync(db,scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>());
 logger.LogInformation("ChatPlatform database initialized successfully.");
 }
 catch (Exception ex)
