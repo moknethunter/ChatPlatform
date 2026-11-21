@@ -36,6 +36,7 @@ jobs:
           export ASPNETCORE_ENVIRONMENT=Production
           export Campaigns__Enabled=true # disposable CI only; future-scheduled fake recipients
           export ASPNETCORE_URLS=http://127.0.0.1:5080
+          export CHATPLATFORM_REVISION="$GITHUB_SHA"
           export WHATSAPP_VERIFY_TOKEN=ci-only-test-token
           export WHATSAPP_APP_SECRET=ci-only-test-secret
           # Simulate an older persistent volume with nullable account metadata.
@@ -69,7 +70,7 @@ jobs:
           done
           test "$ready" = true
           base=http://127.0.0.1:5080
-          curl -fsS "$base/ready" > /dev/null
+          python3 scripts/check_deployment.py --base-url "$base" --expected-revision "$GITHUB_SHA" --attempts 1
           python3 tests/security_smoke.py
       - name: Manual send and auto-reply through mocked Graph API
         run: dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
