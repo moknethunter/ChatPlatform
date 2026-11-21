@@ -64,95 +64,93 @@ public sealed class WhatsAppController : ControllerBase
         return Ok(accounts);
     }
 
-    // POST: api/whatsapp/validate-credentials
-    [HttpPost("validate-credentials")]
-    public async Task<IActionResult> ValidateCredentials([FromBody] ValidateMetaRequest req, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(req.PhoneNumberId) || 
-            string.IsNullOrWhiteSpace(req.WabaId) || 
-            string.IsNullOrWhiteSpace(req.AccessToken))
-            return BadRequest(new { valid = false, message = "جميع الحقول مطلوبة." });
+    private static bool ValidMetaId(string? id) => id is { Length: >= 1 and <= 32 } && id.All(c => c is >= '0' and <= '9');
+    private static bool ValidToken(string? token) => token is { Length: >= 1 and <= 4096 } && !token.Any(char.IsWhiteSpace);
 
+    // A successful phone lookup alone does not establish membership in the supplied WABA.
+    // Fail closed if the phone is not on the first returned page; never follow arbitrary paging URLs.
+    private async Task<bool> VerifyAccount(string phone, string waba, string token, CancellationToken ct)
+    {
+        if (!ValidMetaId(phone) || !ValidMetaId(waba) || !ValidToken(token)) return false;
         try
         {
             var client = _httpFactory.CreateClient("whatsapp");
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", req.AccessToken);
-
-            // 1. التحقق من Phone Number ID
-            var phoneRes = await client.GetAsync($"{req.PhoneNumberId}?fields=id,display_phone_number", ct);
-            if (!phoneRes.IsSuccessStatusCode)
-                return Ok(new { valid = false, message = "فشل التحقق من Phone Number ID. تأكد من الرقم والتوكن." });
-
-            // 2. التحقق من WABA ID
-            var wabaRes = await client.GetAsync($"{req.WabaId}/phone_numbers", ct);
-            if (!wabaRes.IsSuccessStatusCode)
-                return Ok(new { valid = false, message = "فشل التحقق من WABA ID. تأكد من الصلاحيات." });
-
-            return Ok(new { valid = true, message = "تم التحقق بنجاح." });
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{waba}/phone_numbers?fields=id&limit=100");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            using var response = await client.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode) return false;
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            return json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
+                && data.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.Object &&
+                    x.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == phone);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or FormatException or TaskCanceledException)
         {
-            _logger.LogError(ex, "Error validating Meta credentials.");
-            return StatusCode(500, new { valid = false, message = "خطأ في الاتصال بميتا." });
+            _logger.LogWarning("Meta account verification failed: {Kind}", ex.GetType().Name);
+            return false;
         }
     }
 
-    // POST: api/whatsapp/accounts
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [HttpPost("validate-credentials")]
+    public async Task<IActionResult> ValidateCredentials([FromBody] ValidateMetaRequest req, CancellationToken ct)
+    {
+        var valid = await VerifyAccount(req.PhoneNumberId, req.WabaId, req.AccessToken, ct);
+        return Ok(new { valid, message = valid ? "تم التحقق من ملكية الرقم ضمن WABA." : "تعذر التحقق من البيانات." });
+    }
+
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPost("accounts")]
     public async Task<IActionResult> CreateAccount([FromBody] CreateTenantRequest dto, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(dto.TenantId) || 
-            string.IsNullOrWhiteSpace(dto.PhoneNumberId) || 
-            string.IsNullOrWhiteSpace(dto.AccessToken))
-            return BadRequest(new { message = "البيانات غير مكتملة." });
-
-        var existing = await _db.WhatsAppTenants
-            .FirstOrDefaultAsync(x => x.PhoneNumberId == dto.PhoneNumberId, ct);
-
-        if (existing != null)
-            return BadRequest(new { message = "رقم الهاتف هذا مرتبط بالفعل بحساب آخر." });
-
-        // تشفير التوكن قبل الحفظ
-        var encryptedToken = _protector.Protect(dto.AccessToken);
-
-        var account = new WhatsAppTenantEntity
-        {
-            TenantId = dto.TenantId,
-            PhoneNumberId = dto.PhoneNumberId,
-            WabaId = dto.WabaId,
-            BusinessTokenEncrypted = encryptedToken,
-            IsActive = true
-        };
-
+        var tenant = User.TenantId();
+        if (dto.TenantId != tenant) return Forbid();
+        if (!ValidMetaId(dto.PhoneNumberId) || !ValidMetaId(dto.WabaId) || !ValidToken(dto.AccessToken))
+            return BadRequest(new { error = "invalid_credentials" });
+        if (await _db.WhatsAppTenants.AnyAsync(x => x.PhoneNumberId == dto.PhoneNumberId, ct))
+            return Conflict(new { error = "account_already_registered" });
+        if (!await VerifyAccount(dto.PhoneNumberId, dto.WabaId, dto.AccessToken, ct))
+            return BadRequest(new { error = "account_verification_failed" });
+        var account = new WhatsAppTenantEntity { TenantId = tenant, PhoneNumberId = dto.PhoneNumberId,
+            WabaId = dto.WabaId, BusinessTokenEncrypted = _protector.Protect(dto.AccessToken), IsActive = true };
         _db.WhatsAppTenants.Add(account);
-        await _db.SaveChangesAsync(ct);
-
-        return Ok(new { message = "تم حفظ الحساب بنجاح." });
+        try { await _db.SaveChangesAsync(ct); }
+        catch (DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            if (await _db.WhatsAppTenants.AnyAsync(x => x.PhoneNumberId == dto.PhoneNumberId, ct))
+                return Conflict(new { error = "account_already_registered" });
+            throw;
+        }
+        return Ok(new { id = account.Id, message = "saved" });
     }
 
-    // PUT: api/whatsapp/accounts/{id}/token
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPut("accounts/{id}/token")]
     public async Task<IActionResult> UpdateToken(string id, [FromBody] UpdateTokenRequest req, CancellationToken ct)
     {
-        var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.TenantId == id, ct);
-        if (account == null) return NotFound(new { message = "الحساب غير موجود." });
-
+        var tenant = User.TenantId();
+        var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
+        if (account == null) return NotFound();
+        if (!await VerifyAccount(account.PhoneNumberId, account.WabaId, req.AccessToken, ct))
+            return BadRequest(new { error = "account_verification_failed" });
         account.BusinessTokenEncrypted = _protector.Protect(req.AccessToken);
         await _db.SaveChangesAsync(ct);
-
-        return Ok(new { message = "تم تحديث التوكن بنجاح." });
+        return Ok(new { message = "updated" });
     }
 
-    // DELETE: api/whatsapp/accounts/{id}
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpDelete("accounts/{id}")]
     public async Task<IActionResult> DeleteAccount(string id, CancellationToken ct)
     {
-        var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.TenantId == id, ct);
+        var tenant = User.TenantId();
+        var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (account == null) return NotFound();
-
-        _db.WhatsAppTenants.Remove(account);
+        // Preserve ownership and history. A disconnected phone must never become claimable by another tenant.
+        account.IsActive = false;
+        account.BusinessTokenEncrypted = "";
         await _db.SaveChangesAsync(ct);
-        return Ok(new { message = "تم الحذف بنجاح." });
+        return Ok(new { message = "deactivated" });
     }
 
     // =================================================================

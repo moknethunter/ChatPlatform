@@ -21,6 +21,8 @@ public sealed class MessagesController : ControllerBase
     public sealed record SendTextRequest(string? To, JsonElement Text, string? PhoneNumberId,
         string? TenantId, string? WhatsAppTenantId, string? Type);
 
+    public sealed record SendTemplateRequest(string? To, JsonElement Template, string? PhoneNumberId, string? TenantId, string? WhatsAppTenantId);
+
     [HttpPost("send")]
     public async Task<IActionResult> Send([FromBody] SendTextRequest req, CancellationToken ct)
     {
@@ -35,9 +37,49 @@ public sealed class MessagesController : ControllerBase
         var text = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
         if (string.IsNullOrWhiteSpace(text) || text.Length > 4096) return BadRequest(new { error = "invalid_text" });
 
+        var payload = JsonSerializer.Serialize(new { messaging_product = "whatsapp", recipient_type = "individual", to, type = "text", text = new { body = text, preview_url = false } });
+        return await Queue(tenant, to, req.PhoneNumberId, req.WhatsAppTenantId, "text", text, payload, ct);
+    }
+
+    [HttpPost("send-template")]
+    public async Task<IActionResult> SendTemplate([FromBody] SendTemplateRequest req, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        if (!string.IsNullOrEmpty(req.TenantId) && req.TenantId != tenant) return Forbid();
+        var to = req.To?.Trim().TrimStart('+');
+        if (string.IsNullOrEmpty(to) || to.Length is < 7 or > 15 || to[0] == '0'
+            || to.Any(c => c < '0' || c > '9')) return BadRequest(new { error = "invalid_recipient" });
+        var template = req.Template;
+        if (template.ValueKind != JsonValueKind.Object ||
+            !template.TryGetProperty("name", out var nameEl) || nameEl.ValueKind != JsonValueKind.String ||
+            !template.TryGetProperty("language", out var lang) || lang.ValueKind != JsonValueKind.Object ||
+            !lang.TryGetProperty("code", out var codeEl) || codeEl.ValueKind != JsonValueKind.String)
+            return BadRequest(new { error = "invalid_template" });
+        var name = nameEl.GetString()!;
+        var code = codeEl.GetString()!;
+        if (name.Length is < 1 or > 512 || name.Any(c => !(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_'))
+            || code.Length is < 2 or > 20 || code.Any(c => !(char.IsAsciiLetter(c) || c == '_')))
+            return BadRequest(new { error = "invalid_template" });
+        JsonElement? components = null;
+        if (template.TryGetProperty("components", out var comp))
+        {
+            if (comp.ValueKind != JsonValueKind.Array || comp.GetArrayLength() > 20 || comp.GetRawText().Length > 32000)
+                return BadRequest(new { error = "invalid_components" });
+            components = comp;
+        }
+        // Only the selected tenant's token can send this template. Meta remains authoritative for approval.
+        var templatePayload = new Dictionary<string, object> { ["name"] = name, ["language"] = new { code } };
+        if (components.HasValue && components.Value.GetArrayLength() > 0) templatePayload["components"] = components.Value;
+        var payload = JsonSerializer.Serialize(new { messaging_product = "whatsapp", recipient_type = "individual", to, type = "template", template = templatePayload });
+        return await Queue(tenant, to, req.PhoneNumberId, req.WhatsAppTenantId, "template", name, payload, ct);
+    }
+
+    private async Task<IActionResult> Queue(string tenant, string to, string? phoneNumberId, string? whatsAppTenantId,
+        string messageType, string preview, string payload, CancellationToken ct)
+    {
         var query = _db.WhatsAppTenants.AsNoTracking().Where(a => a.TenantId == tenant && a.IsActive);
-        if (!string.IsNullOrEmpty(req.PhoneNumberId)) query = query.Where(a => a.PhoneNumberId == req.PhoneNumberId);
-        if (!string.IsNullOrEmpty(req.WhatsAppTenantId)) query = query.Where(a => a.Id == req.WhatsAppTenantId);
+        if (!string.IsNullOrEmpty(phoneNumberId)) query = query.Where(a => a.PhoneNumberId == phoneNumberId);
+        if (!string.IsNullOrEmpty(whatsAppTenantId)) query = query.Where(a => a.Id == whatsAppTenantId);
         var accounts = await query.Take(2).ToListAsync(ct);
         if (accounts.Count == 0) return NotFound(new { error = "account_not_found" });
         if (accounts.Count != 1) return BadRequest(new { error = "select_account" });
@@ -50,7 +92,6 @@ public sealed class MessagesController : ControllerBase
         if (suppliedKey.Length > 128) return BadRequest(new { error = "invalid_idempotency_key" });
         if (string.IsNullOrEmpty(suppliedKey)) suppliedKey = Guid.NewGuid().ToString("N");
         var key = "api:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tenant + "\n" + suppliedKey)));
-        var payload = JsonSerializer.Serialize(new { messaging_product = "whatsapp", recipient_type = "individual", to, type = "text", text = new { body = text, preview_url = false } });
         async Task<IActionResult?> Existing()
         {
             var existing = await _db.WhatsAppOutbox.AsNoTracking()
@@ -65,20 +106,26 @@ public sealed class MessagesController : ControllerBase
 
         var conversation = await _db.WhatsAppConversations.FirstOrDefaultAsync(c =>
             c.TenantId == tenant && c.PhoneNumberId == account.PhoneNumberId && c.ContactPhone == to, ct);
-        if (conversation?.LastInboundAtUtc is not DateTime inbound || inbound > now || now - inbound >= TimeSpan.FromHours(24))
+        if (messageType == "text" && (conversation?.LastInboundAtUtc is not DateTime inbound || inbound > now || now - inbound >= TimeSpan.FromHours(24)))
             return Conflict(new { error = "window_closed_use_template" });
+        if (conversation == null)
+        {
+            conversation = new WhatsAppConversationEntity { TenantId = tenant, PhoneNumberId = account.PhoneNumberId,
+                ContactPhone = to, CreatedAtUtc = now, UpdatedAtUtc = now };
+            _db.WhatsAppConversations.Add(conversation);
+        }
 
         var message = new WhatsAppMessageEntity
         {
-            TenantId = tenant, ConversationId = conversation.Id, Direction = "Outbound", MessageType = "text",
-            ContentJson = payload, TextPreview = text.Length > 200 ? text[..200] : text,
+            TenantId = tenant, ConversationId = conversation.Id, Direction = "Outbound", MessageType = messageType,
+            ContentJson = payload, TextPreview = preview.Length > 200 ? preview[..200] : preview,
             Status = "Queued", TimestampUtc = now, CreatedAtUtc = now
         };
         _db.WhatsAppMessages.Add(message);
         _db.WhatsAppOutbox.Add(new WhatsAppOutboxEntity
         {
             TenantId = tenant, IdempotencyKey = key, MessageId = message.Id,
-            PhoneNumberId = account.PhoneNumberId, RecipientPhone = to, MessageType = "text",
+            PhoneNumberId = account.PhoneNumberId, RecipientPhone = to, MessageType = messageType,
             PayloadJson = payload, Status = "Pending", CreatedAtUtc = now, NextAttemptAtUtc = now, UpdatedAtUtc = now
         });
         conversation.UpdatedAtUtc = now;

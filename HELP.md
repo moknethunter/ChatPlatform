@@ -86,3 +86,8 @@ curl -fsS https://chatplatform.fly.dev/ready
 - CI uses synthetic credentials and a disposable database. Run tests/security_smoke.py against the isolated service configured by the workflow; never run against production.
 
 - Template schema migration adds missing MetaTemplateId and UpdatedAtUtc without deleting rows. Back up the production volume and test restore before applying migrations. Security smoke tests use fake accounts and assert foreign account/invalid session requests never reach outbound delivery.
+
+## Tenant account and template sending candidate
+- Manual account creation validates numeric Meta IDs and confirms the phone belongs to the specified WABA using the supplied token before storing it. Only an organization Admin may create or rotate credentials. Deactivation preserves ownership and removes the token. Legacy accounts without a WABA ID need a reviewed migration; OAuth onboarding remains disabled.
+- Template sends use the same tenant-scoped durable outbox as text sends. Meta decides whether the template is approved; queued does not mean sent. The sender remains responsible for recipient opt-in and Meta policy compliance. Negative HTTP tests do not contact Meta; positive account verification and template delivery need mocked integration tests.
+- The first WABA phone list page is checked; missing numbers are rejected rather than following untrusted paging URLs. Connector endpoints, SignalR and embedded signup remain disabled pending review.

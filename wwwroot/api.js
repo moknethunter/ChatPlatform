@@ -378,6 +378,7 @@
                         fallbackTemplateName: options.fallbackTemplateName || null,
                         fallbackTemplateLanguage: normalizeMetaLanguage(options.fallbackTemplateLanguage || "ar"),
                         tenantId: options.tenantId || null,
+                        phoneNumberId: options.phoneNumberId || null,
                         whatsAppTenantId: options.whatsAppTenantId || null
                     }
                 });
@@ -419,6 +420,7 @@
                         messaging_product: "whatsapp",
                         to: cleanTo,
                         type: "template",
+                        phoneNumberId: options.phoneNumberId || null,
                         template: { name, language: { code: langCode }, components },
                         tenantId: options.tenantId || null,
                         whatsAppTenantId: options.whatsAppTenantId || null
@@ -427,9 +429,11 @@
             },
 
             // --- Tenants / WhatsApp Accounts - بدون this لتتوافق مع whatsapp.html ---
+            getIdentity(opts = {}) { return request("/api/auth/me", { signal: opts.signal }); },
+            logout() { return request("/api/auth/logout", { method: "POST" }); },
             async getTenants(opts = {}) {
-                const data = await request(API.tenants, { signal: opts.signal });
-                return unwrapList(data);
+                const identity = await request("/api/auth/me", { signal: opts.signal });
+                return [{ id: identity.tenantId, tenantId: identity.tenantId, name: identity.tenantId }];
             },
             createTenant(data, opts = {}) {
                 if (!data || typeof data !== "object") throw new ApiError("بيانات حساب واتساب غير صالحة.");
@@ -445,11 +449,13 @@
             },
             deleteWhatsAppAccount(id, opts = {}) {
                 id = validateId(id, "معرّف حساب واتساب");
-                return request(`${API.tenants}/${encodeURIComponent(id)}`, { method: "DELETE", signal: opts.signal });
+                return request("/api/whatsapp/accounts/" + encodeURIComponent(id), { method: "DELETE", signal: opts.signal });
             },
-            getWhatsAppAccounts(opts = {}) { return api.getTenants(opts); },
-            getWhatsAppTenants(opts = {}) { return api.getTenants(opts); },
-            createWhatsAppAccount(data, opts = {}) { return api.createTenant(data, opts); },
+            getWhatsAppAccounts(opts = {}) { return request("/api/whatsapp/accounts", { signal: opts.signal }); },
+            getWhatsAppTenants(opts = {}) { return api.getWhatsAppAccounts(opts); },
+            createWhatsAppAccount(data, opts = {}) { return request("/api/whatsapp/accounts", { method: "POST", body: data, signal: opts.signal }); },
+            validateMetaCredentials(data, opts = {}) { return request("/api/whatsapp/validate-credentials", { method: "POST", body: data, signal: opts.signal }); },
+            updateWhatsAppToken(id, data, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/token", { method: "PUT", body: data, signal: opts.signal }); },
 
             getConnectors(opts = {}) { return request(API.connectors, { signal: opts.signal }); },
             createConnector(data, opts = {}) {

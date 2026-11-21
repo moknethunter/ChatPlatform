@@ -181,56 +181,7 @@ public static class EndpointMapper
             });
         });
 
-        // 8. WhatsApp Meta - إرسال قالب معتمد - متوافق مع Meta فقط
-        app.MapPost(ApiEndpoints.WhatsAppSendTemplate, async (
-            HttpRequest request,
-            IHttpClientFactory httpFactory,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                using var doc = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct);
-                var root = doc.RootElement;
-
-                if (!root.TryGetProperty("to", out var to) ||
-                    !root.TryGetProperty("template", out var template))
-                    return Results.BadRequest(new { error = "to و template مطلوبان." });
-
-                var cleanTo = to.GetString()?.Trim().TrimStart('+').Replace(" ", "").Replace("-", "");
-                if (string.IsNullOrWhiteSpace(cleanTo))
-                    return Results.BadRequest(new { error = "رقم المستلم غير صالح." });
-
-                var phoneId = configuration["WhatsApp:PhoneNumberId"];
-                if (string.IsNullOrWhiteSpace(phoneId))
-                    return Results.BadRequest(new { error = "WhatsApp:PhoneNumberId غير معين." });
-
-                var payload = new
-                {
-                    messaging_product = "whatsapp",
-                    to = cleanTo,
-                    type = "template",
-                    template = new
-                    {
-                        name = template.GetProperty("name").GetString(),
-                        language = new { code = template.TryGetProperty("language", out var lang) && lang.TryGetProperty("code", out var code) ? code.GetString() ?? "ar" : "ar" },
-                        components = template.TryGetProperty("components", out var comp) ? comp : (JsonElement?)null
-                    }
-                };
-
-                var client = httpFactory.CreateClient("WhatsAppCloudApi");
-                var response = await client.PostAsJsonAsync($"{phoneId}/messages", payload, ct);
-                var content = await response.Content.ReadAsStringAsync(ct);
-
-                if (!response.IsSuccessStatusCode)
-                    return Results.Json(new { error = JsonDocument.Parse(content).RootElement }, statusCode: (int)response.StatusCode);
-
-                return Results.Ok(JsonDocument.Parse(content).RootElement);
-            }
-            catch (JsonException)
-            {
-                return Results.BadRequest(new { error = "Invalid JSON body" });
-            }
-        });
+        // Template sending is implemented by the authenticated durable MessagesController.
 
         // 9. Controllers
         app.MapControllers();
