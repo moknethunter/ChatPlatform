@@ -62,3 +62,33 @@ jobs:
           with sqlite3.connect(sys.argv[1]) as db:
               assert db.execute("SELECT TenantId FROM WhatsAppTenants WHERE PhoneNumberId = ?", ('999999999999',)).fetchone() == ('ci-tenant-a',)
           PY
+
+          # Send a signed synthetic inbound message; never contact Meta.
+          python3 - <<'PY'
+          import json, hmac, hashlib, urllib.request, time
+          base = "http://127.0.0.1:5080"
+          body = json.dumps({"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.inbound.1","from":"15550000001","type":"text","text":{"body":"CI inbound message"}}]}}]}]}).encode()
+          signature = "sha256=" + hmac.new(b"ci-only-test-secret", body, hashlib.sha256).hexdigest()
+          for _ in range(2):
+              request = urllib.request.Request(base+"/webhook", data=body, headers={"Content-Type":"application/json","X-Hub-Signature-256":signature})
+              with urllib.request.urlopen(request, timeout=10) as response:
+                  assert response.status == 200
+          def get(path):
+              with urllib.request.urlopen(base+path, timeout=10) as response:
+                  return json.load(response)
+          # Wait for the real background worker to persist the message.
+          for _ in range(30):
+              conversations = get("/api/conversations?tenantId=ci-tenant-a")
+              match = next((c for c in conversations if c["contactPhone"]=="15550000001"), None)
+              if match and match.get("lastMessage"):
+                  break
+              time.sleep(1)
+          else:
+              raise AssertionError("Inbound message never appeared in conversations")
+          assert match["lastMessage"]["text"] == "CI inbound message", match
+          messages = get("/api/conversations/"+match["id"]+"/messages")
+          assert sum(m.get("wamid")=="wamid.ci.inbound.1" for m in messages)==1, messages
+          assert messages[0]["textPreview"]=="CI inbound message", messages
+          assert not get("/api/conversations?tenantId=ci-tenant-b")
+          print("PASS: signed webhook -> worker -> conversation -> message API; duplicate suppressed")
+          PY
