@@ -54,3 +54,10 @@ curl -i -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:5080/webhoo
 curl -i http://127.0.0.1:5080/ready
 ```
 اختبار منع نقل ملكية حساب واتساب بين المؤسسات ينفذ تلقائياً في CI باستخدام بيانات وهمية. لا تختبره على حساب حقيقي.
+
+## اختبار الإرسال والرد الآلي المعزول
+```bash
+# اختبار الإرسال والرد الآلي عبر عامل Outbox وواجهة Graph وهمية، بلا اتصال خارجي
+ dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
+```
+النتيجة المتوقعة: PASS ورسالتان بحالة Sent في قاعدة الاختبار فقط. لا يدل ذلك على تسليم رسائل حقيقية عبر Meta.
