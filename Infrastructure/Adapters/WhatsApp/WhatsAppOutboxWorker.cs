@@ -74,7 +74,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             .Where(x => ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                          (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
                         && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
-                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:"))))
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
             .OrderBy(x => x.CreatedAtUtc)
             .Select(x => new { x.Id, x.Status })
             .FirstOrDefaultAsync(ct);
@@ -86,7 +86,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             .Where(x => x.Id == candidate.Id && x.Status == candidate.Status
                         && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                             (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
-                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:"))))
+                        && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.Status, StatusProcessing)
                 .SetProperty(x => x.LeaseUntilUtc, now.AddSeconds(LeaseSeconds))
@@ -174,7 +174,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             {await FailPermanentAsync(db,item,"campaign_guard_rejected",ct);return true;}
             // Ensure the queued template did not change between scheduling and dispatch.
             var expected=System.Text.Json.JsonSerializer.Serialize(new{messaging_product="whatsapp",recipient_type="individual",to=item.RecipientPhone,type="template",template=new{name=allowed.Name,language=new{code=allowed.Language}}});
-            if(item.PayloadJson!=expected){await FailPermanentAsync(db,item,"campaign_template_changed",ct);return true;}
+            if(item.PayloadJson!=expected || !await db.WhatsAppTemplates.AnyAsync(t=>t.Id==allowed.Id&&t.TenantId==item.TenantId&&t.IsActive&&t.Category=="MARKETING"&&t.Body==allowed.Body&&t.Name==allowed.Name&&t.Language==allowed.Language,ct)){await FailPermanentAsync(db,item,"campaign_template_changed",ct);return true;}
         }
 
         // 5. إرسال الرسالة عبر WhatsApp Cloud API

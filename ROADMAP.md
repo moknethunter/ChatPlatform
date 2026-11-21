@@ -50,3 +50,5 @@ Do not merge or deploy until reviewed, tested and explicitly approved.
 - [x] Multi-turn wait nodes, persistent cursor, human handoff and resume controls (candidate, CI pending).
 
 - [x] Account-specific consent evidence and revocation, lists, bounded scheduled campaigns, dispatch-time template approval/consent guards and queue status reporting (candidate, CI pending).
+
+- [x] Marketing workspace and tenant-scoped date-bounded reports (candidate; CI pending).

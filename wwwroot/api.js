@@ -343,6 +343,7 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            reports(days=7) { return request("/api/reports?days="+encodeURIComponent(days)); },
             marketingOptions() { return request("/api/marketing/options"); },
             marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
             marketingConsent(data) { return request("/api/marketing/consent",{method:"PUT",body:data}); },
@@ -634,7 +635,7 @@
                 identityText.title=identity.tenantId;
                 const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
                 const menu=[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
-                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
                 for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
                     if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
                     links.append(link);}

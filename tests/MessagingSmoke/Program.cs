@@ -33,6 +33,18 @@ try
         WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
         throw new Exception("Media type or download host security regression.");
     Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
+    // Verify approval matches the exact stored template; local status alone cannot authorize campaigns.
+    var marketingTemplate=new WhatsAppTemplateEntity{Name="offer",Language="en",Category="MARKETING",Body="Offer",IsActive=true};
+    using var approved=JsonDocument.Parse("""{"data":[{"name":"offer","language":"en","category":"MARKETING","status":"APPROVED","components":[{"type":"BODY","text":"Offer"}]}]}""");
+    using var rejected=JsonDocument.Parse("""{"data":[{"name":"offer","language":"en","category":"MARKETING","status":"REJECTED","components":[{"type":"BODY","text":"Offer"}]}]}""");
+    if(!ChatPlatform.Infrastructure.Marketing.TemplateApproval.Eligible(marketingTemplate) ||
+        !ChatPlatform.Infrastructure.Marketing.TemplateApproval.Matches(approved.RootElement,marketingTemplate) ||
+        ChatPlatform.Infrastructure.Marketing.TemplateApproval.Matches(rejected.RootElement,marketingTemplate))
+        throw new Exception("Marketing template approval guard regression.");
+    marketingTemplate.Body="Different";
+    if(ChatPlatform.Infrastructure.Marketing.TemplateApproval.Matches(approved.RootElement,marketingTemplate))
+        throw new Exception("Marketing template body mismatch accepted.");
+    Console.WriteLine("PASS: exact approved marketing template and rejected/mismatched guards.");
     // Exercise the same schema creation/compatibility logic as production.
     DbInitializer.EnsureCreated(connection);
     var requests = new ConcurrentQueue<string>();

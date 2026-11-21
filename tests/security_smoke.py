@@ -375,6 +375,14 @@ with sqlite3.connect(DB) as db:
     assert db.execute("SELECT COUNT(*) FROM ConsentEvents WHERE TenantId='ci-tenant-a'").fetchone()[0]==2
 call("/api/marketing/campaigns","POST",dict(schedule,id=str(uuid.uuid4())),cookie=a,expected=409)
 print("PASS: campaign scheduling, deduplication, tenant isolation and signed opt-out cancellation")
+call("/api/reports",expected=401)
+call("/api/reports",cookie=agent,expected=403)
+ra,_=call("/api/reports?days=7",cookie=a)
+rb,_=call("/api/reports?days=7",cookie=b)
+assert len(ra["daily"])==7 and sum(d["inbound"] for d in ra["daily"])>0
+assert sum(d["outbound"] for d in rb["daily"])==0 and rb["consent"]==[]
+assert any(x["granted"]==False and x["count"]==1 for x in ra["consent"])
+print("PASS: tenant-scoped date-bounded reports and consent aggregates")
 call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
