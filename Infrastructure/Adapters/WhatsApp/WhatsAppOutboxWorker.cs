@@ -20,7 +20,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
     private const string StatusDeadLetter = "DeadLetter";
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly IDataProtector _protector;
+    private readonly WhatsAppTokenProtection _protector;
     private readonly ILogger<WhatsAppOutboxWorker> _logger;
 
     private readonly string _leaseOwner = 
@@ -32,7 +32,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         ILogger<WhatsAppOutboxWorker> logger)
     {
         _scopeFactory = scopeFactory;
-        _protector = protection.CreateProtector("BusinessToken");
+        _protector = new WhatsAppTokenProtection(protection);
         _logger = logger;
     }
 

@@ -61,3 +61,14 @@ curl -i http://127.0.0.1:5080/ready
  dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
 ```
 النتيجة المتوقعة: PASS ورسالتان بحالة Sent في قاعدة الاختبار فقط. لا يدل ذلك على تسليم رسائل حقيقية عبر Meta.
+
+## تشخيص حسابات واتساب في الإنتاج (قراءة فقط)
+```bash
+# التحقق من نشر نسخة سليمة وحالة الآلات
+fly status -a chatplatform
+# قراءة سجلات الخادم، وابحث عن TraceId المطابق للخطأ؛ لا تشارك الأسرار
+fly logs -a chatplatform --no-tail
+# فحص اتصال قاعدة البيانات
+curl -fsS https://chatplatform.fly.dev/ready
+``
+من لوحة Fly.io افتح Monitoring ثم Live Logs قبل إعادة طلب accounts. لا تحذف مجلد /data أو قاعدة البيانات. وجود configured=true يثبت وجود الإعدادات فقط، وليس صلاحية التوكن أو اشتراك messages لدى Meta. اختبار CI يحاكي قاعدة قديمة وتوكنات وهمية، ويتحقق من القراءة والتشفير دون إرسال حقيقي.

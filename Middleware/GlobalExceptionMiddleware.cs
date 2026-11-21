@@ -22,7 +22,8 @@ public sealed class GlobalExceptionMiddleware
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Unhandled exception occurred: {Message}", ex.Message);
+            _log.LogError(ex, "Unhandled request {Method} {Path}; TraceId={TraceId}",
+                context.Request.Method, context.Request.Path, context.TraceIdentifier);
             
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
             context.Response.ContentType = "application/json";
