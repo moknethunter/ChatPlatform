@@ -92,3 +92,5 @@ jobs:
           assert not get("/api/conversations?tenantId=ci-tenant-b")
           print("PASS: signed webhook -> worker -> conversation -> message API; duplicate suppressed")
           PY
+      - name: Manual send and auto-reply through mocked Graph API
+        run: dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
