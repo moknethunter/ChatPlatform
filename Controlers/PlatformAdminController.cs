@@ -65,6 +65,7 @@ public sealed class PlatformAdminController(PlatformDbContext db,IConfiguration 
         if(s==null){if(r.Version!=0)return Conflict(new{error="stale_version"});s=new TenantSubscriptionEntity{TenantId=id};db.TenantSubscriptions.Add(s);}
         else{if(s.Version!=r.Version)return Conflict(new{error="stale_version"});s.Version++;}
         s.PlanId=r.PlanId;s.Enabled=r.Enabled.Value;s.EndsAtUtc=r.EndsAt.UtcDateTime;s.UpdatedAtUtc=DateTime.UtcNow;
+        if(!s.Enabled)await ChatPlatform.Infrastructure.Marketing.Consent.CancelAsync(db,id,db.WhatsAppOutbox.Where(o=>o.TenantId==id),DateTime.UtcNow,"subscription_suspended",ct);
         Audit("subscription_changed",id,$"{r.PlanId} enabled={r.Enabled} until={s.EndsAtUtc:O}");
         await db.SaveChangesAsync(ct);await tx.CommitAsync(ct);return Ok(s);
     }
@@ -75,6 +76,7 @@ public sealed class PlatformAdminController(PlatformDbContext db,IConfiguration 
         await using var tx=await db.Database.BeginTransactionAsync(ct);
         var t=await db.Tenants.SingleOrDefaultAsync(x=>x.Id==id,ct);if(t==null)return NotFound();
         t.IsActive=r.IsActive.Value;
+        if(!t.IsActive)await ChatPlatform.Infrastructure.Marketing.Consent.CancelAsync(db,id,db.WhatsAppOutbox.Where(o=>o.TenantId==id),DateTime.UtcNow,"tenant_suspended",ct);
         await db.PlatformSessions.Where(s=>s.TenantId==id).ExecuteDeleteAsync(ct);
         Audit("tenant_activity",id,t.IsActive.ToString());await db.SaveChangesAsync(ct);await tx.CommitAsync(ct);return NoContent();
     }

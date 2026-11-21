@@ -182,6 +182,14 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             if(item.PayloadJson!=expected || !await db.WhatsAppTemplates.AnyAsync(t=>t.Id==allowed.Id&&t.TenantId==item.TenantId&&t.IsActive&&t.Category=="MARKETING"&&t.Body==allowed.Body&&t.Name==allowed.Name&&t.Language==allowed.Language,ct)){await FailPermanentAsync(db,item,"campaign_template_changed",ct);return true;}
         }
 
+        // Revalidate tenant/account/entitlement after any remote template approval lookup.
+        // Once a network request has begun it cannot be recalled.
+        var latest=await Entitlements.ReadAsync(db,item.TenantId,DateTime.UtcNow,ct);
+        if(!latest.Active||(marketing&&latest.Managed&&!latest.Plan!.Campaigns)||
+            !await db.WhatsAppTenants.AnyAsync(a=>a.Id==account.Id&&a.TenantId==item.TenantId&&a.IsActive&&
+                a.BusinessTokenEncrypted==account.BusinessTokenEncrypted&&db.Tenants.Any(t=>t.Id==item.TenantId&&t.IsActive),ct))
+        {await FailPermanentAsync(db,item,"subscription_or_account_changed",ct);return true;}
+
         // 5. إرسال الرسالة عبر WhatsApp Cloud API
         var result = await client.SendRawAsync(item.PhoneNumberId, token, item.PayloadJson, ct);
 

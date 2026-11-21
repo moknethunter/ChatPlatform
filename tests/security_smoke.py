@@ -473,7 +473,25 @@ call("/api/auth/me",cookie=b,expected=401)
 new_cookie=login("ci-new-admin")
 assert call("/api/auth/me",cookie=new_cookie)[0]["tenantId"]==new_tenant["id"]
 assert call("/api/subscription",cookie=new_cookie)[0]["plan"]["id"]==plan["id"]
+# Synthetic invalid token prevents network access while exercising one reserved slot.
+with sqlite3.connect(DB) as db:
+    db.execute("""INSERT INTO WhatsAppTenants(Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc,WabaId,AppId,BusinessTokenEncrypted,CreatedAt)
+       VALUES('ci-new-account',?,'999999999996',1,'2026-01-01','999999999995','','invalid-ci-ciphertext','2026-01-01')""",(new_tenant["id"],))
+new_send={"to":"15550000009","phoneNumberId":"999999999996","template":{"name":"ci_example","language":{"code":"ar"}}}
+first,_=call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=202,extra={"Idempotency-Key":"ci-quota-first"})
+repeat,_=call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=202,extra={"Idempotency-Key":"ci-quota-first"})
+assert first["id"]==repeat["id"]
+assert call("/api/subscription",cookie=new_cookie)[0]["usage"]["messages"]==1
+call("/api/messages/send-template","POST",new_send,cookie=new_cookie,expected=409,extra={"Idempotency-Key":"ci-quota-second"})
+with sqlite3.connect(DB) as db:
+    # A second synthetic future row represents a reservation made before a plan reduction.
+    scheduled_id=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppOutbox(Id,TenantId,CorrelationId,IdempotencyKey,PhoneNumberId,RecipientPhone,MessageType,PayloadJson,Status,Attempts,MaxAttempts,CreatedAtUtc,NextAttemptAtUtc,ScheduledForUtc,UpdatedAtUtc)
+       VALUES(?,?,?,'ci-future-reservation','999999999996','15550000009','template','{}','Pending',0,10,'2026-01-01','2099-01-01','2099-01-01','2026-01-01')""",(scheduled_id,new_tenant["id"],scheduled_id))
+print("PASS: one outgoing reservation, same-key replay free, distinct second send blocked")
 call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=owner,expected=204)
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT Status,LastError FROM WhatsAppOutbox WHERE Id=?",(scheduled_id,)).fetchone()==("Cancelled","tenant_suspended")
 call("/api/auth/me",cookie=new_cookie,expected=401)
 call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":True},cookie=owner,expected=204)
 call("/api/auth/me",cookie=new_cookie,expected=401)

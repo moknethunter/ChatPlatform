@@ -83,10 +83,10 @@ public sealed class TeamController(PlatformDbContext db, IConfiguration configur
     public async Task<IActionResult> SetActive(string username, SetActiveRequest req, CancellationToken ct)
     {
         var tenant = User.TenantId();
+        if(req.IsActive==null)return BadRequest();
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var agent = await db.ManagedAgents.SingleOrDefaultAsync(x => x.Username == username && x.TenantId == tenant, ct);
         if (agent == null) return NotFound();
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        if(req.IsActive==null)return BadRequest();
         if(req.IsActive.Value&&!agent.IsActive&&await Entitlements.CapacityAsync(db,tenant,"agents",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         agent.IsActive = req.IsActive.Value;
         agent.UpdatedAtUtc = DateTime.UtcNow;
