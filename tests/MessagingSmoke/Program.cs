@@ -1,4 +1,8 @@
 using System.Net;
+using System.Security.Claims;
+using ChatPlatform.Controllers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using ChatPlatform.Core.Abstractions;
@@ -77,6 +81,27 @@ try
         await adapter.HandleEventAsync(subscription.Current, ct);
     }
 
+    using (var scope = provider.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var ctrl = new MessagesController(db);
+        var context = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim("tenant_id", tenant) }, "smoke")) };
+        ctrl.ControllerContext = new ControllerContext { HttpContext = context };
+        context.Request.Headers["Idempotency-Key"] = "ci-text";
+        var text = new MessagesController.SendTextRequest(recipient, JsonSerializer.SerializeToElement("api smoke"), phoneId, tenant, null, "text");
+        if (await ctrl.Send(text, ct) is not AcceptedResult || await ctrl.Send(text, ct) is not AcceptedResult)
+            throw new Exception("Authenticated text queue or idempotency failed");
+        context.Request.Headers["Idempotency-Key"] = "ci-template";
+        var template = new MessagesController.SendTemplateRequest(recipient,
+            JsonSerializer.SerializeToElement(new { name = "ci_example", language = new { code = "ar" } }), phoneId, tenant, null);
+        if (await ctrl.SendTemplate(template, ct) is not AcceptedResult || await ctrl.SendTemplate(template, ct) is not AcceptedResult)
+            throw new Exception("Authenticated template queue or idempotency failed");
+        if (await db.WhatsAppOutbox.CountAsync(x => x.TenantId == tenant, ct) != 4)
+            throw new Exception("Duplicate queue rows detected");
+        Console.WriteLine("PASS: tenant-bound controller text/template queue; repeat keys reuse original message.");
+    }
+
     var worker = provider.GetRequiredService<WhatsAppOutboxWorker>();
     await worker.StartAsync(ct);
     try
@@ -88,12 +113,12 @@ try
             var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
             var rows = await db.WhatsAppOutbox.AsNoTracking().Where(x => x.TenantId == tenant).ToListAsync(ct);
             var messages = await db.WhatsAppMessages.AsNoTracking().Where(x => x.ConversationId == conversationId).ToListAsync(ct);
-            if (rows.Count == 2 && rows.All(x => x.Status == "Sent") &&
-                messages.Count == 2 && messages.All(x => x.Status == "Sent" && x.Wamid != null))
+            if (rows.Count == 4 && rows.All(x => x.Status == "Sent") &&
+                messages.Count == 4 && messages.All(x => x.Status == "Sent" && x.Wamid != null))
             {
-                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || requests.Count != 2)
+                if (!requests.Contains("manual smoke") || !requests.Contains("pong ping") || !requests.Contains("api smoke") || !requests.Contains("ci_example") || requests.Count != 4)
                     throw new Exception("Unexpected simulated Graph requests.");
-                Console.WriteLine("PASS: manual send event and auto-reply reached mocked Graph API; both marked Sent.");
+                Console.WriteLine("PASS: manual send, auto-reply, authenticated text and template reached mocked Graph API; all marked Sent.");
                 break;
             }
             await Task.Delay(250, ct);
@@ -116,7 +141,8 @@ sealed class FakeGraphHandler(ConcurrentQueue<string> requests) : HttpMessageHan
             request.Headers.Authorization?.Parameter != "fake-token")
             throw new InvalidOperationException("Unexpected outgoing request.");
         using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
-        requests.Enqueue(payload.RootElement.GetProperty("text").GetProperty("body").GetString()!);
+        var root = payload.RootElement;
+        requests.Enqueue(root.GetProperty("type").GetString() == "template" ? root.GetProperty("template").GetProperty("name").GetString()! : root.GetProperty("text").GetProperty("body").GetString()!);
         // No network is used. Return a different synthetic ID for each accepted message.
         return new HttpResponseMessage(HttpStatusCode.OK)
         {

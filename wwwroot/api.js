@@ -429,6 +429,7 @@
             },
 
             // --- Tenants / WhatsApp Accounts - بدون this لتتوافق مع whatsapp.html ---
+            getWhatsAppDiagnostics(opts = {}) { return request("/api/whatsapp/diagnostics", { signal: opts.signal }); },
             getIdentity(opts = {}) { return request("/api/auth/me", { signal: opts.signal }); },
             logout() { return request("/api/auth/logout", { method: "POST" }); },
             async getTenants(opts = {}) {
@@ -569,6 +570,26 @@
         window.ChatPlatformAPI = defaultClient;
         window.ChatPlatformApiError = ApiError;
         window.ChatPlatformClient = { createClient, ApiError };
+        // All pages loading the shared API client obtain the user's identity from the server.
+        document.addEventListener("DOMContentLoaded", async () => {
+            try {
+                const identity = await defaultClient.getIdentity();
+                const bar = document.createElement("div");
+                bar.setAttribute("dir", "rtl");
+                bar.style.cssText = "padding:10px 16px;background:#f0f7f4;color:#173b32;display:flex;align-items:center;gap:12px;flex-wrap:wrap";
+                const label = document.createElement("span");
+                label.textContent = identity.username + " | " + identity.tenantId + " | " + (identity.role === "Admin" ? "مدير" : "موظف");
+                const logout = document.createElement("button");
+                logout.textContent = "تسجيل الخروج";
+                logout.addEventListener("click", async () => {
+                    try { await defaultClient.logout(); location.assign("/login.html"); }
+                    catch { label.textContent = "تعذر تسجيل الخروج؛ حاول مجددًا."; }
+                });
+                bar.append(label, logout); document.body.prepend(bar);
+            } catch (err) {
+                if (err.status !== 401) console.warn("Unable to verify session");
+            }
+        }, { once: true });
     }
     if (typeof module !== "undefined" && module.exports) {
         module.exports = { createClient, ApiError, defaultClient };

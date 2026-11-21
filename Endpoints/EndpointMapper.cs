@@ -94,92 +94,22 @@ public static class EndpointMapper
         // 6. WhatsApp Webhook
         app.MapWhatsAppWebhook();
 
-        // 7. WhatsApp Meta - حالة Webhook - متوافق مع Meta فقط
-        app.MapGet(
-            ApiEndpoints.WhatsAppWebhookStatus,
-            (IOptions<WhatsAppOptions> options,
-             HttpRequest request) =>
+        // Report configuration for this tenant, never the platform's global access token or phone.
+        app.MapGet(ApiEndpoints.WhatsAppWebhookStatus, async (HttpContext ctx, PlatformDbContext db,
+            IOptions<WhatsAppOptions> options, CancellationToken ct) =>
         {
-            var whatsapp =
-                options.Value;
-
-            var token =
-                whatsapp.AccessToken;
-
-            var phoneNumberId =
-                whatsapp.PhoneNumberId;
-
-            var verifyToken =
-                whatsapp.VerifyToken;
-
-            var appSecret =
-                whatsapp.AppSecret;
-
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                token =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_TOKEN");
-            }
-
-            if (string.IsNullOrWhiteSpace(phoneNumberId))
-            {
-                phoneNumberId =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_PHONE_NUMBER_ID");
-            }
-
-            if (string.IsNullOrWhiteSpace(verifyToken))
-            {
-                verifyToken =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_VERIFY_TOKEN");
-            }
-
-            if (string.IsNullOrWhiteSpace(appSecret))
-            {
-                appSecret =
-                    Environment.GetEnvironmentVariable(
-                        "WHATSAPP_APP_SECRET");
-            }
-
-            var forwardedProto =
-                request.Headers["X-Forwarded-Proto"]
-                    .FirstOrDefault();
-
-            var scheme =
-                string.Equals(
-                    forwardedProto,
-                    "https",
-                    StringComparison.OrdinalIgnoreCase)
-                    ? "https"
-                    : request.Scheme;
-
-            var baseUrl =
-                $"{scheme}://{request.Host}";
-
+            var tenant = ChatPlatform.Security.PlatformSecurity.TenantId(ctx.User);
+            var accountConfigured = await db.WhatsAppTenants.AnyAsync(a => a.TenantId == tenant &&
+                a.IsActive && a.BusinessTokenEncrypted != "", ct);
             return Results.Ok(new
             {
-                configured =
-                    !string.IsNullOrWhiteSpace(token) &&
-                    !string.IsNullOrWhiteSpace(phoneNumberId) &&
-                    !string.IsNullOrWhiteSpace(verifyToken),
-
-                phoneNumberId,
-
-                apiVersion =
-                    whatsapp.ApiVersion,
-
-                webhookUrl =
-                    $"{baseUrl}{ApiEndpoints.WhatsAppWebhook}",
-
-                verifyTokenConfigured =
-                    !string.IsNullOrWhiteSpace(verifyToken),
-
-                appSecretConfigured =
-                    !string.IsNullOrWhiteSpace(appSecret)
+                configured = accountConfigured,
+                apiVersion = options.Value.ApiVersion,
+                webhookUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/webhook",
+                verifyTokenConfigured = !string.IsNullOrWhiteSpace(options.Value.VerifyToken),
+                appSecretConfigured = !string.IsNullOrWhiteSpace(options.Value.AppSecret)
             });
-        });
+        }).RequireAuthorization("TenantRead");
 
         // Template sending is implemented by the authenticated durable MessagesController.
 

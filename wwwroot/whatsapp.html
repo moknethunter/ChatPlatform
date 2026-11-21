@@ -373,23 +373,23 @@ async function loadDiagnostics() {
         
         // Update Status Cards
         updateDot("metaStatusDot", data.metaConnected ? "green" : "red");
-        $("metaStatusText").textContent = data.metaConnected ? "متصل" : "غير متصل";
+        $("metaStatusText").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "متصل" : "غير متصل";
         
         updateDot("webhookStatusDot", data.webhookVerified ? "green" : "yellow");
         $("webhookStatusText").textContent = data.webhookVerified ? "يعمل" : "يحتاج تحقق";
         
         // Update Diagnostics List
-        $("diagMetaApi").textContent = data.metaConnected ? "Connected" : "Disconnected";
+        $("diagMetaApi").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "Connected" : "Disconnected";
         $("diagMetaApi").style.color = data.metaConnected ? "var(--success)" : "var(--danger)";
         
-        $("diagToken").textContent = data.tokenValid ? "Valid" : "Invalid";
+        $("diagToken").textContent = data.tokenValid == null ? "غير مفحوص" : data.tokenValid ? "Valid" : "Invalid";
         $("diagToken").style.color = data.tokenValid ? "var(--success)" : "var(--danger)";
         
-        $("diagWebhookVerify").textContent = data.webhookVerified ? "Passed" : "Failed";
+        $("diagWebhookVerify").textContent = data.webhookVerified == null ? "غير مفحوص" : data.webhookVerified ? "Passed" : "Failed";
         $("diagWebhookSig").textContent = data.webhookSignatureEnabled ? "Enabled" : "Disabled";
         
-        $("diagInbox").textContent = data.inboxWorkerRunning ? "Running" : "Stopped";
-        $("diagOutbox").textContent = data.outboxWorkerRunning ? "Running" : "Stopped";
+        $("diagInbox").textContent = data.inboxWorkerRunning == null ? "غير مفحوص" : data.inboxWorkerRunning ? "Running" : "Stopped";
+        $("diagOutbox").textContent = data.outboxWorkerRunning == null ? "غير مفحوص" : data.outboxWorkerRunning ? "Running" : "Stopped";
 
         // Update Webhook URL from backend
         if (data.webhookUrl) {

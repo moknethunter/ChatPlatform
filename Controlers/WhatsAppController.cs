@@ -158,18 +158,23 @@ public sealed class WhatsAppController : ControllerBase
     // =================================================================
 
     // GET: api/whatsapp/diagnostics
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet("diagnostics")]
-    public IActionResult GetDiagnostics()
+    public async Task<IActionResult> GetDiagnostics([FromServices] Microsoft.Extensions.Options.IOptions<WhatsAppOptions> options, CancellationToken ct)
     {
-        // في بيئة إنتاج، يجب فحص حالة الـ Workers فعلياً من الـ DI
+        var tenant = User.TenantId();
+        var configured = await _db.WhatsAppTenants.AnyAsync(a => a.TenantId == tenant && a.IsActive &&
+            a.BusinessTokenEncrypted != "", ct);
+        // Configuration is not live connectivity. Unknown signals must not appear successful.
         return Ok(new
         {
-            metaConnected = true, // يمكن فحصها بطلب بسيط لميتا
-            tokenValid = true,
-            webhookVerified = true,
-            webhookSignatureEnabled = true,
-            inboxWorkerRunning = true,
-            outboxWorkerRunning = true,
+            accountConfigured = configured,
+            metaConnected = (bool?)null,
+            tokenValid = (bool?)null,
+            webhookVerified = (bool?)null,
+            webhookSignatureEnabled = !string.IsNullOrWhiteSpace(options.Value.AppSecret),
+            inboxWorkerRunning = (bool?)null,
+            outboxWorkerRunning = (bool?)null,
             webhookUrl = $"{Request.Scheme}://{Request.Host}/webhook"
         });
     }
