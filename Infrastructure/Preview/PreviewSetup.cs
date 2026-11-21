@@ -31,8 +31,8 @@ public static class PreviewSetup
         b.Configuration["Campaigns:Enabled"]="false";
         foreach(var a in b.Configuration.GetSection("Security:Accounts").GetChildren())b.Configuration[a.Path+":Role"]="";
         // These hashes represent independent, randomly generated preview-only passwords.
-        SetAccount(0,"preview-admin",Tenant,"Admin","AQAAAAIAAYagAAAAEMOTz8frCMXUFZ7W+VSiTLttRjN+xz4do5xpQnKgTfEt2KCrvM/z5U1AR/IHutctzg==");
-        SetAccount(1,"preview-owner",PlatformSecurity.PlatformScope,"SuperAdmin","AQAAAAIAAYagAAAAEJxAnLUn6TO03SrJRtc9PUaNiwezD+ZeRn5tborpqHUnPC5qz/WohVwXfXbTVYikxA==");
+        SetAccount(0,"preview-admin",Tenant,"Admin","AQAAAAIAAYagAAAAELfkcO3iEbL0Rf1AeTAH64gPxNU1AyfVi81PJFl5gdihe+ehc52HWuCHgmQjj3sy2g==");
+        SetAccount(1,"preview-owner",PlatformSecurity.PlatformScope,"SuperAdmin","AQAAAAIAAYagAAAAEP3JJNM6O4CIcSSJltrb0i36NJflXk2/lzkBQBa70eY3YnsXkTX0ajnxl+RfUop0Fw==");
         // A local smoke run may supply a disposable test hash, never an override on Fly.
         if(Environment.GetEnvironmentVariable("FLY_APP_NAME")==null && b.Configuration["Preview:SmokePasswordHash"] is string testHash && testHash.Length>30)
             b.Configuration["Security:Accounts:0:PasswordHash"]=testHash;
