@@ -43,6 +43,7 @@ with sqlite3.connect(DB) as db:
     # Synthetic account has no token. No real outbound request is possible.
     db.execute("INSERT INTO WhatsAppTenants (Id,TenantId,PhoneNumberId,IsActive,CreatedAtUtc,WabaId,AppId,BusinessTokenEncrypted,CreatedAt) VALUES ('ci-account-a','ci-tenant-a','999999999999',1,'2026-01-01','','','','2026-01-01')")
 call("/api/conversations",expected=401)
+call("/api/media/00000000-0000-0000-0000-000000000001",expected=401)
 call("/api/whatsapp/accounts",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":PASSWORD},expected=403,csrf=False)
@@ -92,6 +93,19 @@ path="/api/conversations/"+match["id"]+"/messages"
 messages,_=call(path,cookie=a)
 assert sum(m.get("wamid")=="wamid.ci.inbound.1" for m in messages)==1
 call(path,cookie=b,expected=404)
+# Synthetic inbound image; no network calls because account has no token.
+image_body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.image.1","from":"15550000001","type":"image","image":{"id":"123456789","mime_type":"image/png"}}]}}]}]}
+image_sig="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(image_body).encode(),hashlib.sha256).hexdigest()
+call("/webhook","POST",image_body,extra={"X-Hub-Signature-256":image_sig})
+for _ in range(30):
+    image=next((m for m in call(path,cookie=a)[0] if m.get("wamid")=="wamid.ci.image.1"),None)
+    if image: break
+    time.sleep(1)
+else: raise AssertionError("Inbound image not persisted")
+call("/api/media/"+image["id"],cookie=b,expected=404)
+call("/api/media/"+image["id"],cookie=a,expected=409)
+call("/api/messages/send-media","POST",{"conversationId":match["id"],"ticket":"forged"},cookie=a,expected=400)
+call("/api/messages/send-media","POST",{"conversationId":match["id"],"ticket":"forged"},expected=401)
 assert not call("/api/conversations",cookie=b)[0]
 rule={"name":"CI rule","matchType":"any","replyText":"CI only","isActive":False,"tenantId":"ci-tenant-b"}
 call("/api/autoreply","POST",rule,cookie=agent,expected=403)

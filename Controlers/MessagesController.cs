@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Data;
+using ChatPlatform.Infrastructure.Adapters.WhatsApp;
+using Microsoft.AspNetCore.DataProtection;
 using ChatPlatform.Infrastructure.Data.Entities;
 using ChatPlatform.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -74,6 +76,34 @@ public sealed class MessagesController : ControllerBase
         return await Queue(tenant, to, req.PhoneNumberId, req.WhatsAppTenantId, "template", name, payload, ct);
     }
 
+    public sealed record SendMediaRequest(Guid ConversationId, string? Ticket, string? Caption);
+
+    [HttpPost("send-media")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("media")]
+    public async Task<IActionResult> SendMedia(SendMediaRequest req, [FromServices] IDataProtectionProvider protection, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        if (string.IsNullOrWhiteSpace(req.Ticket) || req.Ticket.Length > 4096 || (req.Caption?.Length ?? 0) > 1024)
+            return BadRequest(new { error = "invalid_media" });
+        MediaController.Ticket? ticket;
+        try {
+            ticket = JsonSerializer.Deserialize<MediaController.Ticket>(
+                protection.CreateProtector(MediaController.Purpose).ToTimeLimitedDataProtector().Unprotect(req.Ticket));
+        } catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException) {
+            return BadRequest(new { error = "invalid_media_ticket" });
+        }
+        if (ticket == null || ticket.Tenant != tenant || ticket.ConversationId != req.ConversationId) return Forbid();
+        var conv = await _db.WhatsAppConversations.AsNoTracking().SingleOrDefaultAsync(c => c.Id == req.ConversationId && c.TenantId == tenant, ct);
+        if (conv == null || conv.PhoneNumberId != ticket.PhoneId) return NotFound();
+        if (ticket.Type is not ("image" or "video" or "audio" or "document")) return BadRequest();
+        var media = new Dictionary<string, object> { ["id"] = ticket.MediaId };
+        if (ticket.Type != "audio" && !string.IsNullOrWhiteSpace(req.Caption)) media["caption"] = req.Caption.Trim();
+        if (ticket.Type == "document") media["filename"] = ticket.Filename;
+        var body = new Dictionary<string, object> { ["messaging_product"] = "whatsapp", ["recipient_type"] = "individual",
+            ["to"] = conv.ContactPhone, ["type"] = ticket.Type, [ticket.Type] = media };
+        return await Queue(tenant, conv.ContactPhone, ticket.PhoneId, null, ticket.Type, req.Caption?.Trim() ?? "["+ticket.Type+"]", JsonSerializer.Serialize(body), ct);
+    }
+
     private async Task<IActionResult> Queue(string tenant, string to, string? phoneNumberId, string? whatsAppTenantId,
         string messageType, string preview, string payload, CancellationToken ct)
     {
@@ -106,7 +136,7 @@ public sealed class MessagesController : ControllerBase
 
         var conversation = await _db.WhatsAppConversations.FirstOrDefaultAsync(c =>
             c.TenantId == tenant && c.PhoneNumberId == account.PhoneNumberId && c.ContactPhone == to, ct);
-        if (messageType == "text" && (conversation?.LastInboundAtUtc is not DateTime inbound || inbound > now || now - inbound >= TimeSpan.FromHours(24)))
+        if (messageType != "template" && (conversation?.LastInboundAtUtc is not DateTime inbound || inbound > now || now - inbound >= TimeSpan.FromHours(24)))
             return Conflict(new { error = "window_closed_use_template" });
         if (conversation == null)
         {

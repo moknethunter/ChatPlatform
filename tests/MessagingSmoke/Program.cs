@@ -24,6 +24,14 @@ using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(45));
 var ct = timeout.Token;
 try
 {
+    if (!WhatsAppMediaService.TrustedDownload(new Uri("https://lookaside.fbsbx.com/whatsapp_business/attachments/")) ||
+        WhatsAppMediaService.TrustedDownload(new Uri("https://lookaside.fbsbx.com.evil.invalid/")) ||
+        WhatsAppMediaService.TrustedDownload(new Uri("http://lookaside.fbsbx.com/")) ||
+        WhatsAppMediaService.TrustedDownload(new Uri("https://lookaside.fbsbx.com:8443/")) ||
+        WhatsAppMediaService.Detect(System.Text.Encoding.UTF8.GetBytes("<script>alert(1)</script>")) != null ||
+        WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
+        throw new Exception("Media type or download host security regression.");
+    Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
     // Exercise the same schema creation/compatibility logic as production.
     DbInitializer.EnsureCreated(connection);
     var requests = new ConcurrentQueue<string>();

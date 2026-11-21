@@ -109,6 +109,9 @@ public static class PlatformSecurity
             options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            options.AddPolicy("media", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.Identity?.Name ?? "anonymous", _ => new FixedWindowRateLimiterOptions {
+                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             options.AddFixedWindowLimiter("oauth-policy", o => { o.PermitLimit = 10; o.Window = TimeSpan.FromMinutes(1); o.QueueLimit = 0; });
         });
         return services;

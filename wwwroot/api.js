@@ -355,6 +355,13 @@
                 if (!["status","read","assign","tags"].includes(action)) throw new ApiError("Invalid action");
                 return request(API.conversations + "/" + encodeURIComponent(id) + "/" + action, { method: "PUT", body });
             },
+            uploadMedia(conversationId, file) {
+                const data = new FormData(); data.append("file", file);
+                return request("/api/media/upload/" + encodeURIComponent(conversationId), { method: "POST", rawBody: data, timeout: 45000, retries: 0 });
+            },
+            sendMedia(conversationId, ticket, caption, idempotencyKey) {
+                return request("/api/messages/send-media", { method: "POST", body: { conversationId, ticket, caption }, headers: { "Idempotency-Key": idempotencyKey }, retries: 0 });
+            },
             getConversationMessages(id, take = 100, opts = {}) {
                 id = validateId(id, "معرّف المحادثة");
                 const limit = Math.min(Math.max(Number(take) || 100, 1), 200);
