@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ChatPlatform.Security;
 using ChatPlatform.Core.Abstractions;
 using ChatPlatform.Core.Events;
 using ChatPlatform.Infrastructure.Adapters;
@@ -130,6 +131,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
+builder.Services.AddPlatformSecurity();
 builder.Services.AddHttpClient("ResilientClient")
 .AddPolicyHandler(
 HttpPolicyExtensions.HandleTransientHttpError()
@@ -223,6 +225,7 @@ throw;
 // 10. Middleware Pipeline - التعديل 3 و 4 هنا
 // ============================================================
 app.UseMiddleware<GlobalExceptionMiddleware>();
+app.UseRouting();
 app.UseCors();
 // Never expose development-only seed operations in production.
 if (!app.Environment.IsDevelopment())
@@ -241,6 +244,11 @@ if (!app.Environment.IsDevelopment())
 // آلية TenantResolver الحالية في WhatsApp تبقى كما هي
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
+app.Use(PlatformSecurity.ProtectBrowserWrites);
+app.UseRateLimiter();
+app.MapPlatformSecurity();
 // ============================================================
 // 11. All Endpoints
 // ============================================================

@@ -1,3 +1,5 @@
+using ChatPlatform.Security;
+using Microsoft.AspNetCore.Authorization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -40,14 +42,16 @@ public sealed class WhatsAppController : ControllerBase
     // =================================================================
 
     // GET: api/whatsapp/accounts
+    [Authorize(Policy = PlatformSecurity.ReadPolicy)]
     [HttpGet("accounts")]
     public async Task<IActionResult> GetAccounts(CancellationToken ct)
     {
+        var tenant = User.TenantId();
         var accounts = await _db.WhatsAppTenants
-            .AsNoTracking()
+            .AsNoTracking().Where(a => a.TenantId == tenant)
             .Select(a => new
             {
-                Id = a.TenantId,
+                Id = a.Id,
                 TenantId = a.TenantId,
                 PhoneNumberId = a.PhoneNumberId,
                 WabaId = a.WabaId,
@@ -293,7 +297,7 @@ public sealed class WhatsAppController : ControllerBase
     // =================================================================
     
     // GET: api/whatsapp/tenants
-    [HttpGet("tenants")]
+    [HttpGet("tenant-options")]
     public async Task<IActionResult> GetTenants(CancellationToken ct)
     {
         // افترض أن لديك جدول للـ Tenants، أو استخدم WhatsAppTenants كبديل مؤقت

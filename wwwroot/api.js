@@ -224,6 +224,7 @@
                 const headers = {
                     "Accept": "application/json",
                     "X-Request-Id": requestId,
+                    "X-ChatPlatform-CSRF": "1",
                     ...mutableHeaders,
                     ...(useJson ? { "Content-Type": "application/json" } : {}),
                     ...options.headers
@@ -287,6 +288,9 @@
                 }
 
                 if (response.ok) return data;
+                if (response.status === 401 && typeof window !== "undefined" && new URL(url, window.location.href).origin === window.location.origin) {
+                    window.location.assign("/login.html");
+                }
 
                 const metaCode = extractMetaCode(data);
                 const rawMessage = extractErrorMessage(data);

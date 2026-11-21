@@ -99,7 +99,7 @@ public static class WhatsAppExtensions
                 return Results.BadRequest();
 
             return Results.Text(challenge, "text/plain");
-        });
+        }).AllowAnonymous();
 
         // POST /webhook
         // Meta incoming messages and statuses.
@@ -193,7 +193,7 @@ public static class WhatsAppExtensions
 
                     return Results.StatusCode(503);
                 }
-            });
+            }).AllowAnonymous();
 
         return app;
     }

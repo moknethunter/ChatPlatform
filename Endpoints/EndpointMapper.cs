@@ -37,9 +37,9 @@ public static class EndpointMapper
                     dataDeletion = $"{baseUrl}/data-deletion.html"
                 }
             });
-        });
+        }).RequireAuthorization("TenantRead");
 
-        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow }));
+        app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow })).AllowAnonymous();
 
         // Readiness checks storage separately from the liveness endpoint.
         app.MapGet("/ready", async (PlatformDbContext db, CancellationToken ct) =>
@@ -47,7 +47,7 @@ public static class EndpointMapper
             if (!await db.Database.CanConnectAsync(ct))
                 return Results.StatusCode(503);
             return Results.Ok(new { status = "ready" });
-        });
+        }).AllowAnonymous();
 
         // 2. Connectors API
         var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);

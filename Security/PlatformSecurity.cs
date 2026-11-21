@@ -1,0 +1,158 @@
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading.RateLimiting;
+using ChatPlatform.Infrastructure.Data;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
+
+namespace ChatPlatform.Security;
+
+// Transitional, operator-provisioned identities. No password or hash is committed.
+public sealed class PlatformAccount
+{
+    public string Username { get; set; } = "";
+    public string TenantId { get; set; } = "";
+    public string Role { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+}
+public static class PlatformSecurity
+{
+    public const string ReadPolicy = "TenantRead";
+    public const string AdminPolicy = "TenantAdmin";
+    private const string Scheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    private const string Stamp = "security_stamp";
+    private static readonly PasswordHasher<PlatformAccount> Hasher = new();
+    private static readonly PlatformAccount Dummy = new();
+    private static readonly string DummyHash = Hasher.HashPassword(Dummy, Convert.ToHexString(RandomNumberGenerator.GetBytes(32)));
+
+    private static PlatformAccount? Find(IConfiguration cfg, string? username)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return null;
+        var matches = (cfg.GetSection("Security:Accounts").Get<PlatformAccount[]>() ?? Array.Empty<PlatformAccount>())
+            .Where(a => string.Equals(a.Username, username, StringComparison.Ordinal)).Take(2).ToArray();
+        if (matches.Length != 1) return null;
+        var a = matches[0];
+        return !string.IsNullOrWhiteSpace(a.TenantId) && !string.IsNullOrWhiteSpace(a.PasswordHash)
+            && a.Role is "Admin" or "Agent" ? a : null;
+    }
+
+    private static string Fingerprint(PlatformAccount account) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(account.PasswordHash)));
+
+    public static string TenantId(this ClaimsPrincipal user) =>
+        user.FindFirstValue("tenant_id") ?? throw new InvalidOperationException("Tenant identity is required.");
+
+    public static IServiceCollection AddPlatformSecurity(this IServiceCollection services)
+    {
+        services.AddAuthentication(Scheme).AddCookie(options =>
+        {
+            options.Cookie.Name = "__Host-ChatPlatform";
+            options.Cookie.Path = "/";
+            options.Cookie.HttpOnly = true;
+            options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+            options.Cookie.SameSite = SameSiteMode.Strict;
+            options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
+            options.SlidingExpiration = false;
+            options.Events.OnRedirectToLogin = c => { c.Response.StatusCode = 401; return Task.CompletedTask; };
+            options.Events.OnRedirectToAccessDenied = c => { c.Response.StatusCode = 403; return Task.CompletedTask; };
+            options.Events.OnValidatePrincipal = async c =>
+            {
+                var cfg = c.HttpContext.RequestServices.GetRequiredService<IConfiguration>();
+                var account = Find(cfg, c.Principal?.Identity?.Name);
+                var db = c.HttpContext.RequestServices.GetRequiredService<PlatformDbContext>();
+                if (account == null || c.Principal?.FindFirstValue("tenant_id") != account.TenantId
+                    || c.Principal?.FindFirstValue(ClaimTypes.Role) != account.Role
+                    || c.Principal?.FindFirstValue(Stamp) != Fingerprint(account)
+                    || !await db.Tenants.AnyAsync(t => t.Id == account.TenantId && t.IsActive, c.HttpContext.RequestAborted))
+                {
+                    c.RejectPrincipal();
+                    await c.HttpContext.SignOutAsync(Scheme);
+                }
+            };
+        });
+        services.AddAuthorization(options =>
+        {
+            // Every new endpoint must explicitly choose a reviewed policy or public access.
+            options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAssertion(_ => false).Build();
+            options.AddPolicy(ReadPolicy, p => p.RequireAuthenticatedUser().RequireClaim("tenant_id").RequireRole("Admin", "Agent"));
+            options.AddPolicy(AdminPolicy, p => p.RequireAuthenticatedUser().RequireClaim("tenant_id").RequireRole("Admin"));
+        });
+        services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = 429;
+            options.AddPolicy("login", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            options.AddFixedWindowLimiter("oauth-policy", o => { o.PermitLimit = 10; o.Window = TimeSpan.FromMinutes(1); o.QueueLimit = 0; });
+        });
+        return services;
+    }
+
+    // A custom header prevents ordinary cross-origin forms; reject cross-site browser fetches too.
+    public static async Task ProtectBrowserWrites(HttpContext context, RequestDelegate next)
+    {
+        var request = context.Request;
+        if (request.Path.StartsWithSegments("/api") && !HttpMethods.IsGet(request.Method)
+            && !HttpMethods.IsHead(request.Method) && !HttpMethods.IsOptions(request.Method))
+        {
+            var site = request.Headers["Sec-Fetch-Site"].ToString();
+            if (request.Headers["X-ChatPlatform-CSRF"].ToString() != "1"
+                || site == "cross-site" || site == "same-site")
+            {
+                context.Response.StatusCode = 403;
+                return;
+            }
+        }
+        await next(context);
+    }
+
+    public sealed record LoginRequest(string Username, string Password);
+
+    public static void MapPlatformSecurity(this WebApplication app)
+    {
+        app.MapPost("/api/auth/login", async (LoginRequest req, HttpContext ctx, IConfiguration cfg, PlatformDbContext db, ILoggerFactory logs, CancellationToken ct) =>
+        {
+            var logger = logs.CreateLogger("Authentication");
+            if (string.IsNullOrWhiteSpace(req.Username) || req.Username.Length > 100
+                || string.IsNullOrEmpty(req.Password) || req.Password.Length > 1024)
+                return Results.Unauthorized();
+            var a = Find(cfg, req.Username);
+            PasswordVerificationResult result;
+            try { result = Hasher.VerifyHashedPassword(a ?? Dummy, a?.PasswordHash ?? DummyHash, req.Password); }
+            catch (FormatException) { result = PasswordVerificationResult.Failed; }
+            if (a == null || result == PasswordVerificationResult.Failed
+                || !await db.Tenants.AnyAsync(t => t.Id == a.TenantId && t.IsActive, ct))
+            {
+                logger.LogWarning("Rejected login attempt.");
+                return Results.Unauthorized();
+            }
+            var identity = new ClaimsIdentity(new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, a.Username),
+                new Claim(ClaimTypes.Name, a.Username),
+                new Claim(ClaimTypes.Role, a.Role),
+                new Claim("tenant_id", a.TenantId),
+                new Claim(Stamp, Fingerprint(a))
+            }, Scheme);
+            await ctx.SignInAsync(Scheme, new ClaimsPrincipal(identity), new AuthenticationProperties { IsPersistent = false, AllowRefresh = false });
+            logger.LogInformation("Login succeeded for {User} in tenant {Tenant}.", a.Username, a.TenantId);
+            return Results.Ok(new { username = a.Username, tenantId = a.TenantId, role = a.Role });
+        }).AllowAnonymous().RequireRateLimiting("login");
+
+        app.MapGet("/api/auth/me", (ClaimsPrincipal user) => Results.Ok(new
+        {
+            username = user.Identity!.Name, tenantId = user.TenantId(), role = user.FindFirstValue(ClaimTypes.Role)
+        })).RequireAuthorization(ReadPolicy);
+
+        app.MapPost("/api/auth/logout", async (HttpContext ctx) =>
+        {
+            await ctx.SignOutAsync(Scheme);
+            return Results.NoContent();
+        }).RequireAuthorization(ReadPolicy);
+    }
+}
