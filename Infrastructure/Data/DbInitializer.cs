@@ -817,6 +817,12 @@ public static class DbInitializer
                 AND AccessTokenEncrypted IS NOT NULL
                 AND AccessTokenEncrypted <> '';
 
+            -- Older databases may already have these columns with nullable definitions.
+            -- Normalize optional metadata only; never change account or tenant identity.
+            UPDATE WhatsAppTenants SET WabaId = '' WHERE WabaId IS NULL;
+            UPDATE WhatsAppTenants SET AppId = '' WHERE AppId IS NULL;
+            UPDATE WhatsAppTenants SET BusinessTokenEncrypted = '' WHERE BusinessTokenEncrypted IS NULL;
+
             UPDATE WhatsAppTenants
             SET CreatedAt = CreatedAtUtc
             WHERE CreatedAt IS NULL OR CreatedAt = '';
