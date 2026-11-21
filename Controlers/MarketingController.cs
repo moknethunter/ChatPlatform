@@ -123,6 +123,11 @@ public sealed class MarketingController(PlatformDbContext db,IConfiguration conf
         var results=await (from r in db.CampaignRecipients.AsNoTracking() join o in db.WhatsAppOutbox.AsNoTracking() on r.OutboxId equals o.Id
                            where r.TenantId==tenant&&o.TenantId==tenant&&ids.Contains(r.CampaignId)
                            group r by new{r.CampaignId,o.Status} into g select new{g.Key.CampaignId,g.Key.Status,count=g.Count()}).ToListAsync(ct);
-        return Ok(rows.Select(c=>new{c.Id,c.Name,c.Status,c.ScheduledAtUtc,counts=results.Where(r=>r.CampaignId==c.Id).ToDictionary(r=>r.Status,r=>r.count)}));
+        var receipts=await (from r in db.CampaignRecipients.AsNoTracking() join o in db.WhatsAppOutbox.AsNoTracking() on r.OutboxId equals o.Id
+            join m in db.WhatsAppMessages.AsNoTracking() on o.MessageId equals (Guid?)m.Id
+            where r.TenantId==tenant&&o.TenantId==tenant&&m.TenantId==tenant&&ids.Contains(r.CampaignId)
+            group r by new{r.CampaignId,m.Status} into g select new{g.Key.CampaignId,g.Key.Status,count=g.Count()}).ToListAsync(ct);
+        return Ok(rows.Select(c=>new{c.Id,c.Name,c.Status,c.ScheduledAtUtc,counts=results.Where(r=>r.CampaignId==c.Id).ToDictionary(r=>r.Status,r=>r.count),
+            messageStates=receipts.Where(r=>r.CampaignId==c.Id).ToDictionary(r=>r.Status,r=>r.count)}));
     }
 }

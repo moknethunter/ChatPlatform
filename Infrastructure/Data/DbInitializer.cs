@@ -234,6 +234,8 @@ public static class DbInitializer
                     ProcessedAtUtc TEXT NULL
                 );
 
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppStatusInbox_Pending ON WhatsAppStatusInbox(Processed, ReceivedAtUtc);
+
                 CREATE TABLE IF NOT EXISTS WhatsAppConversations (
                     Id TEXT NOT NULL PRIMARY KEY,
                     TenantId TEXT NOT NULL,

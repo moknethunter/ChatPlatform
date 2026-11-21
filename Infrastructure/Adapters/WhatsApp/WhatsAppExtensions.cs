@@ -57,6 +57,7 @@ public static class WhatsAppExtensions
         services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
 
         services.AddHostedService<WhatsAppInboxWorker>();
+        services.AddHostedService<WhatsAppReceiptWorker>();
         services.AddHostedService<WhatsAppOutboxWorker>();
 
         return services;

@@ -383,6 +383,36 @@ assert len(ra["daily"])==7 and sum(d["inbound"] for d in ra["daily"])>0
 assert sum(d["outbound"] for d in rb["daily"])==0 and rb["consent"]==[]
 assert any(x["granted"]==False and x["count"]==1 for x in ra["consent"])
 print("PASS: tenant-scoped date-bounded reports and consent aggregates")
+# Signed status notices apply only to outbound message/account/tenant/recipient matches.
+with sqlite3.connect(DB) as db:
+    receipt_message=str(uuid.uuid4()).upper()
+    db.execute("""INSERT INTO WhatsAppMessages(Id,TenantId,ConversationId,Wamid,Direction,MessageType,ContentJson,TextPreview,Status,TimestampUtc,CreatedAtUtc)
+        VALUES(?,?,?,'wamid.ci.receipt','Outbound','text','{}','CI receipt','Sent',?,?)""",
+        (receipt_message,"ci-tenant-a",conversation_id,datetime.now(timezone.utc).isoformat(),datetime.now(timezone.utc).isoformat()))
+def receipt(status,phone_id="999999999999",recipient="15550000001"):
+    body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":phone_id},"statuses":[{"id":"wamid.ci.receipt","recipient_id":recipient,"status":status,"timestamp":str(int(time.time()))}]}}]}]}
+    signed="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(body).encode(),hashlib.sha256).hexdigest()
+    call("/webhook","POST",body,extra={"X-Hub-Signature-256":signed})
+def wait_receipt(expected):
+    for _ in range(20):
+        with sqlite3.connect(DB) as db:
+            if db.execute("SELECT Status FROM WhatsAppMessages WHERE Id=?",(receipt_message,)).fetchone()[0]==expected:return
+        time.sleep(.5)
+    raise AssertionError("Missing delivery receipt status "+expected)
+receipt("delivered")
+wait_receipt("Delivered")
+receipt("read")
+wait_receipt("Read")
+receipt("failed")
+for _ in range(20):
+    with sqlite3.connect(DB) as db:
+        if db.execute("SELECT COUNT(*) FROM WhatsAppStatusInbox WHERE Wamid='wamid.ci.receipt' AND Status='failed' AND Processed=1").fetchone()[0]:break
+    time.sleep(.5)
+else:raise AssertionError("Late failed receipt not processed")
+wait_receipt("Read")
+receipt("delivered",recipient="15559999999")
+assert any(x["status"]=="Read" for x in call("/api/reports?days=7",cookie=a)[0]["delivery"])
+print("PASS: signed delivered/read receipts, late failure cannot downgrade read")
 call("/api/autoreply/"+fallback["id"],"DELETE",cookie=a)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE WhatsAppTenants SET BusinessTokenEncrypted='' WHERE Id='ci-account-a'")
