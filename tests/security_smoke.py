@@ -56,6 +56,25 @@ with sqlite3.connect(DB) as db:
     row=db.execute("SELECT BusinessTokenEncrypted,TenantId,AppId FROM WhatsAppTenants WHERE Id='ci-legacy-account'").fetchone()
     assert row[0] and row[0]!="ci-only-bootstrap-token" and row[1:]==("tenant-alhawbani-001","")
 assert call("/api/auth/me",cookie=a)[0]["tenantId"]=="ci-tenant-a"
+call("/api/knowledge",expected=401)
+call("/api/knowledge",cookie=agent,expected=403)
+article={"title":"CI warranty","body":"Warranty period is 12 months","isPublished":True,"version":0,"tenantId":"ci-tenant-b"}
+kb,_=call("/api/knowledge","POST",article,cookie=a,expected=201)
+kp="/api/knowledge/"+kb["id"]
+assert kb["tenantId"]=="ci-tenant-a"
+assert not call("/api/knowledge",cookie=b)[0]
+call(kp,cookie=b,expected=404)
+call(kp,"PUT",dict(article,version=1),cookie=b,expected=404)
+call(kp+"?version=1","DELETE",cookie=b,expected=404)
+assert call("/api/knowledge/search","POST",{"question":"warranty"},cookie=a)[0][0]["id"]==kb["id"]
+assert not call("/api/knowledge/search","POST",{"question":"warranty"},cookie=b)[0]
+call(kp,"PUT",dict(article,version=1,isPublished=False),cookie=a)
+assert not call("/api/knowledge/search","POST",{"question":"warranty"},cookie=a)[0]
+call(kp,"PUT",dict(article,version=1),cookie=a,expected=409)
+assert call("/api/knowledge/model",cookie=a)[0]["configured"] is False
+call("/api/knowledge/preview","POST",{"question":"warranty"},cookie=a,expected=409)
+call(kp+"?version=2","DELETE",cookie=a,expected=204)
+print("PASS: isolated knowledge articles, published-only search, stale version and disabled own-model preview")
 assert not call("/api/whatsapp/accounts",cookie=b)[0]
 call("/api/live/inbox",cookie=a,expected=403,extra={"Origin":"https://untrusted.example"})
 call("/api/bots",cookie=agent,expected=403)

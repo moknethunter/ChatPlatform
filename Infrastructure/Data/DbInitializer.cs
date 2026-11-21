@@ -309,6 +309,16 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_BotDrafts_TenantId ON BotDrafts(TenantId);
+                CREATE TABLE IF NOT EXISTS KnowledgeArticles (
+                    Id TEXT NOT NULL PRIMARY KEY,
+                    TenantId TEXT NOT NULL,
+                    Title TEXT NOT NULL,
+                    Body TEXT NOT NULL,
+                    IsPublished INTEGER NOT NULL,
+                    Version INTEGER NOT NULL,
+                    UpdatedAtUtc TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS IX_KnowledgeArticles_TenantId ON KnowledgeArticles(TenantId);
                 CREATE TABLE IF NOT EXISTS BotReleases (
                     TenantId TEXT NOT NULL PRIMARY KEY,
                     DraftId TEXT NOT NULL,

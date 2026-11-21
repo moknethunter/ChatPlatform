@@ -1,5 +1,6 @@
 name: Isolated build and smoke checks
 on:
+  workflow_call:
   push:
     branches: ['development/**']
   pull_request:

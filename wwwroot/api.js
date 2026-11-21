@@ -343,6 +343,13 @@
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
+            knowledgeList() { return request("/api/knowledge"); },
+            knowledgeGet(id) { return request("/api/knowledge/"+encodeURIComponent(id)); },
+            knowledgeSave(id,data) { return request("/api/knowledge"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
+            knowledgeDelete(id,version) { return request("/api/knowledge/"+encodeURIComponent(id)+"?version="+encodeURIComponent(version),{method:"DELETE"}); },
+            knowledgeSearch(question) { return request("/api/knowledge/search",{method:"POST",body:{question}}); },
+            modelStatus() { return request("/api/knowledge/model"); },
+            modelPreview(question) { return request("/api/knowledge/preview",{method:"POST",body:{question},timeout:35000,retries:0}); },
             activeBot() { return request("/api/bots/active"); },
             publishBot(id,version) { return request("/api/bots/"+encodeURIComponent(id)+"/publish",{method:"POST",body:{version}}); },
             stopBot(id,activationId) { return request("/api/bots/"+encodeURIComponent(id)+"/publish/"+encodeURIComponent(activationId),{method:"DELETE"}); },

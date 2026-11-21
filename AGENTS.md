@@ -14,3 +14,6 @@
 2. Authentication, authorization, secret handling and security regression tests.
 3. Tenant isolation, role matrix and cross-tenant negative tests.
 See HELP.md and ROADMAP.md.
+
+## Owner-model constraint (Phase 5)
+- AI inference must use the owner's future self-hosted model, via the versioned project protocol. No paid model API integrations, provider SDKs, external AI fallbacks or required API subscriptions. Keep model calls disabled until an operator explicitly configures the owner's endpoint; knowledge search and ordinary bots work offline. Do not send real customer data to an unverified model. Any automatic AI replies require separate review and explicit enablement.

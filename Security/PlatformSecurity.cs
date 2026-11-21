@@ -118,6 +118,8 @@ public static class PlatformSecurity
             options.AddPolicy("media", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new FixedWindowRateLimiterOptions {
                     PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            options.AddPolicy("own-model", context => RateLimitPartition.GetConcurrencyLimiter(
+                context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 1, QueueLimit = 0 }));
             options.AddPolicy("inbox-live", context => RateLimitPartition.GetConcurrencyLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 2, QueueLimit = 0 }));
             options.AddFixedWindowLimiter("oauth-policy", o => { o.PermitLimit = 10; o.Window = TimeSpan.FromMinutes(1); o.QueueLimit = 0; });
