@@ -6,6 +6,8 @@ on:
       - 'fly.preview.toml'
       - '.github/workflows/deploy-preview.yml'
       - 'Infrastructure/Preview/**'
+      - 'tests/preview_smoke.py'
+      - 'Controlers/PreviewController.cs'
   workflow_dispatch:
 permissions:
   contents: read
