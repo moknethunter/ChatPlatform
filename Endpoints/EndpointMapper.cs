@@ -41,6 +41,14 @@ public static class EndpointMapper
 
         app.MapGet(ApiEndpoints.Health, () => Results.Ok(new { status = "Core is running", timestamp = DateTimeOffset.UtcNow }));
 
+        // Readiness checks storage separately from the liveness endpoint.
+        app.MapGet("/ready", async (PlatformDbContext db, CancellationToken ct) =>
+        {
+            if (!await db.Database.CanConnectAsync(ct))
+                return Results.StatusCode(503);
+            return Results.Ok(new { status = "ready" });
+        });
+
         // 2. Connectors API
         var connectorsGroup = app.MapGroup(ApiEndpoints.Connectors);
         connectorsGroup.MapGet("/", async (PlatformDbContext db) =>
