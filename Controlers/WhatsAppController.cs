@@ -167,7 +167,7 @@ public sealed class WhatsAppController : ControllerBase
         await _db.SaveChangesAsync(ct);
         // Remove deprecated ciphertext so it cannot resurrect a disconnected token.
         await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = NULL WHERE Id = {id} AND TenantId = {tenant}", ct);
+            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = '' WHERE Id = {id} AND TenantId = {tenant}", ct);
         await tx.CommitAsync(ct);
         return Ok(new { message = "updated" });
     }
@@ -185,7 +185,7 @@ public sealed class WhatsAppController : ControllerBase
         account.BusinessTokenEncrypted = "";
         await _db.SaveChangesAsync(ct);
         await _db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = NULL WHERE Id = {id} AND TenantId = {tenant}", ct);
+            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = '' WHERE Id = {id} AND TenantId = {tenant}", ct);
         await tx.CommitAsync(ct);
         return Ok(new { message = "deactivated" });
     }
