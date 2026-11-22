@@ -762,6 +762,9 @@ public static class DbInitializer
                 "WHATSAPP_PHONE_NUMBER_ID");
 
         if (string.IsNullOrWhiteSpace(phoneNumberId))
+            phoneNumberId = Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId");
+
+        if (string.IsNullOrWhiteSpace(phoneNumberId))
         {
             Console.WriteLine(
                 ">>> WhatsApp linking skipped: " +
@@ -1037,6 +1040,14 @@ public static class DbInitializer
             Execute(connection, transaction, """
                 UPDATE WhatsAppTenants SET CreatedAtUtc = CreatedAt
                 WHERE CreatedAt IS NOT NULL AND julianday(CreatedAt) IS NOT NULL;
+                """);
+        }
+
+        if (!hadCreatedAt && hadCreatedAtUtc)
+        {
+            Execute(connection, transaction, """
+                UPDATE WhatsAppTenants SET CreatedAt = CreatedAtUtc
+                WHERE CreatedAtUtc IS NOT NULL AND julianday(CreatedAtUtc) IS NOT NULL;
                 """);
         }
 
