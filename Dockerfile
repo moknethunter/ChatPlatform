@@ -35,6 +35,9 @@ ENV CHATPLATFORM_DATA_DIR=/app/data
 ENV CHATPLATFORM_ALLOW_EPHEMERAL_DB=false
 ENV DOTNET_EnableDiagnostics=0
 
+COPY scripts/container_healthcheck.sh /app/container_healthcheck.sh
+
 EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 CMD ["bash", "/app/container_healthcheck.sh"]
 
 ENTRYPOINT ["dotnet", "ChatPlatform.dll"]
