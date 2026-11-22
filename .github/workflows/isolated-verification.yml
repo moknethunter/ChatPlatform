@@ -72,5 +72,31 @@ jobs:
           base=http://127.0.0.1:5080
           python3 scripts/check_deployment.py --base-url "$base" --expected-revision "$GITHUB_SHA" --attempts 1
           python3 tests/security_smoke.py
+          python3 tests/backup_smoke.py
       - name: Manual send and auto-reply through mocked Graph API
         run: dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
+
+      - name: Container build and network-isolated healthcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --build-arg APP_REVISION="$GITHUB_SHA" -t chatplatform-ci:local .
+          name=chatplatform-ci-health
+          trap 'docker logs "$name" || true; docker rm -f "$name" || true' EXIT
+          docker run -d --network none --name "$name" \
+            -e CHATPLATFORM_DATA_DIR=/app/data \
+            -e 'ConnectionStrings__DefaultConnection=Data Source=/app/data/platform.db' \
+            -e WhatsApp__AccessToken= -e WhatsApp__PhoneNumberId= \
+            -e WhatsApp__VerifyToken= -e WhatsApp__AppSecret= \
+            -e OwnModel__Enabled=false -e Campaigns__Enabled=false \
+            chatplatform-ci:local
+          for i in {1..60}; do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' "$name")" = healthy ]; then
+              docker exec "$name" printenv CHATPLATFORM_REVISION | grep -Fx "$GITHUB_SHA"
+              echo 'PASS: built container reports healthy using its actual Docker healthcheck'
+              exit 0
+            fi
+            if [ "$(docker inspect --format '{{.State.Running}}' "$name")" != true ]; then break; fi
+            sleep 2
+          done
+          exit 1
