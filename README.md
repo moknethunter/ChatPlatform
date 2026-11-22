@@ -1,172 +1,26 @@
-<div align="center">
+# ChatPlatform
 
-# 🚀 ChatPlatform
+منصة عربية لإدارة محادثات WhatsApp Business لعدة مؤسسات. يجمع المشروع تطبيق ASP.NET Core 8 وواجهات HTML/JavaScript وقاعدة SQLite في مشروع واحد. تحتفظ كل مؤسسة بحساباتها ومحادثاتها وقواعد الأتمتة ضمن نطاق صلاحياتها.
 
-### WhatsApp Business Cloud API Server · .NET 8
+## أين تبدأ
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![ASP.NET Core](https://img.shields.io/badge/ASP.NET_Core-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://learn.microsoft.com/aspnet/core)
-[![SQLite](https://img.shields.io/badge/SQLite-3-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org/)
-[![EF Core](https://img.shields.io/badge/EF_Core-8.0-512BD4?style=for-the-badge&logo=dotnet&logoColor=white)](https://learn.microsoft.com/ef/core/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://docker.com/)
-[![License](https://img.shields.io/badge/License-Private-red?style=for-the-badge)](#-الترخيص)
+| إذا كنت تريد | اقرأ |
+|---|---|
+| تشغيل نسخة محلية أو فحص التطبيق | [دليل الأوامر والتشغيل](HELP.md) |
+| تسجيل الدخول وإدارة المؤسسات أو الفريق أو محادثات واتساب | [دليل المستخدم والإدارة](docs/user-guide.md) |
+| فهم مسار الرسالة والتخزين والصلاحيات | [المعمارية والبيانات](docs/architecture.md) |
+| ربط عميل داخلي أو معرفة المسارات والأدوار | [مرجع API](docs/api.md) |
+| ضبط الأسرار، أخذ نسخة احتياطية، أو نشر إصدار على Fly | [دليل التشغيل والإصدار](docs/operations.md) |
+| معرفة وظيفة ملف أو مجلد أو كلاس | [مرجع الكود وشجرة المشروع](docs/source-map.md) |
+| اختيار الفرع الصحيح | [دليل فروع Git](docs/branches.md) |
 
-**خادم متكامل لاستقبال وإرسال رسائل WhatsApp Business**
-معمارية Event-Driven · Outbox Pattern · Webhook Signature Validation
+دليل الإصدار الحالي يوثّق السلوك في [النسخة 2b1543b](https://github.com/moknethunter/ChatPlatform/commit/2b1543b55b3c1a17aa159c9b60ca2f9690922c9e). خريطة العمل محفوظة في [ROADMAP.md](ROADMAP.md)، وقواعد المساهمة في [AGENTS.md](AGENTS.md).
 
-[نظرة عامة](#-نظرة-عامة) · [المعمارية](#-المعمارية) · [قاعدة-البيانات](#-قاعدة-البيانات) · [التشغيل](#-التشغيل-السريع) · [الـAPI](#-نقاط-النهاية)
+## مساحات العمل
 
-</div>
+- **مدير المنصة** يدير إنشاء المؤسسات والباقات والاشتراكات وحسابات مديري المؤسسات وسجل العمليات.
+- **مدير المؤسسة** يدير فريقه وحسابات واتساب والقوالب والبوتات والحملات والاشتراك.
+- **موظف المؤسسة** يتابع صندوق المحادثات وملفات العملاء ويرسل الردود ضمن صلاحيات المؤسسة.
+- **Meta** تتحقق من عنوان التطبيق وتسلّم الأحداث عبر `/webhook`. تُقبل أحداث POST بعد التحقق من توقيعها وتُعالج عبر طوابير محفوظة في SQLite.
 
----
-
-## 📑 جدول المحتويات
-
-- [🎯 نظرة عامة](#-نظرة-عامة)
-- [🏗️ المعمارية](#️-المعمارية)
-  - [المعمارية العامة](#المعمارية-العامة)
-  - [معمارية الطبقات](#معمارية-الطبقات)
-  - [معمارية المكونات](#معمارية-المكونات)
-  - [تسلسل الرسائل الواردة](#تسلسل-الرسائل-الواردة)
-  - [تسلسل الرسائل الصادرة](#تسلسل-الرسائل-الصادرة)
-- [🗄️ قاعدة البيانات](#️-قاعدة-البيانات)
-  - [مخطط الكيانات (ERD)](#مخطط-الكيانات-erd)
-  - [الجداول بالتفصيل](#الجداول-بالتفصيل)
-  - [العلاقات](#العلاقات)
-  - [الفهارس](#الفهارس)
-- [🔄 دورة حياة الرسائل](#-دورة-حياة-الرسائل)
-- [🗂️ بنية المشروع](#️-بنية-المشروع)
-- [🚀 التشغيل السريع](#-التشغيل-السريع)
-- [🔌 نقاط النهاية (API)](#-نقاط-النهاية-api)
-- [🔐 الأمان والامتثال](#-الأمان-والامتثال)
-- [☁️ النشر](#️-النشر)
-- [🐛 استكشاف الأخطاء](#-استكشاف-الأخطاء)
-
----
-
-## 🎯 نظرة عامة
-
-**ChatPlatform** هو خادم ويب مبني بـ **ASP.NET Core 8** يوفّر حلقة وصل كاملة بين **WhatsApp Cloud API** (Meta) وأي واجهة أمامية (React, Flutter, Mobile, Web).
-
-| القدرة | التقنية |
-|--------|---------|
-| 📥 **استقبال** الرسائل الواردة | Webhook موقّع (`X-Hub-Signature-256`) |
-| 📤 **إرسال** الرسائل الصادرة | Outbox Pattern + Retry with backoff |
-| 🔄 **معالجة غير متزامنة** | `IHostedService` + `System.Threading.Channels` |
-| 💾 **التخزين** | EF Core 8 + SQLite (قابل للترقية) |
-| 🔐 **الأمان** | Signature Validation + API Key + CORS |
-| 📊 **المرونة** | Modular Adapters (`IIntegrationAdapter`) |
-| 🌐 **REST API** | JSON + Swagger UI |
-
----
-
-## 🏗️ المعمارية
-
-### المعمارية العامة
-
-```mermaid
-flowchart TB
-    subgraph META["☁️ Meta Cloud API"]
-        direction LR
-        FB[graph.facebook.com]
-    end
-
-    subgraph BACKEND["🖥️ ChatPlatform (.NET 8)"]
-        direction TB
-
-        subgraph ENTRY["🚪 Entry Layer"]
-            WH["POST /webhook<br/>GET /webhook"]
-            API["REST API<br/>/api/*"]
-        end
-
-        subgraph MIDDLEWARE["🛡️ Middleware"]
-            EXC[GlobalException]
-            CORS[CORS Policy]
-            AUTH[ApiKey]
-        end
-
-        subgraph CORE["⚙️ Core"]
-            BUS["IEventBus<br/>(In-Memory Channels)"]
-            ENGINE["CoreEngine<br/>(IHostedService)"]
-        end
-
-        subgraph ADAPTERS["🔌 Adapters"]
-            WA[WhatsAppAdapter]
-            CN[ConsoleAdapter]
-            CH[ChatAdapter]
-            UC[UniversalConnector]
-        end
-
-        subgraph WORKERS["👷 Workers"]
-            INBOX[WhatsAppInboxWorker]
-            OUTBOX[WhatsAppOutboxWorker]
-        end
-
-        subgraph DATA["💾 Data Layer"]
-            DB[("SQLite<br/>PlatformDbContext")]
-            EF[EF Core 8]
-        end
-    end
-
-    subgraph CLIENT["📱 Clients"]
-        WEB[Web / Mobile / React]
-    end
-
-    WH --> MIDDLEWARE
-    API --> MIDDLEWARE
-    MIDDLEWARE --> CORE
-    MIDDLEWARE --> API
-    CORE <--> ADAPTERS
-    ADAPTERS --> WA
-    WA -->|HTTPS| FB
-    FB -->|Webhook| WH
-    WORKERS <--> DB
-    DB <--> EF
-    API <--> DB
-    WEB <-->|HTTP| API
-
-    style META fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style BACKEND fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style CLIENT
-
-fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    style DATA fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    style WORKERS
-fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-
-## 🗂️ بنية المشروع
-
-```mermaid
-flowchart TB
-    subgraph SOLUTION["📦 ChatPlatform Solution"]
-        direction TB
-
-        subgraph PROJ1["🌐 ChatPlatform (Web API)"]
-            P1["📁 Controllers<br/>ConversationsController<br/>MessagesController<br/>TenantsController"]
-            P2["📁 Hubs<br/>ChatHub"]
-            P3["📁 Middleware<br/>GlobalExceptionMiddleware<br/>ApiKeyMiddleware"]
-            P4["📁 wwwroot<br/>privacy.html<br/>terms.html<br/>data-deletion.html"]
-            P5["Program.cs<br/>appsettings.json<br/>Dockerfile"]
-        end
-
-        subgraph PROJ2["⚙️ ChatPlatform.Core"]
-            C1["📁 Abstractions<br/>IIntegrationAdapter"]
-            C2["📁 Events<br/>PlatformEvent"]
-        end
-
-        subgraph PROJ3["💾 ChatPlatform.Infrastructure"]
-            I1["📁 Adapters<br/>Console / Chat / Universal<br/>WhatsApp: Adapter, Client, Workers"]
-            I2["📁 Data<br/>PlatformDbContext<br/>8 Entities"]
-            I3["📁 Engine<br/>CoreEngine"]
-            I4["📁 Messaging<br/>InMemoryEventBus"]
-        end
-    end
-
-    PROJ1 --> PROJ2
-    PROJ1 --> PROJ3
-    PROJ3 --> PROJ2
-
-    style PROJ1 fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
-    style PROJ2 fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px
-    style PROJ3 fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-```
+ابدأ بفحص `/health` لإصدار الخدمة و`/ready` لاتصال قاعدة البيانات. راجع [خطوات التشغيل المحلي](HELP.md#تشغيل-محلي-معزول-bash--linux) لإعداد قاعدة اختبار قبل تشغيل التطبيق.
