@@ -163,3 +163,19 @@ curl -fsS https://chatplatform.fly.dev/ready
 - Production deployment stays manual via GitHub Actions → Deploy ChatPlatform to Fly.io → Run workflow (main). An explicitly approved merge changing the deployment workflow with the marker `[deploy-fly-approved]` also starts deployment. Ordinary main commits do not deploy automatically.
 - The deployment first runs the reusable isolated CI; then it builds the merged revision, retaining the existing app and /data mount, and checks both public health endpoints. `/health` includes the exact revision, `/ready` checks database connectivity. A stale revision or non-200 readiness fails verification. Requires a valid existing `FLY_API_TOKEN` secret and operational Fly account; no secrets are printed.
 - Read-only external observation: `python3 scripts/check_deployment.py`. To verify an expected deployed commit: `python3 scripts/check_deployment.py --expected-revision <commit-sha>`. PASS proves revision and basic DB connectivity, not real WhatsApp delivery.
+
+## Database recovery and container checks
+- Run these commands from a trusted Linux host with Python 3 and direct file access. Source is the real SQLite database, not a downloaded web page. A Fly mounted database is normally `/data/platform.db`; on Compose it is `/app/data/platform.db` inside the container. The Python recovery tool is a repository operator tool, not a web endpoint or bundled Python runtime.
+- Create a private backup directory and a new consistent snapshot:
+  ```bash
+  mkdir -m 700 -p "$HOME/chatplatform-backups"
+  python3 scripts/database_recovery.py backup --source /data/platform.db --destination "$HOME/chatplatform-backups/platform-$(date -u +%Y%m%d-%H%M%S).db"
+  ```
+  Output: PASS and SHA256. Uses SQLite online backup (including committed WAL), validates integrity and expected tables, creates mode-0600 file, refuses overwrite. Retain encrypted copies off-server and protect keys and customer data. Do not upload snapshots to GitHub or CI artifacts. The backup deadline bounds SQLite page-copy progress; integrity checks may take longer on large databases.
+- Restore into a **new, offline** private destination, not the live mounted volume:
+  ```bash
+  python3 scripts/database_recovery.py restore --source /secure/known-backup.db --destination /secure/restored.db
+  ```
+  Output: PASS, SHA256, and reminder to reconcile queues. Verify the backup hash against the recorded trusted value. Restore revokes database sessions but preserves data-protection keys and other records. External Meta media, configuration/secret values supplied outside SQLite, and Fly metadata are not backed up. Before replacing a production database: stop all workers, take a fresh snapshot, reconcile pending and ambiguous delivery/receipt/campaign records against Meta to avoid replay, restore with networking disabled first, and verify ownership and key decryption. No live replacement or automatic replay is implemented.
+- CI executes `python3 tests/backup_smoke.py` against the synthetic integration database; checks a WAL snapshot, restoration, session revocation, corruption detection and refusal to overwrite. Docker now has a built-in readiness healthcheck; CI builds the real image and observes its health status with networking disabled.
+- Compose uses `CHATPLATFORM_IMAGE` (default chat66d:latest). To test an already published immutable tag set `CHATPLATFORM_IMAGE=ghcr.io/moknethunter/chat66d:sha-<revision>` then use `docker compose config --quiet` to validate. Starting or updating a production container still requires operator approval and configured secrets.
