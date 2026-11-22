@@ -174,6 +174,8 @@ call("/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345",ex
 call("/webhook","POST",{},expected=401)
 body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.inbound.1","from":"15550000001","type":"text","text":{"body":"CI inbound message"}}]}}]}]}
 sig="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(body).encode(),hashlib.sha256).hexdigest()
+call("/webhook","POST",body,extra={"X-Hub-Signature-256":"sha256="+"0"*64},expected=401)
+call("/webhook","POST",body,extra={"X-Hub-Signature-256":"sha256=not-hex"},expected=401)
 for _ in range(2): call("/webhook","POST",body,extra={"X-Hub-Signature-256":sig})
 for _ in range(30):
     conversations,_=call("/api/conversations",cookie=a)
