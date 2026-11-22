@@ -33,7 +33,9 @@ public class TenantsController : ControllerBase
             .OrderBy(t => t.PhoneNumberId)
             .Select(t => new
             {
+                id = t.Id,
                 tenantId = t.TenantId,
+                wabaId = t.WabaId,
                 phoneNumberId = t.PhoneNumberId,
                 displayName = t.PhoneNumberId,
                 isActive = t.IsActive,
