@@ -3,6 +3,7 @@ using ChatPlatform.Security;
 using Microsoft.AspNetCore.Authorization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp;
@@ -75,13 +76,14 @@ public sealed class WhatsAppController : ControllerBase
         if (!ValidMetaId(phone) || !ValidMetaId(waba) || !ValidToken(token)) return false;
         try
         {
-            var client = _httpFactory.CreateClient("whatsapp");
+            using var client = _httpFactory.CreateClient("whatsapp");
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{waba}/phone_numbers?fields=id&limit=100");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using var response = await client.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode) return false;
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            return json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
+            return json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
                 && data.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.Object &&
                     x.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == phone);
         }
@@ -98,6 +100,32 @@ public sealed class WhatsAppController : ControllerBase
     {
         var valid = await VerifyAccount(req.PhoneNumberId, req.WabaId, req.AccessToken, ct);
         return Ok(new { valid, message = valid ? "تم التحقق من ملكية الرقم ضمن WABA." : "تعذر التحقق من البيانات." });
+    }
+
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [HttpPost("accounts/{id}/verify")]
+    public async Task<IActionResult> VerifySavedAccount(string id, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        var account = await _db.WhatsAppTenants.AsNoTracking()
+            .Where(x => x.Id == id && x.TenantId == tenant)
+            .Select(x => new { x.IsActive, x.PhoneNumberId, x.WabaId, x.BusinessTokenEncrypted })
+            .SingleOrDefaultAsync(ct);
+        if (account == null) return NotFound();
+        if (!account.IsActive || !ValidMetaId(account.WabaId) || string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
+            return Conflict(new { message = "أعد ربط الحساب أو أكمل بياناته قبل التحقق." });
+
+        string token;
+        try { token = _protector.Unprotect(account.BusinessTokenEncrypted); }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            return Conflict(new { message = "تعذرت قراءة رمز الوصول المحفوظ. حدّث الرمز ثم أعد التحقق." });
+        }
+
+        var valid = await VerifyAccount(account.PhoneNumberId, account.WabaId, token, ct);
+        return Ok(new { valid, message = valid
+            ? "أكدت Meta أن الرمز المحفوظ يصل إلى هذا الرقم ضمن حساب الأعمال."
+            : "تعذر التحقق لدى Meta. راجع الرمز وصلاحياته ومعرّفات الحساب." });
     }
 
     [Authorize(Policy = PlatformSecurity.AdminPolicy)]
@@ -177,10 +205,10 @@ public sealed class WhatsAppController : ControllerBase
     public async Task<IActionResult> DeleteAccount(string id, CancellationToken ct)
     {
         var tenant = User.TenantId();
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (account == null) return NotFound();
         // Preserve ownership and history. A disconnected phone must never become claimable by another tenant.
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         account.IsActive = false;
         account.BusinessTokenEncrypted = "";
         await _db.SaveChangesAsync(ct);

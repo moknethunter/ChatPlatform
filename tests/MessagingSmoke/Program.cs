@@ -142,7 +142,11 @@ try
         Identity("foreign");
         if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789"), ct) is not NotFoundResult)
             throw new Exception("Cross-tenant account repair accepted");
+        if (await controller.VerifySavedAccount(account.Id, ct) is not NotFoundResult)
+            throw new Exception("Cross-tenant verification accepted");
         Identity(tenant);
+        if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
+            throw new Exception("Verification accepted incomplete account");
         if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token"), ct) is not BadRequestObjectResult ||
             await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "790"), ct) is not BadRequestObjectResult ||
             await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789"), ct) is not OkObjectResult)
@@ -151,6 +155,13 @@ try
         var repaired = await db.WhatsAppTenants.AsNoTracking().SingleAsync(x => x.Id == account.Id, ct);
         if (repaired.WabaId != "789" || new WhatsAppTokenProtection(dp).Unprotect(repaired.BusinessTokenEncrypted) != "verified-token")
             throw new Exception("Verified repair was not persisted");
+        if (await controller.VerifySavedAccount(account.Id, ct) is not OkObjectResult verified ||
+            !JsonSerializer.SerializeToElement(verified.Value).GetProperty("valid").GetBoolean() ||
+            JsonSerializer.Serialize(verified.Value).Contains("verified-token", StringComparison.Ordinal))
+            throw new Exception("Stored-token verification failed or disclosed the token");
+        await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET BusinessTokenEncrypted = 'invalid!' WHERE Id = 'repair-account'", ct);
+        if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
+            throw new Exception("Unreadable saved token was not handled");
         if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "790"), ct) is not ConflictObjectResult)
             throw new Exception("Established WABA could be replaced");
         await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET AccessTokenEncrypted = 'old-token' WHERE Id = 'repair-account'", ct);
@@ -166,7 +177,7 @@ try
         // Do not leave the extra account active for the unrelated messaging regression tests.
         db.ChangeTracker.Clear();
         await controller.DeleteAccount(account.Id, ct);
-        Console.WriteLine("PASS: verified legacy WABA repair, cross-tenant rejection, disconnect survives restart, explicit reconnect.");
+        Console.WriteLine("PASS: legacy WABA repair, saved-token verification, cross-tenant rejection, disconnect survives restart, explicit reconnect.");
     }
 
     var adapter = provider.GetRequiredService<WhatsAppAdapter>();

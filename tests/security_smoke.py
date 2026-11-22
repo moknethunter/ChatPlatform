@@ -101,6 +101,12 @@ assert call("/api/whatsapp/tenants",expected=401)[0] is not None
 own_tenants,_=call("/api/whatsapp/tenants",cookie=a)
 assert len(own_tenants)==1 and own_tenants[0]["id"]=="ci-account-a" and own_tenants[0]["tenantId"]=="ci-tenant-a"
 assert not call("/api/whatsapp/tenants",cookie=b)[0]
+verify_path = "/api/whatsapp/accounts/ci-account-a/verify"
+call(verify_path,"POST",expected=401)
+call(verify_path,"POST",cookie=agent,expected=403)
+call(verify_path,"POST",cookie=b,expected=404)
+call(verify_path,"POST",cookie=a,expected=403,csrf=False)
+call(verify_path,"POST",cookie=a,expected=409)
 call("/api/whatsapp/tenants","POST",{"tenantId":"ci-tenant-a","phoneNumberId":"1234","accessToken":"fake"},cookie=a,expected=403)
 call("/api/whatsapp/tenant-options",cookie=a,expected=403)
 call("/api/whatsapp/messages",cookie=a,expected=403)
