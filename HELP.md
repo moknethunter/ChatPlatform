@@ -1,6 +1,6 @@
 # دليل أوامر ChatPlatform
 
-نفّذ الأوامر من جذر المشروع. تحتاج إلى Git و.NET SDK 8 وDocker Compose v2 حسب الأمر.
+نفّذ الأوامر من جذر المشروع. تحتاج إلى Git و.NET SDK 8 وDocker Compose v2 حسب الأمر. راجع [دليل التشغيل والإصدار](docs/operations.md) للإعدادات، و[دليل المستخدم والإدارة](docs/user-guide.md) لاستخدام الواجهات.
 
 | الأمر | الوظيفة / النتيجة المتوقعة |
 |---|---|
@@ -40,13 +40,13 @@ dotnet run --project ChatPlatform.csproj --no-launch-profile
 ```bash
 # اختبار جاهزية الخادم: المتوقع HTTP 200
 curl -i http://127.0.0.1:5080/health
-# اختبار منع مسارات البذر في الإنتاج: المتوقع HTTP 404 بعد الإصلاح
+# اختبار منع مسارات البذر في الإنتاج: المتوقع HTTP 404 في وضع Production
 curl -i http://127.0.0.1:5080/dev/seed/list
 # اختبار رفض webhook غير موقع: المتوقع HTTP 401
 curl -i -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:5080/webhook
 ```
 
-أوقف الخادم بـ Ctrl+C. لا تستخدم بيانات اعتماد حقيقية أو قاعدة إنتاج في هذه الخطوات. راجع نتائج GitHub Actions قبل الدمج. الدمج إلى main يشغّل إجراءات النشر الحالية تلقائياً.
+أوقف الخادم بـ Ctrl+C. لا تستخدم بيانات اعتماد حقيقية أو قاعدة إنتاج في هذه الخطوات. راجع نتائج GitHub Actions قبل الدمج. الدمج العادي إلى `main` يشغّل CI. راجع قسم النشر أدناه لشروط تشغيل سير Fly.
 
 ## فحص جاهزية التخزين
 ```bash
@@ -60,7 +60,7 @@ curl -i http://127.0.0.1:5080/ready
 # اختبار الإرسال والرد الآلي عبر عامل Outbox وواجهة Graph وهمية، بلا اتصال خارجي
  dotnet run --project tests/MessagingSmoke/MessagingSmoke.csproj -c Release
 ```
-النتيجة المتوقعة: PASS ورسالتان بحالة Sent في قاعدة الاختبار فقط. لا يدل ذلك على تسليم رسائل حقيقية عبر Meta.
+النتيجة المتوقعة: رسائل PASS للتحقق والوسائط المعزولة، وست عمليات إرسال ناجحة في محاكاة Graph. تُحفظ النتائج في قاعدة الاختبار المؤقتة.
 
 ## تشخيص حسابات واتساب في الإنتاج (قراءة فقط)
 ```bash
@@ -70,29 +70,29 @@ fly status -a chatplatform
 fly logs -a chatplatform --no-tail
 # فحص اتصال قاعدة البيانات
 curl -fsS https://chatplatform.fly.dev/ready
-``
+```
 من لوحة Fly.io افتح Monitoring ثم Live Logs قبل إعادة طلب accounts. لا تحذف مجلد /data أو قاعدة البيانات. وجود configured=true يثبت وجود الإعدادات فقط، وليس صلاحية التوكن أو اشتراك messages لدى Meta. اختبار CI يحاكي قاعدة قديمة وتوكنات وهمية، ويتحقق من القراءة والتشفير دون إرسال حقيقي.
 
 ## Trusted reverse proxies and development CI
 - Configure `Security__TrustedProxies__0` (and subsequent indices) only with verified immediate proxy IP addresses. Loopback is trusted by default. Verify Fly.io proxy topology before deploying this change; do not clear the trust lists or enable unrestricted forwarded headers.
 - Development branch pushes run isolated verification, including a dependency vulnerability report. Inspect the report and actual test results before merging; the report alone does not enforce a vulnerability gate.
-- Authentication and cross-tenant authorization remain release blockers. Existing anonymous smoke checks must be revised together with authentication.
+- CI checks authentication, role restrictions and cross-tenant authorization with synthetic users. Production login, proxy and real-provider checks need a verification run on the deployed revision.
 
-## Authentication candidate (development branch only)
+## Authentication and tenant isolation
 - Set `Security__Accounts__0__Username`, `Security__Accounts__0__TenantId`, `Security__Accounts__0__Role` (Admin/Agent) and `Security__Accounts__0__PasswordHash` through secret configuration. Use ASP.NET Identity PasswordHasher V3 output; never commit a password/hash. Each username must be unique and the referenced tenant active.
-- Login at /login.html (HTTPS required by the secure cookie); /api/auth/me returns identity. Cookie lifetime 30 minutes; sessions are checked in SQLite and logout deletes the server-side session. Account provisioning is still operator-managed and must be configured before production.
-- Writes require X-ChatPlatform-CSRF: 1. Admin can manage local templates and auto-reply rules; Agent reads only. Conversations and account listings are scoped by the authenticated tenant.
-- Unreviewed API endpoints and SignalR are intentionally denied (401/403). Text sending uses a tenant-scoped durable message/outbox transaction and a request idempotency key; approved-template sending, onboarding, connector administration and account registration remain disabled until reviewed. Existing UI flows require further integration and testing before release.
+- Login at /login.html (HTTPS required by the secure cookie); /api/auth/me returns identity. Cookie lifetime 30 minutes; sessions are checked in SQLite and logout deletes the server-side session. The platform operator provisions the first tenant administrator and tenant administrators can provision managed agents.
+- Writes require X-ChatPlatform-CSRF: 1. Admin manages templates and auto-reply rules. Agent can read those resources and operate tenant-scoped conversations and messaging. Conversations and account listings are scoped by the authenticated tenant.
+- Unreviewed API endpoints and SignalR are intentionally denied (401/403). Text sending uses a tenant-scoped durable message/outbox transaction and a request idempotency key; template sending uses the same durable path, while manual account registration is restricted to the tenant Admin. OAuth onboarding and connector administration are denied.
 - CI uses synthetic credentials and a disposable database. Run tests/security_smoke.py against the isolated service configured by the workflow; never run against production.
 
 - Template schema migration adds missing MetaTemplateId and UpdatedAtUtc without deleting rows. Back up the production volume and test restore before applying migrations. Security smoke tests use fake accounts and assert foreign account/invalid session requests never reach outbound delivery.
 
-## Tenant account and template sending candidate
-- Manual account creation validates numeric Meta IDs and confirms the phone belongs to the specified WABA using the supplied token before storing it. Only an organization Admin may create or rotate credentials. Deactivation preserves ownership and removes the token. Legacy accounts without a WABA ID need a reviewed migration; OAuth onboarding remains disabled.
-- Template sends use the same tenant-scoped durable outbox as text sends. Meta decides whether the template is approved; queued does not mean sent. The sender remains responsible for recipient opt-in and Meta policy compliance. Negative HTTP tests do not contact Meta; positive account verification and template delivery need mocked integration tests.
+## Tenant account and template sending
+- Manual account creation validates numeric Meta IDs and confirms the phone belongs to the specified WABA using the supplied token before storing it. Only an organization Admin may create or rotate credentials. Deactivation preserves ownership and removes the token. The Admin can repair missing legacy WABA metadata from account settings after verification. OAuth onboarding remains blocked by the default authorization policy.
+- Template sends use the same tenant-scoped durable outbox as text sends. Meta decides whether the template is approved; queued does not mean sent. The sender remains responsible for recipient opt-in and Meta policy compliance. Negative HTTP tests do not contact Meta; positive account verification and template delivery are covered by mocked integration tests.
 - The first WABA phone list page is checked; missing numbers are rejected rather than following untrusted paging URLs. Connector endpoints, SignalR and embedded signup remain disabled pending review.
 
-- MessagingSmoke now invokes the real text/template controller with a synthetic tenant identity and repeats the idempotency keys; the worker must send all four expected messages only to a mocked Graph handler. The HTTP smoke suite separately checks authentication and tenant denials. Diagnostic null values mean unknown, not disconnected or verified.
+- MessagingSmoke now invokes the real text/template controller with a synthetic tenant identity and repeats the idempotency keys; the worker must send the expected messages only to a mocked Graph handler. The HTTP smoke suite separately checks authentication and tenant denials. Diagnostic null values mean unknown, not disconnected or verified.
 
 ## Phase 4: team administration
 - Open /team.html while signed in as a configured tenant Admin. Create Agent users with lowercase unique usernames and passwords of at least 14 characters. Do not share passwords through GitHub, logs or chat. The server hashes passwords and never returns them.
@@ -100,34 +100,34 @@ curl -fsS https://chatplatform.fly.dev/ready
 - The isolated HTTP smoke suite tests agent creation, cross-tenant access denial, role escalation attempts, password reset and session revocation. UI browser verification and a secure initial-password delivery/change workflow remain pending.
 
 ## CRM and shared inbox
-- /contacts.html lists profiles by tenant; new conversation inserts create a profile automatically. Startup backfills existing conversation contacts without overwriting edited profiles. A contact is uniquely keyed by (TenantId, Phone). Set stage to new, lead, customer or inactive; notes are shared within the tenant. No bulk import/export or deletion is implemented.
-- /inbox.html is now a shared inbox with search/filter/pagination, text replies, manual refresh, status, unread reset, tags and administrator-only assignment to active managed agents. Assignment is routing metadata, not an agent-only access boundary: all authenticated team members may read their own tenant conversations. No real-time transport or attachment rendering yet.
+- /contacts.html lists profiles by tenant; new conversation inserts create a profile automatically. Startup backfills existing conversation contacts without overwriting edited profiles. A contact is uniquely keyed by (TenantId, Phone). Set stage to new, lead, customer or inactive; notes are shared within the tenant. Client records can be created and edited individually. Bulk import/export and deletion are outside this interface.
+- /inbox.html is now a shared inbox with search/filter/pagination, text replies, manual refresh, status, unread reset, tags and administrator-only assignment to active managed agents. Assignment is routing metadata, not an agent-only access boundary: all authenticated team members may read their own tenant conversations. Inbox supports revision streaming over SSE and renders supported media.
 - CI uses synthetic contacts and checks same-phone isolation, cross-tenant writes, role restrictions, assignment/status and unread updates. Browser UI checks remain pending.
 
-## Media candidate and automatic inbox updates
+## Media and automatic inbox updates
 - Inbox supports selected JPEG/PNG, MP4, PDF and Ogg/Opus or MP3 attachments up to 5 MiB. Files are uploaded to Meta for the selected conversation; the returned short-lived encrypted ticket is bound to tenant and conversation. Sending uses the durable outbox and a stable idempotency key (within a retry of the same ticket). No arbitrary links or raw media IDs are accepted from clients. Meta validates formats/codecs. Media uploads are not persisted locally and may leave unused Meta uploads if a send is abandoned.
 - /api/media/{messageId} fetches the stored media ID with the owning account token, bounds response size, forbids redirects and allows only HTTPS lookaside.fbsbx.com. Expired or unavailable media returns an error; PDF is download-only. No permanent media archive or antivirus scanning. File signatures are basic checks, not a malware guarantee. Limit concurrent use and verify live Meta integration in a separate environment before release.
-- The inbox refreshes every five seconds while visible, without a SignalR connection. Every refresh verifies session and tenant again. True push and browser recording remain pending. No real Meta requests in CI; negative HTTP tests and media signature/host checks are included.
+- The inbox uses SSE revision updates with a five-second polling fallback while visible. Each data request checks session and tenant. Browser recording depends on Ogg/Opus MediaRecorder support. No real Meta requests in CI; negative HTTP tests and media signature/host checks are included.
 
-- The MessagingSmoke test now exercises upload, retrieval, ticket ownership and idempotent media delivery against a fake HTTP handler, with no real network requests. The optional browser microphone recorder is enabled only if Ogg/Opus MediaRecorder is supported; otherwise users can attach an existing MP3/Ogg file. Recordings are limited to 120 seconds and 5 MiB, and require explicit send.
+- The MessagingSmoke test exercises upload, retrieval, ticket ownership and idempotent media delivery against a fake HTTP handler, with no real network requests. The optional browser microphone recorder is enabled only if Ogg/Opus MediaRecorder is supported; otherwise users can attach an existing MP3/Ogg file. Recordings are limited to 120 seconds and 5 MiB, and require explicit send.
 
 ## Live inbox and bot drafts
 - /api/live/inbox streams tenant-specific revision numbers only over SSE; SQLite triggers track messages, conversation and CRM mutations. Sessions are revalidated every second, streams close after 25 seconds and permit two simultaneous connections per user. Browser reconnects and uses five-second polling as fallback. No client-supplied tenant or group names; legacy SignalR remains denied. Proxy streaming and load tests pending.
-- /bots.html is an Admin-only draft editor with draggable nodes, coordinate inputs, links via selectors, save/version conflict protection and a side-effect-free simulator. Supported nodes: start, contains, text reply, end. Graphs are bounded to 40 nodes, reject cycles or unreachable nodes and require valid branches. Drafts are not published or executed on incoming messages. No AI or external requests in simulation. CI verifies tenant boundaries, invalid graphs and version conflicts. Real-browser UX checks remain pending.
+- /bots.html is an Admin-only draft editor with draggable nodes, coordinate inputs, links via selectors, save/version conflict protection and a side-effect-free simulator. Supported nodes include start, contains, text reply, wait, handoff and end. Graphs are bounded to 40 nodes, reject cycles or unreachable nodes and require valid branches. Only an explicitly published immutable version is executed on incoming messages. No AI or external requests in simulation. CI verifies tenant boundaries, invalid graphs and version conflicts. Real-browser UX checks remain pending.
 
 - The HTTP smoke suite explicitly opens a live stream, logs out that session and expects a session-expired event and 401 on reconnect. The bot validation tests also reject missing edges and unreachable nodes.
 
 ## Published bot runtime
-- /bots.html: save and simulate a draft, then publish the exact saved version. One published immutable snapshot per tenant; a new publication replaces it. Stop is bound to the activation ID. A published bot exclusively handles new inbound text even if no condition matches. Without a release, the highest-priority matching legacy rule is evaluated durably. A bot combines up to three reply nodes into one message (<=4000 chars), with a five-second per-recipient cooldown; legacy cooldown is preserved. Legacy matching scans up to 100 active rules, regex timeout 50ms.
+- /bots.html: save and simulate a draft, then publish the exact saved version. One published immutable snapshot per tenant; a new publication replaces it. Stop is bound to the activation ID. A published bot exclusively handles new inbound text even if no condition matches. Without a release, the highest-priority matching legacy rule is evaluated durably. A bot combines reply text up to the 4000-character limit, with a five-second per-recipient cooldown; legacy cooldown is preserved. Legacy matching scans up to 100 active rules, regex timeout 50ms.
 - Signed inbound processing commits the conversation/message, automation execution receipt and outbox reply in one SaveChanges transaction. One receipt per inbound message, unique tenant/wamid outbox key. The old event adapter skips automationHandled notifications. No real network in CI; fake encrypted token prevents sending in HTTP tests, and a separate fake Graph handler verifies successful delivery. Queue deduplication is not a guarantee of exactly-once delivery at Meta after a network failure. Stop affects future messages; already queued replies may still send. Worker rechecks the 24-hour window before automatic delivery.
-- This is a stateless per-message flow engine, not a multi-turn conversation state machine. The execution log shows queued/no_match/cooldown/account unavailable; queue status does not imply delivery. Browser and production integration tests remain required.
+- Wait nodes save the next step for a later inbound message; handoff suspends the bot for the conversation. The execution log shows queued/no_match/cooldown/account unavailable; queue status does not imply delivery. Browser and production integration tests remain required.
 
 - Automation reliability: stale signed message timestamps do not extend the customer-service window. The inbox uses a database transaction for ownership, bot decision and atomic queueing. Automated sends stop on ambiguous delivery (HTTP 5xx, timeout, network error, missing Meta message ID or expired processing lease); status is DeliveryUnknown, requiring operator reconciliation. Explicit HTTP 429 rejection can be retried. This favors avoiding duplicates over delivery at all costs; Meta exact-once delivery cannot be promised.
 
 - Mocked Graph tests assert a 500 response produces exactly one automated attempt, and an abandoned processing lease produces no further network request, both marked DeliveryUnknown.
 
 ## Merge and release separation
-- Merging into main runs CI only. Repository Fly.io and GHCR release workflows now run only by explicit workflow_dispatch from main. This prevents a code merge from automatically deploying authentication changes or overwriting production images. Do not dispatch before explicit production approval, verified administrator account provisioning, proxy/HTTPS configuration and tested database backup/restore. External hosting auto-deploy settings are outside this repository workflow control; verify separately before release.
+- Ordinary merges into main run CI only. GHCR workflows run by workflow_dispatch from main. Fly also recognizes an approved deployment marker when a main commit changes its deployment workflow. This prevents a code merge from automatically deploying authentication changes or overwriting production images. Do not dispatch before explicit production approval, verified administrator account provisioning, proxy/HTTPS configuration and tested database backup/restore. External hosting auto-deploy settings are outside this repository workflow control; verify separately before release.
 
 ## Owner model and knowledge
 - /api/knowledge implements tenant-scoped, Admin-only articles (500 max, drafts excluded from search). Local lexical ranking requires no AI or embedding service. /api/knowledge/preview is a manual test only; no automatic WhatsApp AI replies. Default is disabled. Operator config: OwnModel__Enabled=true, OwnModel__Endpoint=https://<owner-host>/inference, OwnModel__Token=<private service token> (never commit); plain HTTP permitted only on loopback. Endpoint configured only server-side; redirects disabled, one concurrent preview per user, response <=32 KiB, deadline 30s. Model receives question and at most four published article excerpts, no account tokens or automatic conversation history. No external provider fallback. Model connection is not a health claim merely because configured.
@@ -144,8 +144,8 @@ curl -fsS https://chatplatform.fly.dev/ready
 
 - Mobile inbox switches between the conversation list and selected conversation with an explicit back button. A synthetic future-scheduled outbox row tests cancellation and message-state synchronization during human takeover.
 
-## Marketing campaigns (candidate)
-- Campaigns__Enabled is false by default. Admins record explicit account-specific marketing consent with evidence, manage named lists of existing CRM contacts (up to 100 each), and schedule up to 300 recipients per tenant per scheduled UTC day. Only opted-in contacts are queued, spaced five seconds within each campaign; no global throughput guarantee. The selected local MARKETING template must be simple text-only with no variables; successful scheduling is not Meta approval. The worker verifies the actual approved MARKETING template body/language on the owning WABA immediately before dispatch, fails closed on network/approval errors, and rechecks consent and cancellation. No redirects or external paging. No live Meta test yet. STOP/unsubscribe/Arabic supported exact opt-out phrases revoke consent from signed inbound messages and suppress bot replies to that opt-out. No automatic consent from inbound messages. Already dispatched messages cannot be recalled. Ambiguous deliveries are not automatically resent. Reports show outbox states, not confirmed read/delivery receipts. Direct manual template sends remain a separate workflow, not campaign consent enforcement; operator must comply with Meta rules and applicable laws.
+## Marketing campaigns
+- Campaigns__Enabled is false by default. Admins record explicit account-specific marketing consent with evidence, manage named lists of existing CRM contacts (up to 100 each), and schedule up to 300 recipients per tenant per scheduled UTC day. Only opted-in contacts are queued, spaced five seconds within each campaign; no global throughput guarantee. The selected local MARKETING template must be simple text-only with no variables; successful scheduling is not Meta approval. The worker verifies the actual approved MARKETING template body/language on the owning WABA immediately before dispatch, fails closed on network/approval errors, and rechecks consent and cancellation. No redirects or external paging. No live Meta test yet. STOP/unsubscribe/Arabic supported exact opt-out phrases revoke consent from signed inbound messages and suppress bot replies to that opt-out. No automatic consent from inbound messages. Already dispatched messages cannot be recalled. Ambiguous deliveries are not automatically resent. Reports show outbox states and the latest stored message state separately. Direct manual template sends remain a separate workflow, not campaign consent enforcement; operator must comply with Meta rules and applicable laws.
 
 - /marketing.html provides Admin-only consent forms, editable named CRM lists, campaign scheduling and cancellation. /reports.html shows bounded 1–30 day UTC traffic, outbox states, latest stored outgoing message status, bot outcomes and current account/recipient consent counts. Neither queued nor accepted by Meta is described as delivered/read. Scheduled messages are counted at record creation time. No AI dependencies; direct browser and actual Meta verification still pending.
 
@@ -180,7 +180,7 @@ curl -fsS https://chatplatform.fly.dev/ready
 - CI executes `python3 tests/backup_smoke.py` against the synthetic integration database; checks a WAL snapshot, restoration, session revocation, corruption detection and refusal to overwrite. Docker now has a built-in readiness healthcheck; CI builds the real image and observes its health status with networking disabled.
 - Compose uses `CHATPLATFORM_IMAGE` (default chat66d:latest). To test an already published immutable tag set `CHATPLATFORM_IMAGE=ghcr.io/moknethunter/chat66d:sha-<revision>` then use `docker compose config --quiet` to validate. Starting or updating a production container still requires operator approval and configured secrets.
 
-## WhatsApp legacy account recovery (candidate; review before merge)
+## WhatsApp legacy account recovery
 - Migration preserves valid account dates in both timestamp column layouts, keeps tenant and phone ownership, and never copies a revoked legacy token into an inactive account. Run the initializer twice on a synthetic legacy schema to test idempotency. Do not migrate the live database without first verifying an encrypted, restorable backup. Unknown or conflicting ownership requires manual review, not reassignment.
 - In WhatsApp account settings, an Admin can enter missing WABA metadata when updating a token. The server verifies exact phone membership in the WABA, refuses a different established WABA, and rechecks the account after verification. Disconnect clears both encrypted credential columns. Explicit reconnect requires verification and an available account quota. Tenant list and account list are authenticated; legacy unscoped send/list/write routes remain denied.
 - In WhatsApp account settings, choose **التحقق لدى Meta** as the active account's tenant Admin. The account needs a saved token and WABA ID. A successful result confirms that the stored token can read the phone's membership in its WABA. This check sends no message and returns no token. Webhook delivery and receipts require a separate live test.
