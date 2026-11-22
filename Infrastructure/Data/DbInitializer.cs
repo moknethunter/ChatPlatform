@@ -762,6 +762,9 @@ public static class DbInitializer
                 "WHATSAPP_PHONE_NUMBER_ID");
 
         if (string.IsNullOrWhiteSpace(phoneNumberId))
+            phoneNumberId = Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId");
+
+        if (string.IsNullOrWhiteSpace(phoneNumberId))
         {
             Console.WriteLine(
                 ">>> WhatsApp linking skipped: " +
@@ -967,6 +970,11 @@ public static class DbInitializer
         SqliteConnection connection,
         SqliteTransaction transaction)
     {
+        // Capture legacy shape before adding defaults: a database created by an older
+        // EF model may contain only CreatedAt, which holds the original timestamp.
+        var hadCreatedAtUtc = ColumnExists(connection, transaction, "WhatsAppTenants", "CreatedAtUtc");
+        var hadCreatedAt = ColumnExists(connection, transaction, "WhatsAppTenants", "CreatedAt");
+
         EnsureColumnExists(
             connection, transaction,
             "WhatsAppTenants", "TenantId",
@@ -1027,11 +1035,28 @@ public static class DbInitializer
             "WhatsAppTenants", "CreatedAt",
             "TEXT NOT NULL DEFAULT '2026-01-01 00:00:00'");
 
+        if (!hadCreatedAtUtc && hadCreatedAt)
+        {
+            Execute(connection, transaction, """
+                UPDATE WhatsAppTenants SET CreatedAtUtc = CreatedAt
+                WHERE CreatedAt IS NOT NULL AND julianday(CreatedAt) IS NOT NULL;
+                """);
+        }
+
+        if (!hadCreatedAt && hadCreatedAtUtc)
+        {
+            Execute(connection, transaction, """
+                UPDATE WhatsAppTenants SET CreatedAt = CreatedAtUtc
+                WHERE CreatedAtUtc IS NOT NULL AND julianday(CreatedAtUtc) IS NOT NULL;
+                """);
+        }
+
         Execute(connection, transaction, """
             UPDATE WhatsAppTenants
             SET BusinessTokenEncrypted = AccessTokenEncrypted
             WHERE
-                (BusinessTokenEncrypted IS NULL
+                IsActive = 1
+                AND (BusinessTokenEncrypted IS NULL
                  OR BusinessTokenEncrypted = '')
                 AND AccessTokenEncrypted IS NOT NULL
                 AND AccessTokenEncrypted <> '';
@@ -1042,9 +1067,16 @@ public static class DbInitializer
             UPDATE WhatsAppTenants SET AppId = '' WHERE AppId IS NULL;
             UPDATE WhatsAppTenants SET BusinessTokenEncrypted = '' WHERE BusinessTokenEncrypted IS NULL;
 
+            -- Canonical UTC timestamp must be present for EF materialization.
+            -- Prefer an existing valid legacy date, never replace a valid canonical date.
+            UPDATE WhatsAppTenants
+            SET CreatedAtUtc = CASE WHEN julianday(CreatedAt) IS NOT NULL
+                THEN CreatedAt ELSE '2026-01-01 00:00:00' END
+            WHERE CreatedAtUtc IS NULL OR julianday(CreatedAtUtc) IS NULL;
+
             UPDATE WhatsAppTenants
             SET CreatedAt = CreatedAtUtc
-            WHERE CreatedAt IS NULL OR CreatedAt = '';
+            WHERE CreatedAt IS NULL OR julianday(CreatedAt) IS NULL;
             """);
 
         Console.WriteLine(

@@ -182,7 +182,7 @@
 
         <div class="grid">
             <!-- Form Section -->
-            <section class="card">
+            <section class="card" id="accountFormCard" hidden>
                 <h2>ربط حساب WhatsApp جديد</h2>
                 
                 <div class="guide-box">
@@ -271,8 +271,11 @@
         <h2>تحديث Access Token</h2>
         <p class="subtitle">أدخل التوكن الجديد للحساب. سيتم إرساله للخادم وتشفيره.</p>
         <input type="hidden" id="modalAccountId">
+        <label for="modalWabaId">معرّف WABA للحساب</label>
+        <input id="modalWabaId" inputmode="numeric" autocomplete="off" maxlength="32">
+        <p id="modalReconnectNote" class="subtitle" hidden>سيُعاد تفعيل الحساب بعد تحقق Meta والسعة المسموحة.</p>
         <label for="modalNewToken">التوكن الجديد</label>
-        <input type="password" id="modalNewToken" placeholder="أدخل التوكن الجديد...">
+        <input type="password" id="modalNewToken" autocomplete="new-password" placeholder="أدخل التوكن الجديد...">
         <div class="actions" style="justify-content: flex-end;">
             <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
             <button class="btn btn-success" id="modalSaveTokenBtn">حفظ التوكن</button>
@@ -286,6 +289,7 @@
 
 const $ = id => document.getElementById(id);
 let isCredentialsValidated = false;
+let canManageAccounts = false;
 
 function showMessage(element, text, type) {
     element.textContent = text;
@@ -297,23 +301,15 @@ function updateDot(id, status) {
     dot.className = "dot " + status;
 }
 
-// 1. Load Tenants for Dropdown
-async function loadTenantsDropdown() {
+async function loadAccountPermissions() {
     const select = $("tenantId");
+    canManageAccounts = false;
     try {
-        // Assuming /api/tenants returns [{id: "guid", name: "Company"}]
-        const data = await ChatPlatformAPI.getTenants();
-        const items = Array.isArray(data) ? data : data.items || [];
-        
-        select.innerHTML = '<option value="" disabled selected>اختر المؤسسة...</option>';
-        items.forEach(t => {
-            const opt = document.createElement("option");
-            opt.value = t.id || t.tenantId;
-            opt.textContent = t.name || t.id;
-            select.appendChild(opt);
-        });
-    } catch (e) {
-        select.innerHTML = '<option value="" disabled selected>فشل تحميل المؤسسات</option>';
+        const identity = await ChatPlatformAPI.getIdentity();
+        canManageAccounts = identity.role === "Admin";
+        if (canManageAccounts) select.replaceChildren(new Option(identity.tenantId, identity.tenantId));
+    } finally {
+        $("accountFormCard").hidden = !canManageAccounts;
     }
 }
 
@@ -349,13 +345,22 @@ async function loadAccounts() {
             add("account-detail", "Tenant: " + (item.tenantId || "—"));
             add("account-detail", "Phone ID: " + (item.phoneNumberId || "—") + " | WABA: " + (item.wabaId || "—"));
             add("account-detail", "Token: " + (item.hasToken ? "مشفر ومحفوظ" : "غير مضبوط"));
-            const actions = add("account-actions", "");
-            for (const [label, action, cls] of [
-                ["تحديث التوكن", () => openTokenModal(item.id), "btn-secondary"],
-                ["إيقاف الحساب", () => deleteAccount(item.id), "btn-danger"]
-            ]) {
-                const btn = document.createElement("button"); btn.className = "btn btn-sm " + cls;
-                btn.textContent = label; btn.addEventListener("click", action); actions.appendChild(btn);
+            if (canManageAccounts) {
+                const actions = add("account-actions", "");
+                const status = add("message", "");
+                status.setAttribute("role", "status");
+                const buttons = [[isActive ? "تحديث التوكن" : "إعادة ربط الحساب", () => openTokenModal(item), "btn-secondary"]];
+                if (isActive) {
+                    buttons.push(["التحقق لدى Meta", event => testConnection(item.id, event.currentTarget, status), "btn-secondary"]);
+                    buttons.push(["إيقاف الحساب", () => deleteAccount(item.id), "btn-danger"]);
+                }
+                for (const [label, action, cls] of buttons) {
+                    const btn = document.createElement("button");
+                    btn.className = "btn btn-sm " + cls;
+                    btn.textContent = label;
+                    btn.addEventListener("click", action);
+                    actions.appendChild(btn);
+                }
             }
             list.appendChild(box);
         });
@@ -489,32 +494,53 @@ $("tenantForm").addEventListener("submit", async (e) => {
 });
 
 // 5. Account Actions
-async function testConnection(id) {
-    alert("سيتم إضافة Endpoint اختبار الاتصال في الـ Backend.");
+async function testConnection(id, button, status) {
+    button.disabled = true;
+    showMessage(status, "جارٍ التحقق لدى Meta…", "info");
+    try {
+        const result = await ChatPlatformAPI.verifyWhatsAppAccount(id);
+        showMessage(status, result.message, result.valid ? "success" : "error");
+    } catch (error) {
+        showMessage(status, error.message || "تعذر التحقق من الحساب.", "error");
+    } finally {
+        button.disabled = false;
+    }
 }
 
-function openTokenModal(id) {
-    $("modalAccountId").value = id;
+let reconnectAccount = false;
+function openTokenModal(item) {
+    $("modalAccountId").value = item.id;
+    $("modalWabaId").value = item.wabaId || "";
+    $("modalWabaId").readOnly = Boolean(item.wabaId);
+    reconnectAccount = item.isActive === false;
+    $("modalReconnectNote").hidden = !reconnectAccount;
     $("modalNewToken").value = "";
     $("tokenModal").classList.add("active");
 }
 
 function closeModal() {
+    $("modalNewToken").value = "";
     $("tokenModal").classList.remove("active");
 }
 
 $("modalSaveTokenBtn").addEventListener("click", async () => {
     const id = $("modalAccountId").value;
     const token = $("modalNewToken").value;
-    if (!token) return alert("أدخل التوكن");
-
+    const wabaId = $("modalWabaId").value.trim();
+    if (!token || !/^[0-9]{1,32}$/.test(wabaId)) return alert("أدخل التوكن ومعرّف WABA الصحيح");
+    if (reconnectAccount && !confirm("هل تريد إعادة تفعيل الحساب نفسه بعد التحقق؟")) return;
+    const button = $("modalSaveTokenBtn");
+    button.disabled = true;
     try {
-        await ChatPlatformAPI.updateWhatsAppToken(id, { accessToken: token }); // PUT /api/whatsapp/accounts/{id}/token
+        await ChatPlatformAPI.updateWhatsAppToken(id, { accessToken: token, wabaId, reactivate: reconnectAccount }); // PUT /api/whatsapp/accounts/{id}/token
         closeModal();
         alert("تم تحديث التوكن بنجاح.");
         loadAccounts();
     } catch (e) {
         alert("فشل التحديث: " + e.message);
+    } finally {
+        $("modalNewToken").value = "";
+        button.disabled = false;
     }
 });
 
@@ -541,7 +567,7 @@ $("copyWebhook").addEventListener("click", async () => {
 
 // Initialize
 async function init() {
-    await loadTenantsDropdown();
+    await loadAccountPermissions().catch(() => {});
     await loadAccounts();
     await loadDiagnostics();
 }

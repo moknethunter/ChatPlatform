@@ -3,6 +3,7 @@ using ChatPlatform.Security;
 using Microsoft.AspNetCore.Authorization;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding;
 using ChatPlatform.Infrastructure.Adapters.WhatsApp;
@@ -75,13 +76,14 @@ public sealed class WhatsAppController : ControllerBase
         if (!ValidMetaId(phone) || !ValidMetaId(waba) || !ValidToken(token)) return false;
         try
         {
-            var client = _httpFactory.CreateClient("whatsapp");
+            using var client = _httpFactory.CreateClient("whatsapp");
             using var request = new HttpRequestMessage(HttpMethod.Get, $"{waba}/phone_numbers?fields=id&limit=100");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             using var response = await client.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode) return false;
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            return json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
+            return json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
                 && data.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.Object &&
                     x.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == phone);
         }
@@ -98,6 +100,32 @@ public sealed class WhatsAppController : ControllerBase
     {
         var valid = await VerifyAccount(req.PhoneNumberId, req.WabaId, req.AccessToken, ct);
         return Ok(new { valid, message = valid ? "تم التحقق من ملكية الرقم ضمن WABA." : "تعذر التحقق من البيانات." });
+    }
+
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [HttpPost("accounts/{id}/verify")]
+    public async Task<IActionResult> VerifySavedAccount(string id, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        var account = await _db.WhatsAppTenants.AsNoTracking()
+            .Where(x => x.Id == id && x.TenantId == tenant)
+            .Select(x => new { x.IsActive, x.PhoneNumberId, x.WabaId, x.BusinessTokenEncrypted })
+            .SingleOrDefaultAsync(ct);
+        if (account == null) return NotFound();
+        if (!account.IsActive || !ValidMetaId(account.WabaId) || string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
+            return Conflict(new { message = "أعد ربط الحساب أو أكمل بياناته قبل التحقق." });
+
+        string token;
+        try { token = _protector.Unprotect(account.BusinessTokenEncrypted); }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            return Conflict(new { message = "تعذرت قراءة رمز الوصول المحفوظ. حدّث الرمز ثم أعد التحقق." });
+        }
+
+        var valid = await VerifyAccount(account.PhoneNumberId, account.WabaId, token, ct);
+        return Ok(new { valid, message = valid
+            ? "أكدت Meta أن الرمز المحفوظ يصل إلى هذا الرقم ضمن حساب الأعمال."
+            : "تعذر التحقق لدى Meta. راجع الرمز وصلاحياته ومعرّفات الحساب." });
     }
 
     [Authorize(Policy = PlatformSecurity.AdminPolicy)]
@@ -134,12 +162,41 @@ public sealed class WhatsAppController : ControllerBase
     public async Task<IActionResult> UpdateToken(string id, [FromBody] UpdateTokenRequest req, CancellationToken ct)
     {
         var tenant = User.TenantId();
+        var snapshot = await _db.WhatsAppTenants.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
+        if (snapshot == null) return NotFound();
+
+        // A migrated account may lack WABA metadata. Repair only after Meta confirms
+        // membership of the immutable phone ID. Do not replace an established WABA.
+        var wabaId = string.IsNullOrWhiteSpace(snapshot.WabaId) ? req.WabaId : snapshot.WabaId;
+        if (!string.IsNullOrWhiteSpace(snapshot.WabaId) && req.WabaId != null && req.WabaId != snapshot.WabaId)
+            return Conflict(new { error = "waba_change_not_allowed" });
+        if (!ValidMetaId(wabaId))
+            return BadRequest(new { error = "waba_required" });
+        if (!snapshot.IsActive && !req.Reactivate)
+            return Conflict(new { error = "account_inactive" });
+        if (!await VerifyAccount(snapshot.PhoneNumberId, wabaId!, req.AccessToken, ct))
+            return BadRequest(new { error = "account_verification_failed" });
+
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (account == null) return NotFound();
-        if (!await VerifyAccount(account.PhoneNumberId, account.WabaId, req.AccessToken, ct))
-            return BadRequest(new { error = "account_verification_failed" });
+        if (account.PhoneNumberId != snapshot.PhoneNumberId || account.WabaId != snapshot.WabaId ||
+            account.IsActive != snapshot.IsActive || account.BusinessTokenEncrypted != snapshot.BusinessTokenEncrypted)
+            return Conflict(new { error = "account_changed_retry" });
+        if (!account.IsActive)
+        {
+            if (await Entitlements.CapacityAsync(_db, tenant, "accounts", 1, DateTime.UtcNow, ct) is string denied)
+                return Conflict(new { error = denied });
+            account.IsActive = true;
+        }
+        account.WabaId = wabaId!;
         account.BusinessTokenEncrypted = _protector.Protect(req.AccessToken);
         await _db.SaveChangesAsync(ct);
+        // Remove deprecated ciphertext so it cannot resurrect a disconnected token.
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = '' WHERE Id = {id} AND TenantId = {tenant}", ct);
+        await tx.CommitAsync(ct);
         return Ok(new { message = "updated" });
     }
 
@@ -148,12 +205,16 @@ public sealed class WhatsAppController : ControllerBase
     public async Task<IActionResult> DeleteAccount(string id, CancellationToken ct)
     {
         var tenant = User.TenantId();
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         var account = await _db.WhatsAppTenants.FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
         if (account == null) return NotFound();
         // Preserve ownership and history. A disconnected phone must never become claimable by another tenant.
         account.IsActive = false;
         account.BusinessTokenEncrypted = "";
         await _db.SaveChangesAsync(ct);
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE WhatsAppTenants SET AccessTokenEncrypted = '' WHERE Id = {id} AND TenantId = {tenant}", ct);
+        await tx.CommitAsync(ct);
         return Ok(new { message = "deactivated" });
     }
 
@@ -338,7 +399,7 @@ public sealed record CreateTenantRequest(
     string AccessToken);
 
 public sealed record UpdateTokenRequest(
-    string AccessToken);
+    string AccessToken, string? WabaId = null, bool Reactivate = false);
 
 public sealed record SendMessageDto(
     string TenantId,

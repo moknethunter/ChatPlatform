@@ -96,6 +96,23 @@ call("/api/knowledge/preview","POST",{"question":"warranty"},cookie=a,expected=4
 call(kp+"?version=2","DELETE",cookie=a,expected=204)
 print("PASS: isolated knowledge articles, published-only search, stale version and disabled own-model preview")
 assert not call("/api/whatsapp/accounts",cookie=b)[0]
+# Both supported account-list APIs use the authenticated tenant; legacy writes stay denied.
+assert call("/api/whatsapp/tenants",expected=401)[0] is not None
+own_tenants,_=call("/api/whatsapp/tenants",cookie=a)
+assert len(own_tenants)==1 and own_tenants[0]["id"]=="ci-account-a" and own_tenants[0]["tenantId"]=="ci-tenant-a"
+assert not call("/api/whatsapp/tenants",cookie=b)[0]
+verify_path = "/api/whatsapp/accounts/ci-account-a/verify"
+call(verify_path,"POST",expected=401)
+call(verify_path,"POST",cookie=agent,expected=403)
+call(verify_path,"POST",cookie=b,expected=404)
+call(verify_path,"POST",cookie=a,expected=403,csrf=False)
+call(verify_path,"POST",cookie=a,expected=409)
+call("/api/whatsapp/tenants","POST",{"tenantId":"ci-tenant-a","phoneNumberId":"1234","accessToken":"fake"},cookie=a,expected=403)
+call("/api/whatsapp/tenant-options",cookie=a,expected=403)
+call("/api/whatsapp/messages",cookie=a,expected=403)
+call("/api/whatsapp/send","POST",{"tenantId":"ci-tenant-a","to":"1234","text":"ci"},cookie=a,expected=403)
+print("PASS: account/tenant lists scoped to session; obsolete unscoped APIs denied")
+
 call("/api/live/inbox",cookie=a,expected=403,extra={"Origin":"https://untrusted.example"})
 call("/api/bots",cookie=agent,expected=403)
 flow={"start":"s","nodes":[{"id":"s","type":"start","next":"c","x":0,"y":0},{"id":"c","type":"contains","text":"hello","next":"r","otherwise":"e","x":180,"y":0},{"id":"r","type":"reply","text":"CI reply","next":"e","x":360,"y":0},{"id":"e","type":"end","x":540,"y":0}]}
@@ -163,6 +180,8 @@ call("/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345",ex
 call("/webhook","POST",{},expected=401)
 body={"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"999999999999"},"messages":[{"id":"wamid.ci.inbound.1","from":"15550000001","type":"text","text":{"body":"CI inbound message"}}]}}]}]}
 sig="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(body).encode(),hashlib.sha256).hexdigest()
+call("/webhook","POST",body,extra={"X-Hub-Signature-256":"sha256="+"0"*64},expected=401)
+call("/webhook","POST",body,extra={"X-Hub-Signature-256":"sha256=not-hex"},expected=401)
 for _ in range(2): call("/webhook","POST",body,extra={"X-Hub-Signature-256":sig})
 for _ in range(30):
     conversations,_=call("/api/conversations",cookie=a)

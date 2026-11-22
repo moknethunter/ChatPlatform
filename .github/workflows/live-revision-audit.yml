@@ -1,0 +1,44 @@
+name: Read-only Fly revision audit
+on:
+  push:
+    branches: ['development/live-audit-20261122']
+    paths: ['.github/workflows/live-revision-audit.yml']
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Inspect public service status only
+        env:
+          EXPECTED: 37260f3d80ea747b340266fa28fb9bba9d9ebfda
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request, urllib.error
+          base = "https://chatplatform.fly.dev"
+          for path, method, body in [
+              ("/health", "GET", None), ("/ready", "GET", None),
+              ("/webhook", "GET", None), ("/webhook", "POST", b"{}"),
+              ("/api/whatsapp/accounts", "GET", None), ("/api/whatsapp/tenants", "GET", None),
+              ("/api/conversations", "GET", None)]:
+              try:
+                  request = urllib.request.Request(base+path, data=body, method=method, headers={"Content-Type":"application/json","Cache-Control":"no-cache"})
+                  with urllib.request.urlopen(request, timeout=8) as response:
+                      print(f"{method} {path}: HTTP {response.status}")
+                      if path in ("/health", "/ready"):
+                          data = json.loads(response.read(8192))
+                          print("  health/readiness status matches:", data.get("status") == ("Core is running" if path=="/health" else "ready"))
+                          if path == "/health":
+                              revision = data.get("revision")
+                              if isinstance(revision,str) and len(revision)==40 and all(c in "0123456789abcdef" for c in revision):
+                                  print("  deployed revision:", revision)
+                                  print("  source revision matches:", revision == os.environ["EXPECTED"])
+                              else:
+                                  print("  deployed revision not reported")
+              except urllib.error.HTTPError as exc:
+                  print(f"{method} {path}: HTTP {exc.code}")
+              except (OSError, ValueError, AttributeError) as exc:
+                  print(f"{method} {path}: {type(exc).__name__}")
+          # Never read customer records, use secrets, sign real messages or deploy.
+          PY

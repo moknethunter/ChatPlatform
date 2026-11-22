@@ -45,6 +45,42 @@ try
     if(ChatPlatform.Infrastructure.Marketing.TemplateApproval.Matches(approved.RootElement,marketingTemplate))
         throw new Exception("Marketing template body mismatch accepted.");
     Console.WriteLine("PASS: exact approved marketing template and rejected/mismatched guards.");
+    // Synthetic older EF schema: no CreatedAtUtc column, existing legacy token,
+    // inactive disconnected account, and an original account timestamp.
+    var legacyConnection = "Data Source=" + Path.Combine(directory.FullName, "legacy.db");
+    using (var legacy = new Microsoft.Data.Sqlite.SqliteConnection(legacyConnection))
+    {
+        legacy.Open();
+        using var cmd = legacy.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE WhatsAppTenants (
+                Id TEXT PRIMARY KEY, TenantId TEXT NOT NULL, PhoneNumberId TEXT NOT NULL,
+                IsActive INTEGER NOT NULL, CreatedAt TEXT, WabaId TEXT,
+                AccessTokenEncrypted TEXT, BusinessTokenEncrypted TEXT, AppId TEXT
+            );
+            INSERT INTO WhatsAppTenants VALUES
+                ('legacy-active','tenant-alhawbani-001','123450',1,'2024-02-03 04:05:06',NULL,'legacy-token',NULL,NULL),
+                ('legacy-inactive','tenant-alhawbani-001','123451',0,'2024-02-04 04:05:06',NULL,'revoked-token','',NULL),
+                ('legacy-current','tenant-alhawbani-001','123452',1,'2024-02-05 04:05:06','123','old-token','new-token','456');
+            """;
+        cmd.ExecuteNonQuery();
+    }
+    string? baseline = null;
+    for (var pass = 0; pass < 2; pass++)
+    {
+        DbInitializer.EnsureCreated(legacyConnection);
+        await using var legacyDb = new PlatformDbContext(new DbContextOptionsBuilder<PlatformDbContext>().UseSqlite(legacyConnection).Options);
+        var rows = await legacyDb.WhatsAppTenants.AsNoTracking().Where(x => x.Id.StartsWith("legacy-")).OrderBy(x => x.Id).ToListAsync(ct);
+        if (rows.Count != 3 || rows[0].CreatedAt.Year != 2024 || rows[0].WabaId != "" || rows[0].AppId != "" ||
+            rows[0].BusinessTokenEncrypted != "legacy-token" || rows[1].Id != "legacy-current" ||
+            rows[1].BusinessTokenEncrypted != "new-token" || rows[2].BusinessTokenEncrypted != "" || rows[2].IsActive ||
+            rows.Any(x => x.TenantId != "tenant-alhawbani-001"))
+            throw new Exception("Legacy migration lost data or restored an inactive token.");
+        var snapshot = JsonSerializer.Serialize(rows);
+        if (baseline != null && baseline != snapshot) throw new Exception("Migration was not idempotent.");
+        baseline = snapshot;
+    }
+    Console.WriteLine("PASS: migration twice on legacy EF schema preserves dates, ownership and current credentials.");
     // Exercise the same schema creation/compatibility logic as production.
     DbInitializer.EnsureCreated(connection);
     var requests = new ConcurrentQueue<string>();
@@ -82,6 +118,66 @@ try
         db.AutoReplyRules.Add(new AutoReplyRuleEntity { TenantId = tenant, Name = "Smoke rule",
             MatchType = "exact", KeywordPattern = "ping", ReplyText = "pong {message}", CooldownSeconds = 0 });
         await db.SaveChangesAsync(ct);
+    }
+
+    // Isolated account repair test: fake Graph confirms phone membership, not just WABA existence.
+    using (var scope = provider.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
+        var dp = provider.GetRequiredService<IDataProtectionProvider>();
+        var account = new WhatsAppTenantEntity { Id = "repair-account", TenantId = tenant, PhoneNumberId = "123456",
+            WabaId = "", BusinessTokenEncrypted = "", IsActive = true };
+        db.WhatsAppTenants.Add(account);
+        await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
+        var resolver = new ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding.WhatsAppTenantResolver(db,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ChatPlatform.Infrastructure.Adapters.WhatsApp.Binding.WhatsAppTenantResolver>.Instance);
+        var controller = new WhatsAppController(db, new FakeAccountFactory(), resolver, dp,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<WhatsAppController>.Instance)
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        void Identity(string tenantId) => controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(
+            new ClaimsIdentity(new[] { new Claim("tenant_id", tenantId), new Claim(ClaimTypes.Role, "Admin") }, "smoke"));
+        Identity("foreign");
+        if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789"), ct) is not NotFoundResult)
+            throw new Exception("Cross-tenant account repair accepted");
+        if (await controller.VerifySavedAccount(account.Id, ct) is not NotFoundResult)
+            throw new Exception("Cross-tenant verification accepted");
+        Identity(tenant);
+        if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
+            throw new Exception("Verification accepted incomplete account");
+        if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token"), ct) is not BadRequestObjectResult ||
+            await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "790"), ct) is not BadRequestObjectResult ||
+            await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789"), ct) is not OkObjectResult)
+            throw new Exception("Missing, mismatched or valid WABA repair incorrect");
+        db.ChangeTracker.Clear();
+        var repaired = await db.WhatsAppTenants.AsNoTracking().SingleAsync(x => x.Id == account.Id, ct);
+        if (repaired.WabaId != "789" || new WhatsAppTokenProtection(dp).Unprotect(repaired.BusinessTokenEncrypted) != "verified-token")
+            throw new Exception("Verified repair was not persisted");
+        if (await controller.VerifySavedAccount(account.Id, ct) is not OkObjectResult verified ||
+            !JsonSerializer.SerializeToElement(verified.Value).GetProperty("valid").GetBoolean() ||
+            JsonSerializer.Serialize(verified.Value).Contains("verified-token", StringComparison.Ordinal))
+            throw new Exception("Stored-token verification failed or disclosed the token");
+        await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET BusinessTokenEncrypted = 'invalid!' WHERE Id = 'repair-account'", ct);
+        if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
+            throw new Exception("Unreadable saved token was not handled");
+        if (await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "790"), ct) is not ConflictObjectResult)
+            throw new Exception("Established WABA could be replaced");
+        await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET AccessTokenEncrypted = 'old-token' WHERE Id = 'repair-account'", ct);
+        if (await controller.DeleteAccount(account.Id, ct) is not OkObjectResult)
+            throw new Exception("Disconnect failed");
+        db.ChangeTracker.Clear();
+        DbInitializer.EnsureCreated(connection);
+        repaired = await db.WhatsAppTenants.AsNoTracking().SingleAsync(x => x.Id == account.Id, ct);
+        if (repaired.IsActive || repaired.BusinessTokenEncrypted != "" ||
+            await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789"), ct) is not ConflictObjectResult ||
+            await controller.UpdateToken(account.Id, new UpdateTokenRequest("verified-token", "789", true), ct) is not OkObjectResult)
+            throw new Exception("Disconnect restarted or explicit reconnection failed");
+        // Do not leave the extra account active for the unrelated messaging regression tests.
+        db.ChangeTracker.Clear();
+        await controller.DeleteAccount(account.Id, ct);
+        Console.WriteLine("PASS: legacy WABA repair, saved-token verification, cross-tenant rejection, disconnect survives restart, explicit reconnect.");
     }
 
     var adapter = provider.GetRequiredService<WhatsAppAdapter>();
@@ -263,5 +359,27 @@ sealed class FakeMediaHandler(byte[] bytes) : HttpMessageHandler
         if (request.Method == HttpMethod.Get && uri.Host == "lookaside.fbsbx.com")
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
         throw new Exception("Unexpected media HTTP request");
+    }
+}
+
+sealed class FakeAccountFactory : IHttpClientFactory
+{
+    public HttpClient CreateClient(string name)
+    {
+        if (name != "whatsapp") throw new InvalidOperationException("Unexpected client");
+        return new HttpClient(new FakeAccountHandler()) { BaseAddress = new Uri("https://graph.invalid/") };
+    }
+}
+sealed class FakeAccountHandler : HttpMessageHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid" ||
+            request.Headers.Authorization?.Parameter != "verified-token" ||
+            request.RequestUri.Query != "?fields=id&limit=100")
+            throw new InvalidOperationException("Unexpected account verification request");
+        var body = request.RequestUri.AbsolutePath == "/789/phone_numbers"
+            ? "{\"data\":[{\"id\":\"123456\"}]}" : "{\"data\":[{\"id\":\"999999\"}]}";
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
     }
 }
