@@ -1,6 +1,6 @@
 services:
   chatplatform:
-    image: ghcr.io/moknethunter/chat55d:latest
+    image: ${CHATPLATFORM_IMAGE:-ghcr.io/moknethunter/chat66d:latest}
     container_name: chatplatform
     restart: unless-stopped
     ports:
