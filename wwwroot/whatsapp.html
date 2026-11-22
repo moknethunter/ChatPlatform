@@ -271,8 +271,11 @@
         <h2>تحديث Access Token</h2>
         <p class="subtitle">أدخل التوكن الجديد للحساب. سيتم إرساله للخادم وتشفيره.</p>
         <input type="hidden" id="modalAccountId">
+        <label for="modalWabaId">معرّف WABA للحساب</label>
+        <input id="modalWabaId" inputmode="numeric" autocomplete="off" maxlength="32">
+        <p id="modalReconnectNote" class="subtitle" hidden>سيُعاد تفعيل الحساب بعد تحقق Meta والسعة المسموحة.</p>
         <label for="modalNewToken">التوكن الجديد</label>
-        <input type="password" id="modalNewToken" placeholder="أدخل التوكن الجديد...">
+        <input type="password" id="modalNewToken" autocomplete="new-password" placeholder="أدخل التوكن الجديد...">
         <div class="actions" style="justify-content: flex-end;">
             <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
             <button class="btn btn-success" id="modalSaveTokenBtn">حفظ التوكن</button>
@@ -351,7 +354,7 @@ async function loadAccounts() {
             add("account-detail", "Token: " + (item.hasToken ? "مشفر ومحفوظ" : "غير مضبوط"));
             const actions = add("account-actions", "");
             for (const [label, action, cls] of [
-                ["تحديث التوكن", () => openTokenModal(item.id), "btn-secondary"],
+                [isActive ? "تحديث التوكن" : "إعادة ربط الحساب", () => openTokenModal(item), "btn-secondary"],
                 ["إيقاف الحساب", () => deleteAccount(item.id), "btn-danger"]
             ]) {
                 const btn = document.createElement("button"); btn.className = "btn btn-sm " + cls;
@@ -493,28 +496,40 @@ async function testConnection(id) {
     alert("سيتم إضافة Endpoint اختبار الاتصال في الـ Backend.");
 }
 
-function openTokenModal(id) {
-    $("modalAccountId").value = id;
+let reconnectAccount = false;
+function openTokenModal(item) {
+    $("modalAccountId").value = item.id;
+    $("modalWabaId").value = item.wabaId || "";
+    $("modalWabaId").readOnly = Boolean(item.wabaId);
+    reconnectAccount = item.isActive === false;
+    $("modalReconnectNote").hidden = !reconnectAccount;
     $("modalNewToken").value = "";
     $("tokenModal").classList.add("active");
 }
 
 function closeModal() {
+    $("modalNewToken").value = "";
     $("tokenModal").classList.remove("active");
 }
 
 $("modalSaveTokenBtn").addEventListener("click", async () => {
     const id = $("modalAccountId").value;
     const token = $("modalNewToken").value;
-    if (!token) return alert("أدخل التوكن");
-
+    const wabaId = $("modalWabaId").value.trim();
+    if (!token || !/^[0-9]{1,32}$/.test(wabaId)) return alert("أدخل التوكن ومعرّف WABA الصحيح");
+    if (reconnectAccount && !confirm("هل تريد إعادة تفعيل الحساب نفسه بعد التحقق؟")) return;
+    const button = $("modalSaveTokenBtn");
+    button.disabled = true;
     try {
-        await ChatPlatformAPI.updateWhatsAppToken(id, { accessToken: token }); // PUT /api/whatsapp/accounts/{id}/token
+        await ChatPlatformAPI.updateWhatsAppToken(id, { accessToken: token, wabaId, reactivate: reconnectAccount }); // PUT /api/whatsapp/accounts/{id}/token
         closeModal();
         alert("تم تحديث التوكن بنجاح.");
         loadAccounts();
     } catch (e) {
         alert("فشل التحديث: " + e.message);
+    } finally {
+        $("modalNewToken").value = "";
+        button.disabled = false;
     }
 });
 
