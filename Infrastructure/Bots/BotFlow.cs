@@ -2,11 +2,13 @@ namespace ChatPlatform.Infrastructure.Bots;
 
 public static class BotFlow
 {
-    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y, string? MatchMode = null);
+    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y, string? MatchMode = null, string? Variable = null);
     public record Definition(string? Start, Node[]? Nodes);
-    public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff);
+    public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff, Dictionary<string,string>? Variables = null);
 
     private static bool ValidId(string? id) => id is { Length: >= 1 and <= 40 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-');
+
+    private static bool ValidVariable(string? name) => name is { Length: >= 1 and <= 24 } && char.IsAsciiLetter(name[0]) && name.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '_');
 
     public static string? Validate(Definition? flow)
     {
@@ -16,14 +18,16 @@ public static class BotFlow
         {
             if (n == null || !ValidId(n.Id) || !map.TryAdd(n.Id!, n) || n.X is < 0 or > 3000 || n.Y is < 0 or > 3000)
                 return "invalid_node";
-            if (n.Type is not ("start" or "contains" or "reply" or "wait" or "handoff" or "end")) return "invalid_type";
+            if (n.Type is not ("start" or "contains" or "reply" or "wait" or "capture" or "handoff" or "end")) return "invalid_type";
             if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" or "wait" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
+            if ((n.Type == "capture" && !ValidVariable(n.Variable)) || (n.Variable != null && (n.Type is not ("capture" or "contains") || !ValidVariable(n.Variable)))) return "invalid_variable";
             if (n.MatchMode != null && (n.Type != "contains" || n.MatchMode is not ("contains" or "equals" or "starts_with")))
                 return "invalid_match_mode";
             if (n.Type == "contains" && (!ValidId(n.Next) || !ValidId(n.Otherwise))) return "invalid_branch";
-            if (n.Type is "start" or "reply" or "wait" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
+            if (n.Type is "start" or "reply" or "wait" or "capture" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
             if (n.Type is "end" or "handoff" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
         }
+        if (nodes.Where(n => n.Type == "capture").Select(n => n.Variable).Distinct().Count() > 8) return "too_many_variables";
         if (!map.TryGetValue(flow.Start!, out var start) || start.Type != "start" || nodes.Count(n => n.Type == "start") != 1) return "invalid_start";
         var visiting = new HashSet<string>(); var visited = new HashSet<string>();
         bool Walk(string? id)
@@ -46,21 +50,31 @@ public static class BotFlow
         _ => input.Contains(node.Text!, StringComparison.OrdinalIgnoreCase)
     };
 
-    public static Evaluation Evaluate(Definition flow, string input, string? resumeAt = null)
+    public static Evaluation Evaluate(Definition flow, string input, string? resumeAt = null, IReadOnlyDictionary<string,string>? previous = null)
     {
         var map = flow.Nodes!.ToDictionary(n => n.Id!);
         var path = new List<string>(); var replies = new List<string>();
+        var variables = new Dictionary<string,string>(StringComparer.Ordinal);
+        var allowed = flow.Nodes!.Where(n => n.Type == "capture").Select(n => n.Variable!).ToHashSet(StringComparer.Ordinal);
+        if (resumeAt != null && previous != null)
+            foreach (var item in previous)
+                if (allowed.Contains(item.Key) && item.Value is { Length: <= 500 } && variables.Count < 8)
+                    variables[item.Key] = item.Value;
+        string Expand(string text) => System.Text.RegularExpressions.Regex.Replace(text,
+            @"\{\{([A-Za-z][A-Za-z0-9_]{0,23})\}\}", match =>
+                variables.TryGetValue(match.Groups[1].Value, out var value) ? value : match.Value);
         string? cursor = resumeAt ?? flow.Start;
         for (int i = 0; cursor != null && i < 40; i++)
         {
             var node = map[cursor]; path.Add(cursor);
             if (node.Type == "end") break;
             if (node.Type == "handoff") return new(path, new(), null, true);
-            if (node.Type == "wait") { replies.Add(node.Text!); return new(path, replies, node.Next, false); }
-            if (node.Type == "reply") replies.Add(node.Text!);
-            cursor = node.Type == "contains" && !Matches(node, input)
+            if (node.Type == "capture") { var value = input.Trim(); variables[node.Variable!] = value.Length <= 500 ? value : value[..500]; }
+            if (node.Type == "wait") { replies.Add(Expand(node.Text!)); return new(path, replies, node.Next, false, variables); }
+            if (node.Type == "reply") replies.Add(Expand(node.Text!));
+            cursor = node.Type == "contains" && !(node.Variable == null ? Matches(node, input) : variables.TryGetValue(node.Variable, out var stored) && Matches(node, stored))
                 ? node.Otherwise : node.Next;
         }
-        return new(path, replies, null, false);
+        return new(path, replies, null, false, variables);
     }
 }
