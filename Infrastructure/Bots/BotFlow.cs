@@ -2,7 +2,7 @@ namespace ChatPlatform.Infrastructure.Bots;
 
 public static class BotFlow
 {
-    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y);
+    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y, string? MatchMode = null);
     public record Definition(string? Start, Node[]? Nodes);
     public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff);
 
@@ -18,6 +18,8 @@ public static class BotFlow
                 return "invalid_node";
             if (n.Type is not ("start" or "contains" or "reply" or "wait" or "handoff" or "end")) return "invalid_type";
             if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" or "wait" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
+            if (n.MatchMode != null && (n.Type != "contains" || n.MatchMode is not ("contains" or "equals" or "starts_with")))
+                return "invalid_match_mode";
             if (n.Type == "contains" && (!ValidId(n.Next) || !ValidId(n.Otherwise))) return "invalid_branch";
             if (n.Type is "start" or "reply" or "wait" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
             if (n.Type is "end" or "handoff" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
@@ -37,6 +39,13 @@ public static class BotFlow
     }
 
 
+    private static bool Matches(Node node, string input) => node.MatchMode switch
+    {
+        "equals" => string.Equals(input.Trim(), node.Text!.Trim(), StringComparison.OrdinalIgnoreCase),
+        "starts_with" => input.TrimStart().StartsWith(node.Text!.Trim(), StringComparison.OrdinalIgnoreCase),
+        _ => input.Contains(node.Text!, StringComparison.OrdinalIgnoreCase)
+    };
+
     public static Evaluation Evaluate(Definition flow, string input, string? resumeAt = null)
     {
         var map = flow.Nodes!.ToDictionary(n => n.Id!);
@@ -49,7 +58,7 @@ public static class BotFlow
             if (node.Type == "handoff") return new(path, new(), null, true);
             if (node.Type == "wait") { replies.Add(node.Text!); return new(path, replies, node.Next, false); }
             if (node.Type == "reply") replies.Add(node.Text!);
-            cursor = node.Type == "contains" && !input.Contains(node.Text!, StringComparison.OrdinalIgnoreCase)
+            cursor = node.Type == "contains" && !Matches(node, input)
                 ? node.Otherwise : node.Next;
         }
         return new(path, replies, null, false);
