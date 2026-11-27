@@ -53,14 +53,18 @@ public static class BotRuntime
             catch (JsonException) { run.Outcome = "invalid_release"; return; }
             if (BotFlow.Validate(flow) != null) { run.Outcome = "invalid_release"; return; }
             var resume=waiting && flow!.Nodes!.Any(n=>n.Id==state!.NextNode)?state!.NextNode:null;
-            evaluation=BotFlow.Evaluate(flow!,text,resume);
+            Dictionary<string,string>? variables = null;
+            if (resume != null && state!.VariablesJson.Length <= 32768)
+                try { variables = JsonSerializer.Deserialize<Dictionary<string,string>>(state.VariablesJson, Json); }
+                catch (JsonException) { /* Invalid old memory is ignored. */ }
+            evaluation=BotFlow.Evaluate(flow!,text,resume,variables);
             reply=string.Join("\n\n",evaluation.Replies);
             // A prompt's answer must not be swallowed by a cooldown on the preceding prompt.
             cooldown=resume!=null?0:5;
             if(evaluation.Handoff)
             {
                 if(state==null){state=new ConversationAutomationEntity{TenantId=tenant,ConversationId=conversation.Id};db.ConversationAutomation.Add(state);}
-                state.Mode="human";state.ActivationId=null;state.NextNode=null;state.ExpiresAtUtc=null;
+                state.Mode="human";state.ActivationId=null;state.NextNode=null;state.ExpiresAtUtc=null;state.VariablesJson="{}";
                 state.LastInputAtUtc=inbound.TimestampUtc;state.UpdatedAtUtc=now;state.UpdatedBy="bot";
                 await HumanHandoff.CancelPendingAsync(db,conversation,now,ct);
                 run.Outcome="human_handoff";return;
@@ -90,6 +94,7 @@ public static class BotRuntime
             if(state==null){state=new ConversationAutomationEntity{TenantId=tenant,ConversationId=conversation.Id};db.ConversationAutomation.Add(state);}
             state.Mode="bot";state.ActivationId=release!.ActivationId;state.NextNode=evaluation.NextNode;
             state.ExpiresAtUtc=evaluation.NextNode!=null?now.AddMinutes(30):null;
+            state.VariablesJson=evaluation.NextNode!=null?JsonSerializer.Serialize(evaluation.Variables,Json):"{}";
             state.LastInputAtUtc=inbound.TimestampUtc;state.UpdatedAtUtc=now;state.UpdatedBy="bot";
         }
         if(string.IsNullOrWhiteSpace(reply)){run.Outcome="no_match";return;}
