@@ -420,7 +420,20 @@ call("/api/marketing/lists",cookie=agent,expected=403)
 consent={"phoneNumberId":"999999999999","phone":"15550000001","granted":True,"evidence":"CI-only synthetic consent receipt"}
 call("/api/marketing/consent","PUT",dict(consent,phoneNumberId="999999999999"),cookie=b,expected=404)
 call("/api/marketing/consent","PUT",dict(consent,evidence=""),cookie=a,expected=400)
+segment="/api/marketing/segments/preview?phoneNumberId=999999999999&stage=lead&tag=vip"
+call(segment,expected=401)
+call(segment,cookie=agent,expected=403)
+call(segment,cookie=b,expected=404)
+call("/api/marketing/segments/preview?phoneNumberId=999999999999&stage=invalid",cookie=a,expected=400)
+before,_=call(segment,cookie=a)
+assert before["matched"]==1 and before["eligible"]==0 and before["excluded"]==1 and before["items"]==[]
 call("/api/marketing/consent","PUT",consent,cookie=a,expected=204)
+preview,_=call(segment,cookie=a)
+assert preview["matched"]==1 and preview["eligible"]==1 and preview["excluded"]==0 and not preview["truncated"]
+assert [x["phone"] for x in preview["items"]]==["15550000001"]
+assert call("/api/marketing/lists",cookie=a)[0]==[]
+assert call("/api/marketing/campaigns",cookie=a)[0]==[]
+assert next(x["granted"] for x in call(activity_path,cookie=a)[0]["consent"] if x["phoneNumberId"]=="999999999999") is True
 lst,_=call("/api/marketing/lists","POST",{"name":"CI list","phones":["15550000001","15550000001"],"version":0},cookie=a)
 assert len(lst["phones"])==1 and call("/api/marketing/lists",cookie=b)[0]==[]
 call("/api/marketing/lists/"+lst["id"],"PUT",{"name":"Foreign","phones":["15550000001"],"version":1},cookie=b,expected=404)
@@ -447,6 +460,8 @@ for _ in range(30):
     time.sleep(1)
 else:raise AssertionError("Opt-out did not cancel scheduled campaign")
 assert not call("/api/marketing/consents?phoneNumberId=999999999999",cookie=a)[0][0]["granted"]
+assert call(segment,cookie=a)[0]["eligible"]==0
+assert next(x["granted"] for x in call(activity_path,cookie=a)[0]["consent"] if x["phoneNumberId"]=="999999999999") is False
 with sqlite3.connect(DB) as db:
     assert db.execute("SELECT COUNT(*) FROM ConsentEvents WHERE TenantId='ci-tenant-a'").fetchone()[0]==2
 call("/api/marketing/campaigns","POST",dict(schedule,id=str(uuid.uuid4())),cookie=a,expected=409)
