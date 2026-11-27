@@ -22,8 +22,21 @@ The Fly configuration uses a local SQLite file and a mounted volume with one sha
 7. Capacity gate: run the synthetic workload and recovery/security scenarios on isolated staging; publish exact image revision, machine sizing and measured results. Increase replicas and resources only with shared storage and validated behavior.
 
 ## Multiple databases at the same time
-The core PlatformDbContext remains authoritative. External databases are a separate tenant-scoped integration plane, keyed by tenant + alias, with independent connections and provider-specific adapters. The initial registry supports SQLite read-only files and a PostgreSQL adapter requiring verified TLS; operator-configured named scalar reads use parameters, never caller-provided SQL. Only connection aliases/provider and connectivity checks are exposed to tenant admins. Query execution is an internal capability, not yet a bot node or public endpoint. A per-process concurrency cap and per-PostgreSQL-source pool limit are initial guardrails, not distributed quotas.
+The core PlatformDbContext remains authoritative. External databases are a separate tenant-scoped integration plane, keyed by tenant + alias, with independent connections and provider-specific adapters. The initial registry supports SQLite read-only files and a PostgreSQL adapter requiring verified TLS; operator-configured named scalar reads use parameters, never caller-provided SQL. Only connection aliases/provider and connectivity checks are exposed to tenant admins. Query execution is an internal capability, not yet a bot node or public endpoint. A per-process limit of 16 simultaneous operations and disabled external connection pooling are initial guardrails, not distributed quotas. SQL is trusted operator code; use dedicated read-only database roles and separate read-only file mounts, not production credentials. Do not configure untrusted SQL or expose arbitrary SQL to a user or model.
 A future control-plane database directory will map tenants/modules to internal data stores and optional shards; a tenant may have multiple external accounting/ERP sources simultaneously. Keep cross-store updates asynchronous through durable outbox/events with idempotency, not an assumed atomic transaction. Store routing and credentials independently; require least-privilege accounts, explicit mappings, network allowlists, secret rotation, audited actions and provider-specific integration tests before enabling remote sources. Internal PostgreSQL migration, shard routing, distributed limits, additional providers (SQL Server/MySQL/Oracle) and external write operations remain separate work.
 
 ## Non-negotiable
 Tenant scope comes from authenticated identity or verified channel ownership. No user-supplied tenant override. Maintain existing Meta sandbox configuration and manual linking; no automatic commercial activation. No production deployment, live DB migration, or merge without operator authorization. Passing smoke tests is not a load-test result.
+
+### Initial external connection configuration
+Use operator-only secret/environment configuration (example names, not live credentials):
+```text
+ExternalDatabases__Tenants__tenant-a__accounting__Provider=postgresql
+ExternalDatabases__Tenants__tenant-a__accounting__ConnectionName=AccountingA
+ExternalDatabases__Tenants__tenant-a__accounting__Reads__lookup=SELECT name FROM customers WHERE customer_id=@input
+ConnectionStrings__AccountingA=<secret-provided connection string>
+ExternalDatabases__Tenants__tenant-a__warehouse__Provider=sqlite
+ExternalDatabases__Tenants__tenant-a__warehouse__ConnectionName=WarehouseA
+ConnectionStrings__WarehouseA=Data Source=/external/warehouse.db
+```
+Both aliases coexist, without changing the existing platform connection. Tenant admins can GET /api/database-connections and POST /api/database-connections/{id}/probe. Only configured IDs/provider and sanitized probe status are returned; credentials and SQL are not returned. Live PostgreSQL connectivity requires a trusted server certificate, network access and a least-privilege role. Do not enable remote sources before verifying egress controls. The SQLite regression tests use distinct disposable database files; PostgreSQL live integration and UI are pending.
