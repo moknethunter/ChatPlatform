@@ -505,6 +505,7 @@ public static class DbInitializer
                     FOREIGN KEY(TenantId) REFERENCES Tenants(Id)
                 );
                 CREATE INDEX IF NOT EXISTS IX_ManagedTenantAdmins_TenantId ON ManagedTenantAdmins(TenantId);
+                CREATE INDEX IF NOT EXISTS IX_Tenants_Name_Id ON Tenants(Name,Id);
                 CREATE TABLE IF NOT EXISTS ServicePlans (
                     Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, MonthlyMessages INTEGER NOT NULL,
                     Agents INTEGER NOT NULL, Accounts INTEGER NOT NULL, Bots INTEGER NOT NULL, Articles INTEGER NOT NULL,
