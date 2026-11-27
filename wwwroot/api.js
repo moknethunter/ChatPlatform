@@ -346,6 +346,7 @@
             subscription() { return request("/api/subscription"); },
             platformPlans() { return request("/api/platform-admin/plans"); },
             platformCreatePlan(data) { return request("/api/platform-admin/plans",{method:"POST",body:data,retries:0}); },
+            platformBrowseTenants(opts={}) { const q=new URLSearchParams(); for(const key of ["after","search","by","limit"]) if(opts[key]) q.set(key,opts[key]); return request("/api/platform-admin/tenants/browse?"+q); },
             platformTenants(page=1) { return request("/api/platform-admin/tenants?page="+encodeURIComponent(page)); },
             platformCreateTenant(data) { return request("/api/platform-admin/tenants",{method:"POST",body:data,retries:0}); },
             platformAssign(id,data) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/subscription",{method:"PUT",body:data,retries:0}); },
