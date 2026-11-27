@@ -52,3 +52,6 @@ The visual designer now supports a terminal business-request node. Choose an app
 
 ### Invoice/payment comparison
 Choose an operator-approved source pair and enter invoice/payment references. The comparison requires provider-attested linkage, amount, currency and status. A match is for human review only, not settlement or an accounting write.
+
+### Staff-attested customer verification
+Open a pending bot business request, independently verify the customer's identity and entitlement to the record, enter its verified reference and attest. A five-minute, single-use grant is bound to the current request and admin session. The reference is protected at rest. Returning to bot mode cancels pending authorization. Results are for review only. This is not automated identity verification, persistent account linkage or payment authorization.

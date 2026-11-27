@@ -346,6 +346,20 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_KnowledgeArticles_TenantId ON KnowledgeArticles(TenantId);
+                CREATE TABLE IF NOT EXISTS BusinessVerificationGrants (
+                    TenantId TEXT NOT NULL,
+                    ConversationId TEXT NOT NULL,
+                    GrantId TEXT NOT NULL,
+                    AdminUsername TEXT NOT NULL,
+                    SessionHash TEXT NOT NULL,
+                    Source TEXT NOT NULL,
+                    Operation TEXT NOT NULL,
+                    ProtectedReference TEXT NOT NULL,
+                    RequestUpdatedAtUtc TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, ConversationId)
+                );
+                CREATE INDEX IF NOT EXISTS IX_BusinessVerificationGrants_ExpiresAtUtc ON BusinessVerificationGrants(ExpiresAtUtc);
                 CREATE TABLE IF NOT EXISTS ConversationAutomation (
                     ConversationId TEXT NOT NULL,
                     TenantId TEXT NOT NULL,
@@ -566,6 +580,7 @@ public static class DbInitializer
                 transaction);
 
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "VariablesJson", "TEXT NOT NULL DEFAULT '{}'");
+            EnsureColumnExists(connection, transaction, "BusinessVerificationGrants", "SessionHash", "TEXT NOT NULL DEFAULT ''");
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessSource", "TEXT NULL");
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessOperation", "TEXT NULL");
             Execute(connection, transaction, "CREATE INDEX IF NOT EXISTS IX_ConversationAutomation_Business ON ConversationAutomation(TenantId, UpdatedAtUtc) WHERE BusinessSource IS NOT NULL;");
