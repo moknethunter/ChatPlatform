@@ -102,7 +102,8 @@ public sealed class BusinessReadRegistry
                 !result.Currency.All(c=>c is >= 'A' and <= 'Z') ||
                 result.AmountMinor is < -1000000000000000L or > 1000000000000000L ||
                 (kind != BusinessReadKind.CustomerBalance && result.AmountMinor < 0) ||
-                !ValidStatus(kind,result.Status))
+                !ValidStatus(kind,result.Status) ||
+                (result.InvoiceReference!=null && (kind!=BusinessReadKind.PaymentStatus || !ValidReference(result.InvoiceReference))))
                 throw new InvalidOperationException("Invalid business response.");
             return result;
         }
