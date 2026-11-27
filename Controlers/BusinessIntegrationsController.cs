@@ -1,3 +1,5 @@
+using ChatPlatform.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using ChatPlatform.Infrastructure.Adapters.Business;
 using ChatPlatform.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -17,6 +19,20 @@ public sealed class BusinessIntegrationsController(BusinessReadRegistry registry
     {
         Response.Headers["Cache-Control"]="no-store";
         return Ok(registry.List(User.TenantId()));
+    }
+
+    // Only tenant admins can see pending bot requests; no financial result is stored here.
+    [HttpGet("requests")]
+    public async Task<IActionResult> Requests([FromServices] PlatformDbContext db,CancellationToken ct)
+    {
+        Response.Headers["Cache-Control"]="no-store";
+        var tenant=User.TenantId();
+        var rows=await (from s in db.ConversationAutomation.AsNoTracking()
+            join conversation in db.WhatsAppConversations.AsNoTracking() on s.ConversationId equals conversation.Id
+            where s.TenantId==tenant && conversation.TenantId==tenant && s.Mode=="human" && s.BusinessSource!=null
+            orderby s.UpdatedAtUtc descending,s.ConversationId
+            select new {s.ConversationId,s.BusinessSource,s.BusinessOperation,s.UpdatedAtUtc,conversation.ContactPhone}).Take(100).ToListAsync(ct);
+        return Ok(rows);
     }
 
     [HttpPost("{id}/read")]
