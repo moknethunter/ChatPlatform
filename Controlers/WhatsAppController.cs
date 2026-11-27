@@ -238,7 +238,7 @@ public sealed class WhatsAppController : ControllerBase
         var state = attempts.Start(tenant, session, appId, configId, DateTimeOffset.UtcNow);
         if (state == null) return StatusCode(503, new { error = "signup_busy" });
         Response.Headers["Cache-Control"] = "no-store";
-        return Ok(new { appId, configId, state, expiresInSeconds = 300 });
+        return Ok(new { appId, configId, state, graphApiVersion = cfg["WhatsApp:GraphApiVersion"] ?? new WhatsAppOptions().GraphApiVersion, expiresInSeconds = 300 });
     }
 
     // Candidate SDK completion. Never registers phones, subscribes the app or overwrites
