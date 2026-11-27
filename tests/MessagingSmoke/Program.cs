@@ -77,6 +77,51 @@ try
         throw new Exception("Independent database adapter registration failed.");
     Console.WriteLine("PASS: independent external databases, tenant routing, parameterized reads and write rejection.");
 
+    // Both business adapters share the exact same tenant-scoped typed read contract.
+    externalConfig["ExternalDatabases:Tenants:smoke-tenant:one:Reads:balance"] =
+        "SELECT json_object('reference',Id,'amountMinor',12345,'currency','YER','status','available') FROM Items WHERE Id=@input";
+    var businessDb = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig,
+        new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new TestDatabaseAdapter() });
+    var businessConfig = new Microsoft.Extensions.Configuration.ConfigurationManager();
+    const string accountPrefix="BusinessIntegrations:Tenants:smoke-tenant:accounting:";
+    const string paymentPrefix="BusinessIntegrations:Tenants:smoke-tenant:payments:";
+    businessConfig[accountPrefix+"Provider"]="database";
+    businessConfig[accountPrefix+"DatabaseAlias"]="one";
+    businessConfig[accountPrefix+"Operations:customer-balance"]="balance";
+    businessConfig[paymentPrefix+"Provider"]="https-gateway";
+    businessConfig[paymentPrefix+"Endpoint"]="https://payments.example.invalid/read";
+    businessConfig[paymentPrefix+"Token"]="ci-business-token";
+    businessConfig[paymentPrefix+"Operations:payment-status"]="status";
+    var fakeBusiness=new FakeBusinessFactory();
+    var business=new ChatPlatform.Infrastructure.Adapters.Business.BusinessReadRegistry(businessConfig,
+        new IBusinessReadAdapter[] {
+            new ChatPlatform.Infrastructure.Adapters.Business.DatabaseBusinessReadAdapter(businessDb),
+            new ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter(fakeBusiness)
+        },businessDb);
+    var balance=await business.ReadAsync(tenant,"accounting",BusinessReadKind.CustomerBalance,"test",ct);
+    var payment=await business.ReadAsync(tenant,"payments",BusinessReadKind.PaymentStatus,"pay-123",ct);
+    if(balance?.AmountMinor!=12345 || balance.Currency!="YER" || payment?.Status!="succeeded" ||
+        business.List(tenant).Count!=2 || business.List("foreign").Count!=0 || fakeBusiness.Calls!=1)
+        throw new Exception("Business adapter contract regression.");
+    try { await business.ReadAsync("foreign","payments",BusinessReadKind.PaymentStatus,"pay-123",ct); throw new Exception("Cross-tenant read accepted."); }
+    catch(KeyNotFoundException) { }
+    try { await business.ReadAsync(tenant,"payments",BusinessReadKind.Invoice,"pay-123",ct); throw new Exception("Unapproved operation accepted."); }
+    catch(KeyNotFoundException) { }
+    try { await business.ReadAsync(tenant,"payments",BusinessReadKind.PaymentStatus,"' OR 1=1",ct); throw new Exception("Invalid reference accepted."); }
+    catch(ArgumentException) { }
+    if(fakeBusiness.Calls!=1)throw new Exception("Unauthorized request reached gateway.");
+    fakeBusiness.Body="""{"reference":"wrong","amountMinor":100,"currency":"YER","status":"succeeded"}""";
+    try { await business.ReadAsync(tenant,"payments",BusinessReadKind.PaymentStatus,"pay-123",ct); throw new Exception("Wrong reference accepted."); }
+    catch(InvalidOperationException) { }
+    fakeBusiness.Body=new string('x',16385);
+    try { await business.ReadAsync(tenant,"payments",BusinessReadKind.PaymentStatus,"pay-123",ct); throw new Exception("Oversized result accepted."); }
+    catch(InvalidOperationException) { }
+    if(ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter.IsAllowedEndpoint("http://example.invalid/read") ||
+        ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter.IsAllowedEndpoint("https://127.0.0.1/read") ||
+        ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter.IsAllowedEndpoint("https://user@example.invalid/read"))
+        throw new Exception("Unsafe gateway address accepted.");
+    Console.WriteLine("PASS: business database and mocked payment lookup, tenant isolation, operation scope, response bounds and reference verification.");
+
     var attempts = new EmbeddedSignupAttemptStore();
     var instant = DateTimeOffset.UtcNow;
     var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
@@ -554,4 +599,25 @@ sealed class TestDatabaseAdapter : IDatabaseAdapter
     public System.Data.Common.DbConnection CreateReadOnlyConnection(string connectionString) => _inner.CreateReadOnlyConnection(connectionString);
     public ValueTask<System.Data.Common.DbTransaction> BeginReadOnlyTransactionAsync(System.Data.Common.DbConnection connection, CancellationToken ct)
         => _inner.BeginReadOnlyTransactionAsync(connection,ct);
+}
+
+sealed class FakeBusinessFactory : IHttpClientFactory
+{
+    public int Calls;
+    public string Body="""{"reference":"pay-123","amountMinor":100,"currency":"YER","status":"succeeded"}""";
+    public HttpClient CreateClient(string name) => name=="business-read"
+        ? new HttpClient(new Handler(this)) : throw new InvalidOperationException("Unexpected client");
+    private sealed class Handler(FakeBusinessFactory owner) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken ct)
+        {
+            owner.Calls++;
+            if(request.Method!=HttpMethod.Post || request.RequestUri?.AbsoluteUri!="https://payments.example.invalid/read" ||
+                request.Headers.Authorization?.Parameter!="ci-business-token")throw new Exception("Unexpected gateway request");
+            using var json=JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            if(json.RootElement.GetProperty("operation").GetString()!="status" ||
+                json.RootElement.GetProperty("reference").GetString()!="pay-123")throw new Exception("Unexpected gateway payload");
+            return new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(owner.Body)};
+        }
+    }
 }
