@@ -339,7 +339,7 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
-                for (const key of ["search","status","assigned","automation"]) if (opts[key]) q.set(key, opts[key]);
+                for (const key of ["search","status","assigned","automation","phoneNumberId","unread"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
