@@ -14,6 +14,7 @@ public sealed class BusinessReadRegistry
 
     public static bool ValidReference(string? value) => value is {Length: >=1 and <=100} &&
         value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+    public static bool ValidSourceAlias(string? value) => ValidAlias(value);
     private static bool ValidAlias(string? value) => value is {Length: >=1 and <=64} &&
         value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_');
 
@@ -77,6 +78,10 @@ public sealed class BusinessReadRegistry
             ? sources.Values.OrderBy(x=>x.Id,StringComparer.Ordinal)
                 .Select(x=>new BusinessSourceInfo(x.Id,x.Provider,x.Operations.Keys.Select(OperationName).ToArray())).ToArray()
             : Array.Empty<BusinessSourceInfo>();
+
+    // Revalidate configured operation on publish and when staff opens the request.
+    public bool Allows(string tenant,string id,string operation) => TryKind(operation,out var kind) &&
+        _tenants.TryGetValue(tenant,out var sources) && sources.TryGetValue(id,out var source) && source.Operations.ContainsKey(kind);
 
     public async Task<BusinessReadResult?> ReadAsync(string tenant,string id,BusinessReadKind kind,string reference,CancellationToken ct)
     {
