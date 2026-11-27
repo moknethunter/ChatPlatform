@@ -496,6 +496,8 @@
             createAgent(data) { return request("/api/team", { method: "POST", body: data }); },
             setAgentActive(username, isActive) { return request("/api/team/" + encodeURIComponent(username) + "/active", { method: "PUT", body: { isActive } }); },
             resetAgentPassword(username, password) { return request("/api/team/" + encodeURIComponent(username) + "/password", { method: "PUT", body: { password } }); },
+            reconciliationPairs() { return request("/api/payment-reconciliation"); },
+            comparePayment(id,data) { return request("/api/payment-reconciliation/"+encodeURIComponent(id)+"/compare",{method:"POST",body:data,retries:0}); },
             businessRequests() { return request("/api/business-integrations/requests"); },
             businessIntegrations() { return request("/api/business-integrations"); },
             businessRead(id,data) { return request("/api/business-integrations/"+encodeURIComponent(id)+"/read",{method:"POST",body:data,retries:0}); },
