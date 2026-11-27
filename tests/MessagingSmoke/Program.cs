@@ -43,8 +43,8 @@ try
         !attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant) ||
         attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant))
         throw new Exception("Signup attempt isolation or replay regression.");
-    var expired = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
-    if (attempts.Consume(expired, "tenant-a", "session-a", "123", "456", instant.AddMinutes(5)))
+    var expiredAttempt = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(expiredAttempt, "tenant-a", "session-a", "123", "456", instant.AddMinutes(5)))
         throw new Exception("Expired signup accepted.");
     var superseded = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
     var current = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
@@ -192,6 +192,34 @@ try
             !readyJson.GetProperty("appSubscribed").GetBoolean() ||
             readyJson.GetProperty("deliveryVerified").ValueKind != JsonValueKind.Null)
             throw new Exception("Incorrect subscription or delivery readiness");
+        cfg["Meta:EmbeddedSignupEnabled"] = "true";
+        cfg["Meta:EmbeddedSignupConfigId"] = "456";
+        cfg["Meta:AppSecret"] = "ci-fake-secret";
+        void SignupIdentity(string tenantId, string sessionId) => controller.ControllerContext.HttpContext.User =
+            new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", tenantId), new Claim(ClaimTypes.Role, "Admin"),
+                new Claim("platform_session", sessionId) }, "smoke"));
+        SignupIdentity(tenant, "session-one");
+        var started = await controller.StartEmbeddedSignup(cfg, attempts, ct) as OkObjectResult;
+        if (started == null) throw new Exception("Unable to start test signup.");
+        var state = JsonSerializer.SerializeToElement(started.Value).GetProperty("state").GetString()!;
+        var completion = new WhatsAppController.EmbeddedSignupRequest(state, "ci-code", "789", "654321");
+        SignupIdentity(tenant, "session-two");
+        if (await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) is not BadRequestObjectResult)
+            throw new Exception("Signup accepted across sessions.");
+        SignupIdentity(tenant, "session-one");
+        var completed = await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) as OkObjectResult;
+        if (completed == null) throw new Exception("Mocked signup failed.");
+        var createdId = JsonSerializer.SerializeToElement(completed.Value).GetProperty("id").GetString()!;
+        var created = await db.WhatsAppTenants.AsNoTracking().SingleAsync(x => x.Id == createdId, ct);
+        if (created.TenantId != tenant || created.PhoneNumberId != "654321" || created.WabaId != "789" ||
+            new WhatsAppTokenProtection(dp).Unprotect(created.BusinessTokenEncrypted) != "verified-token" ||
+            JsonSerializer.Serialize(completed.Value).Contains("verified-token", StringComparison.Ordinal) ||
+            await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) is not BadRequestObjectResult)
+            throw new Exception("Signup persistence, secrecy or replay regression.");
+        await controller.DeleteAccount(createdId, ct);
+        db.ChangeTracker.Clear();
+        Identity(tenant);
+        Console.WriteLine("PASS: mocked code exchange, verified account creation, session isolation, encrypted token and replay rejection.");
         cfg["Meta:AppId"] = "456";
         var absent = (OkObjectResult)await controller.AccountReadiness(account.Id, cfg, ct);
         if (JsonSerializer.SerializeToElement(absent.Value).GetProperty("appSubscribed").GetBoolean())
@@ -407,7 +435,7 @@ sealed class FakeAccountFactory : IHttpClientFactory
 {
     public HttpClient CreateClient(string name)
     {
-        if (name != "whatsapp") throw new InvalidOperationException("Unexpected client");
+        if (name is not ("whatsapp" or "whatsapp-oauth")) throw new InvalidOperationException("Unexpected client");
         return new HttpClient(new FakeAccountHandler()) { BaseAddress = new Uri("https://graph.invalid/") };
     }
 }
@@ -415,17 +443,25 @@ sealed class FakeAccountHandler : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
-        if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid" ||
-            request.Headers.Authorization?.Parameter != "verified-token")
+        if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid")
             throw new InvalidOperationException("Unexpected account verification request");
         var uri = request.RequestUri!;
+        if (uri.AbsolutePath == "/oauth/access_token")
+        {
+            if (uri.Query != "?client_id=123&client_secret=ci-fake-secret&code=ci-code")
+                throw new InvalidOperationException("Unexpected synthetic OAuth request.");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
+                Content = new StringContent("{\"access_token\":\"verified-token\"}") });
+        }
+        if (request.Headers.Authorization?.Parameter != "verified-token")
+            throw new InvalidOperationException("Unexpected account credentials");
         string body;
         if (uri.AbsolutePath == "/789/subscribed_apps" && uri.Query == "")
             body = "{\"data\":[{\"whatsapp_business_api_data\":{\"id\":\"123\"}}]}";
         else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
             body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"page+2\"}}}";
         else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100&after=page%2B2")
-            body = "{\"data\":[{\"id\":\"123456\"}]}";
+            body = "{\"data\":[{\"id\":\"123456\"},{\"id\":\"654321\"}]}";
         else if (uri.AbsolutePath == "/790/phone_numbers" &&
             (uri.Query == "?fields=id&limit=100" || uri.Query == "?fields=id&limit=100&after=repeat"))
             body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"repeat\"}}}";
