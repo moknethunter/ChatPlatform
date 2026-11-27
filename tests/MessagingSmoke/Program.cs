@@ -69,6 +69,12 @@ try
     catch (Microsoft.Data.Sqlite.SqliteException) { }
     if (await registry.ReadScalarAsync(tenant,"one","lookup","test",ct)!="first")
         throw new Exception("Read-only connection changed data.");
+    externalConfig["ExternalDatabases:Tenants:smoke-tenant:two:Provider"]="test-adapter";
+    var extensionRegistry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig,
+        new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new TestDatabaseAdapter() });
+    if (await extensionRegistry.ReadScalarAsync(tenant,"two","lookup","test",ct)!="second" ||
+        extensionRegistry.List(tenant).Single(x=>x.Id=="two").Provider!="test-adapter")
+        throw new Exception("Independent database adapter registration failed.");
     Console.WriteLine("PASS: independent external databases, tenant routing, parameterized reads and write rejection.");
 
     var attempts = new EmbeddedSignupAttemptStore();
@@ -539,4 +545,13 @@ sealed class FakeAccountHandler : HttpMessageHandler
             throw new InvalidOperationException("Unexpected account verification path or cursor");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
     }
+}
+
+sealed class TestDatabaseAdapter : IDatabaseAdapter
+{
+    private readonly ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter _inner = new();
+    public string Provider => "test-adapter";
+    public System.Data.Common.DbConnection CreateReadOnlyConnection(string connectionString) => _inner.CreateReadOnlyConnection(connectionString);
+    public ValueTask<System.Data.Common.DbTransaction> BeginReadOnlyTransactionAsync(System.Data.Common.DbConnection connection, CancellationToken ct)
+        => _inner.BeginReadOnlyTransactionAsync(connection,ct);
 }
