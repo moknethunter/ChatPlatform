@@ -33,6 +33,44 @@ try
         WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
         throw new Exception("Media type or download host security regression.");
     Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
+    var externalOne = "Data Source=" + Path.Combine(directory.FullName,"external-one.db");
+    var externalTwo = "Data Source=" + Path.Combine(directory.FullName,"external-two.db");
+    foreach (var pair in new[] { (Connection:externalOne, Value:"first"),(Connection:externalTwo, Value:"second") })
+    {
+        await using var external = new Microsoft.Data.Sqlite.SqliteConnection(pair.Connection);
+        await external.OpenAsync(ct);
+        await using var seed = external.CreateCommand();
+        seed.CommandText="CREATE TABLE Items (Id TEXT PRIMARY KEY, Value TEXT); INSERT INTO Items VALUES ('test', @value);";
+        seed.Parameters.AddWithValue("@value",pair.Value);
+        await seed.ExecuteNonQueryAsync(ct);
+    }
+    var externalConfig = new Microsoft.Extensions.Configuration.ConfigurationManager();
+    externalConfig["ConnectionStrings:one"]=externalOne;
+    externalConfig["ConnectionStrings:two"]=externalTwo;
+    foreach (var alias in new[] {"one","two"})
+    {
+        var prefix="ExternalDatabases:Tenants:smoke-tenant:"+alias+":";
+        externalConfig[prefix+"Provider"]="sqlite";
+        externalConfig[prefix+"ConnectionName"]=alias;
+        externalConfig[prefix+"Reads:lookup"]="SELECT Value FROM Items WHERE Id=@input";
+        externalConfig[prefix+"Reads:badwrite"]="DELETE FROM Items WHERE Id=@input RETURNING Value";
+    }
+    var registry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig);
+    var results=await Task.WhenAll(
+        Task.Run(()=>registry.ReadScalarAsync(tenant,"one","lookup","test",ct),ct),
+        Task.Run(()=>registry.ReadScalarAsync(tenant,"two","lookup","test",ct),ct));
+    if (results[0]!="first" || results[1]!="second" || registry.List(tenant).Count!=2 ||
+        registry.List("other-tenant").Count!=0 || registry.Contains("other-tenant","one") ||
+        await registry.ReadScalarAsync(tenant,"one","lookup","test' OR 1=1 --",ct)!=null)
+        throw new Exception("External database routing or parameter isolation regression.");
+    try { await registry.ProbeAsync("other-tenant","one",ct); throw new Exception("Cross-tenant connection allowed."); }
+    catch (KeyNotFoundException) { }
+    try { await registry.ReadScalarAsync(tenant,"one","badwrite","test",ct); throw new Exception("External database write allowed."); }
+    catch (Microsoft.Data.Sqlite.SqliteException) { }
+    if (await registry.ReadScalarAsync(tenant,"one","lookup","test",ct)!="first")
+        throw new Exception("Read-only connection changed data.");
+    Console.WriteLine("PASS: independent external databases, tenant routing, parameterized reads and write rejection.");
+
     var attempts = new EmbeddedSignupAttemptStore();
     var instant = DateTimeOffset.UtcNow;
     var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
