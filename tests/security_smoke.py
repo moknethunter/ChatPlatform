@@ -292,7 +292,12 @@ call(root+"/status","PUT",{"status":"closed"},cookie=b,expected=404)
 call(root+"/tags","PUT",{"tags":"priority"},cookie=b,expected=404)
 call(root+"/read","PUT",{},cookie=b,expected=404)
 call(root+"/status","PUT",{"status":"closed"},cookie=managed_cookie,expected=204)
+assert any(x["id"]==cid for x in call("/api/conversations?unread=true&phoneNumberId=999999999999",cookie=a)[0])
+assert not call("/api/conversations?phoneNumberId=999999999999&unread=true",cookie=b)[0]
+assert not call("/api/conversations?phoneNumberId=123456789",cookie=a)[0]
+call("/api/conversations?phoneNumberId=bad",cookie=a,expected=400)
 call(root+"/read","PUT",{},cookie=managed_cookie,expected=204)
+assert not call("/api/conversations?unread=true",cookie=a)[0]
 call(root+"/tags","PUT",{"tags":"priority"},cookie=managed_cookie,expected=204)
 closed,_=call("/api/conversations?status=closed&search=CI",cookie=a)
 assert len(closed)==1 and closed[0]["unreadCount"]==0 and closed[0]["tags"]=="priority"
