@@ -55,7 +55,7 @@ try
         externalConfig[prefix+"Reads:lookup"]="SELECT Value FROM Items WHERE Id=@input";
         externalConfig[prefix+"Reads:badwrite"]="DELETE FROM Items WHERE Id=@input RETURNING Value";
     }
-    var registry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig);
+    var registry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig, new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new ChatPlatform.Infrastructure.Adapters.Databases.PostgreSqlDatabaseAdapter() });
     var results=await Task.WhenAll(
         Task.Run(()=>registry.ReadScalarAsync(tenant,"one","lookup","test",ct),ct),
         Task.Run(()=>registry.ReadScalarAsync(tenant,"two","lookup","test",ct),ct));
