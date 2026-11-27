@@ -213,3 +213,6 @@ curl -fsS https://chatplatform.fly.dev/ready
 
 ## Scalability architecture
 See `docs/SCALABILITY.md` for the incremental modular-monolith design, proposed acceptance workload and gates before horizontal production deployment. Keep SQLite for local/small installations; do not scale separate SQLite volumes behind a load balancer. The shared signup store adds a table idempotently; take and verify a backup before live migration.
+
+## External databases as adapters
+The current platform database and architecture remain unchanged. For new external database engines, implement `Core/Abstractions/IDatabaseAdapter.cs` in `Infrastructure/Adapters/Databases`, register it through dependency injection, and configure tenant-specific connection aliases as described in `docs/SCALABILITY.md`. The registry does not contain provider-specific branches. The first adapters are SQLite and PostgreSQL; external connections are read-only, use operator-approved parameterized reads and do not automatically synchronize or modify data. The admin API lists configured aliases and checks connectivity; a real PostgreSQL test and UI remain pending. No internal database migration or splitting is authorized by this requirement.
