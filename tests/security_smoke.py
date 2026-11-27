@@ -487,7 +487,8 @@ requests=call("/api/business-integrations/requests",cookie=a)[0]
 assert len(requests)==1 and requests[0]["businessSource"]=="accounting" and requests[0]["businessOperation"]=="invoice"
 assert "private-reference" not in json.dumps(requests)
 verification="/api/business-verification/"+requests[0]["conversationId"]
-grant_body={"reference":"ci-invoice","independentlyVerified":True}
+grant_body={"reference":"ci-invoice","independentlyVerified":True,"source":requests[0]["businessSource"],"operation":requests[0]["businessOperation"],"requestUpdatedAtUtc":requests[0]["updatedAtUtc"]}
+call(verification+"/grant","POST",dict(grant_body,operation="payment-status"),cookie=a,expected=409)
 call(verification+"/grant","POST",grant_body,expected=401)
 call(verification+"/grant","POST",grant_body,cookie=agent,expected=403)
 call(verification+"/grant","POST",grant_body,cookie=b,expected=404)
