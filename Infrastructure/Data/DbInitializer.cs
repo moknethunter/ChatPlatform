@@ -351,6 +351,7 @@ public static class DbInitializer
                     ConversationId TEXT NOT NULL,
                     GrantId TEXT NOT NULL,
                     AdminUsername TEXT NOT NULL,
+                    SessionHash TEXT NOT NULL,
                     Source TEXT NOT NULL,
                     Operation TEXT NOT NULL,
                     ProtectedReference TEXT NOT NULL,
@@ -579,6 +580,7 @@ public static class DbInitializer
                 transaction);
 
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "VariablesJson", "TEXT NOT NULL DEFAULT '{}'");
+            EnsureColumnExists(connection, transaction, "BusinessVerificationGrants", "SessionHash", "TEXT NOT NULL DEFAULT ''");
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessSource", "TEXT NULL");
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessOperation", "TEXT NULL");
             Execute(connection, transaction, "CREATE INDEX IF NOT EXISTS IX_ConversationAutomation_Business ON ConversationAutomation(TenantId, UpdatedAtUtc) WHERE BusinessSource IS NOT NULL;");
