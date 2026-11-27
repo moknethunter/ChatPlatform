@@ -50,7 +50,7 @@ public sealed class BusinessVerificationController(PlatformDbContext db,Business
         var pending=await Pending(tenant,conversationId).AsNoTracking().SingleOrDefaultAsync(ct);
         if(pending==null || !registry.Allows(tenant,pending.BusinessSource!,pending.BusinessOperation!))
             return NotFound(new{error="request_unavailable"});
-        if(request.Source!=pending.BusinessSource || request.Operation!=pending.BusinessOperation || request.RequestUpdatedAtUtc?.ToUniversalTime().Ticks!=pending.UpdatedAtUtc.Ticks)
+        if(request.Source!=pending.BusinessSource || request.Operation!=pending.BusinessOperation || request.RequestUpdatedAtUtc?.Ticks!=pending.UpdatedAtUtc.Ticks)
             return Conflict(new{error="request_changed"});
         // Never store the plaintext account/invoice/payment reference. Replace the previous grant.
         var grantId=Guid.NewGuid();
