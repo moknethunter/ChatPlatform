@@ -1,7 +1,6 @@
 using System.Data.Common;
 using System.Globalization;
-using Microsoft.Data.Sqlite;
-using Npgsql;
+using ChatPlatform.Core.Abstractions;
 
 namespace ChatPlatform.Infrastructure.Data.Connections;
 
@@ -13,15 +12,16 @@ public sealed record DatabaseSourceInfo(string Id, string Provider);
 /// </summary>
 public sealed class ExternalDatabaseRegistry
 {
-    private sealed record Source(string Provider, string ConnectionString, IReadOnlyDictionary<string,string> Reads);
+    private sealed record Source(IDatabaseAdapter Adapter, string ConnectionString, IReadOnlyDictionary<string,string> Reads);
     private readonly Dictionary<(string Tenant, string Id), Source> _sources = new();
     private readonly SemaphoreSlim _slots = new(16,16);
 
     private static bool ValidId(string? id) => id is { Length: >= 1 and <= 64 } &&
         id.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_');
 
-    public ExternalDatabaseRegistry(IConfiguration configuration)
+    public ExternalDatabaseRegistry(IConfiguration configuration, IEnumerable<IDatabaseAdapter> adapters)
     {
+        var providers = adapters.ToDictionary(a => a.Provider, StringComparer.OrdinalIgnoreCase);
         foreach (var tenant in configuration.GetSection("ExternalDatabases:Tenants").GetChildren())
         foreach (var entry in tenant.GetChildren())
         {
@@ -30,7 +30,7 @@ public sealed class ExternalDatabaseRegistry
             var provider = entry["Provider"]?.ToLowerInvariant();
             var connectionName = entry["ConnectionName"];
             var connection = ValidId(connectionName) ? configuration.GetConnectionString(connectionName!) : null;
-            if (provider is not ("sqlite" or "postgresql") || string.IsNullOrWhiteSpace(connection))
+            if (provider == null || !providers.TryGetValue(provider,out var adapter) || string.IsNullOrWhiteSpace(connection))
                 throw new InvalidOperationException("Invalid external database configuration.");
             var reads = new Dictionary<string,string>(StringComparer.Ordinal);
             foreach (var read in entry.GetSection("Reads").GetChildren())
@@ -39,14 +39,14 @@ public sealed class ExternalDatabaseRegistry
                     throw new InvalidOperationException("Invalid external database operation.");
                 reads.Add(read.Key, read.Value);
             }
-            _sources.Add((tenant.Key,entry.Key),new Source(provider,connection,reads));
+            _sources.Add((tenant.Key,entry.Key),new Source(adapter,connection,reads));
         }
     }
 
     public IReadOnlyList<DatabaseSourceInfo> List(string tenant) => _sources
         .Where(x => x.Key.Tenant == tenant)
         .OrderBy(x => x.Key.Id,StringComparer.Ordinal)
-        .Select(x => new DatabaseSourceInfo(x.Key.Id,x.Value.Provider)).ToArray();
+        .Select(x => new DatabaseSourceInfo(x.Key.Id,x.Value.Adapter.Provider)).ToArray();
 
     public bool Contains(string tenant,string id) => _sources.ContainsKey((tenant,id));
 
@@ -64,21 +64,6 @@ public sealed class ExternalDatabaseRegistry
     private Source Find(string tenant,string id) => _sources.TryGetValue((tenant,id),out var source)
         ? source : throw new KeyNotFoundException("External database unavailable.");
 
-    private static DbConnection CreateConnection(Source source)
-    {
-        if (source.Provider == "sqlite")
-        {
-            var builder = new SqliteConnectionStringBuilder(source.ConnectionString)
-            { Mode = SqliteOpenMode.ReadOnly, Pooling = false, DefaultTimeout = 5 };
-            return new SqliteConnection(builder.ConnectionString);
-        }
-        var pg = new NpgsqlConnectionStringBuilder(source.ConnectionString)
-        {
-            SslMode = SslMode.VerifyFull, Pooling = false, Timeout = 5, CommandTimeout = 5
-        };
-        return new NpgsqlConnection(pg.ConnectionString);
-    }
-
     private async Task<string?> ExecuteAsync(Source source,string sql,string? input,CancellationToken ct)
     {
         // Bound simultaneous I/O across sources. A saturated worker returns a retryable error.
@@ -88,20 +73,9 @@ public sealed class ExternalDatabaseRegistry
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(10));
             var token = deadline.Token;
-            await using var connection = CreateConnection(source);
+            await using var connection = source.Adapter.CreateReadOnlyConnection(source.ConnectionString);
             await connection.OpenAsync(token);
-            // SQLite read-only handles must not request an immediate write lock.
-            await using DbTransaction transaction = connection is SqliteConnection sqlite
-                ? sqlite.BeginTransaction(deferred: true)
-                : await connection.BeginTransactionAsync(token);
-            if (source.Provider == "postgresql")
-            {
-                await using var guard = connection.CreateCommand();
-                guard.Transaction = transaction;
-                guard.CommandText = "SET TRANSACTION READ ONLY";
-                guard.CommandTimeout = 5;
-                await guard.ExecuteNonQueryAsync(token);
-            }
+            await using var transaction = await source.Adapter.BeginReadOnlyTransactionAsync(connection,token);
             await using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = sql;
