@@ -159,6 +159,23 @@ try
             !JsonSerializer.SerializeToElement(verified.Value).GetProperty("valid").GetBoolean() ||
             JsonSerializer.Serialize(verified.Value).Contains("verified-token", StringComparison.Ordinal))
             throw new Exception("Stored-token verification failed or disclosed the token");
+        var cfg = new Microsoft.Extensions.Configuration.ConfigurationManager();
+        cfg["Meta:AppId"] = "123";
+        var ready = await controller.AccountReadiness(account.Id, cfg, ct) as OkObjectResult;
+        if (ready == null) throw new Exception("Readiness unavailable");
+        var readyJson = JsonSerializer.SerializeToElement(ready.Value);
+        if (!readyJson.GetProperty("membershipVerified").GetBoolean() ||
+            !readyJson.GetProperty("appSubscribed").GetBoolean() ||
+            readyJson.GetProperty("deliveryVerified").ValueKind != JsonValueKind.Null)
+            throw new Exception("Incorrect subscription or delivery readiness");
+        cfg["Meta:AppId"] = "456";
+        var absent = (OkObjectResult)await controller.AccountReadiness(account.Id, cfg, ct);
+        if (JsonSerializer.SerializeToElement(absent.Value).GetProperty("appSubscribed").GetBoolean())
+            throw new Exception("Unknown app reported subscribed");
+        Identity("foreign");
+        if (await controller.AccountReadiness(account.Id, cfg, ct) is not NotFoundResult)
+            throw new Exception("Cross-tenant readiness accepted");
+        Identity(tenant);
         await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET BusinessTokenEncrypted = 'invalid!' WHERE Id = 'repair-account'", ct);
         if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
             throw new Exception("Unreadable saved token was not handled");
@@ -379,7 +396,9 @@ sealed class FakeAccountHandler : HttpMessageHandler
             throw new InvalidOperationException("Unexpected account verification request");
         var uri = request.RequestUri!;
         string body;
-        if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
+        if (uri.AbsolutePath == "/789/subscribed_apps" && uri.Query == "")
+            body = "{\"data\":[{\"whatsapp_business_api_data\":{\"id\":\"123\"}}]}";
+        else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
             body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"page+2\"}}}";
         else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100&after=page%2B2")
             body = "{\"data\":[{\"id\":\"123456\"}]}";
