@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="chatplatform-directory-") as tmp:
         ("deep keyset", "SELECT Id FROM Tenants WHERE Id > ? ORDER BY Id LIMIT 101", (cursor,), 50),
         ("exact ID", "SELECT Id FROM Tenants WHERE Id = ?", (f"tenant-{count-1:09d}",), 1),
         ("exact name", "SELECT Id FROM Tenants WHERE Name = ? ORDER BY Id LIMIT 101", (f"Organization {count-1:09d}",), 1),
-        ("admin lookup", "SELECT TenantId FROM ManagedTenantAdmins WHERE Username = ?", (f"admin-{count-1:09d}",), 1),
+        ("admin lookup", "SELECT Id FROM Tenants WHERE Id IN (SELECT TenantId FROM ManagedTenantAdmins WHERE Username = ?) ORDER BY Id LIMIT 101", (f"admin-{count-1:09d}",), 1),
     ]
     for label, sql, params, expected in queries:
         plan = db.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
