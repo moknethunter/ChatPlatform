@@ -97,11 +97,14 @@ public static class BotRuntime
                 // Clear waiting cursor and variables / مسح سياق البوت.
                 state.Mode="human";state.ActivationId=null;state.NextNode=null;state.ExpiresAtUtc=null;state.VariablesJson="{}";
                 // Track latest input and update actor / توثيق التوقيت.
+                // Persist only the requested source and operation for the authenticated staff member.
+                // لا تحفظ نتيجة مالية ولا مرجعًا يدخله العميل؛ لا اتصال خارجي داخل المعاملة.
+                state.BusinessSource=evaluation.BusinessSource;state.BusinessOperation=evaluation.BusinessOperation;
                 state.LastInputAtUtc=inbound.TimestampUtc;state.UpdatedAtUtc=now;state.UpdatedBy="bot";
                 // Cancel pending automated sends transactionally / إلغاء المعلق.
                 await HumanHandoff.CancelPendingAsync(db,conversation,now,ct);
                 // Record terminal handoff without sending reply / تسجيل النتيجة.
-                run.Outcome="human_handoff";return;
+                run.Outcome=evaluation.BusinessSource==null?"human_handoff":"business_requested";return;
             }
         }
         // Legacy rules apply only without a release / القواعد القديمة.
@@ -141,6 +144,7 @@ public static class BotRuntime
             if(state==null){state=new ConversationAutomationEntity{TenantId=tenant,ConversationId=conversation.Id};db.ConversationAutomation.Add(state);}
             // Store active release and next cursor / حفظ نقطة الاستئناف.
             state.Mode="bot";state.ActivationId=release!.ActivationId;state.NextNode=evaluation.NextNode;
+            state.BusinessSource=null;state.BusinessOperation=null;
             // Wait expires after 30 minutes; terminal clears it / صلاحية الانتظار.
             state.ExpiresAtUtc=evaluation.NextNode!=null?now.AddMinutes(30):null;
             // Retain variables only while waiting / حفظ الذاكرة المؤقتة.

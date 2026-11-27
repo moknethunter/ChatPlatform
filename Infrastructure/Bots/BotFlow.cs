@@ -1,14 +1,16 @@
+using ChatPlatform.Infrastructure.Adapters.Business;
+
 namespace ChatPlatform.Infrastructure.Bots;
 
 // Pure flow evaluator shared by simulator and runtime / محرك محاكاة وتنفيذ مشترك.
 public static class BotFlow
 {
     // Version-compatible node model; optional fields preserve older definitions / نموذج العقدة.
-    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y, string? MatchMode = null, string? Variable = null);
+    public record Node(string? Id, string? Type, string? Text, string? Next, string? Otherwise, int X, int Y, string? MatchMode = null, string? Variable = null, string? BusinessSource = null, string? BusinessOperation = null);
     // Start ID and complete graph / تعريف المخطط.
     public record Definition(string? Start, Node[]? Nodes);
     // Return path, replies, resume cursor, handoff and variables / نتيجة التنفيذ.
-    public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff, Dictionary<string,string>? Variables = null);
+    public record Evaluation(List<string> Path, List<string> Replies, string? NextNode, bool Handoff, Dictionary<string,string>? Variables = null, string? BusinessSource = null, string? BusinessOperation = null);
 
     // Bound IDs to safe ASCII characters / تحقق معرف العقدة.
     private static bool ValidId(string? id) => id is { Length: >= 1 and <= 40 } && id.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-');
@@ -30,7 +32,7 @@ public static class BotFlow
             if (n == null || !ValidId(n.Id) || !map.TryAdd(n.Id!, n) || n.X is < 0 or > 3000 || n.Y is < 0 or > 3000)
                 return "invalid_node";
             // Allow only implemented node types / أنواع مدعومة فقط.
-            if (n.Type is not ("start" or "contains" or "reply" or "wait" or "capture" or "handoff" or "end")) return "invalid_type";
+            if (n.Type is not ("start" or "contains" or "reply" or "wait" or "capture" or "handoff" or "business" or "end")) return "invalid_type";
             // Bound text and require it for prompt/condition/reply / حد النص.
             if ((n.Text?.Length ?? 0) > 2000 || (n.Type is "contains" or "reply" or "wait" && string.IsNullOrWhiteSpace(n.Text))) return "invalid_text";
             // Only capture or condition nodes may name variables / قيد المتغير.
@@ -42,8 +44,11 @@ public static class BotFlow
             if (n.Type == "contains" && (!ValidId(n.Next) || !ValidId(n.Otherwise))) return "invalid_branch";
             // Single-successor nodes cannot have an else branch / انتقال واحد.
             if (n.Type is "start" or "reply" or "wait" or "capture" && (!ValidId(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_next";
+            // Business requests are terminal, require a named source and operation, and never execute I/O in the evaluator.
+            // طلب مالي ينتهي بتحويل للموظف؛ لا اتصال خارجي داخل المحرك.
+            if (n.Type == "business" ? (!BusinessReadRegistry.ValidSourceAlias(n.BusinessSource) || !BusinessReadRegistry.TryKind(n.BusinessOperation,out _)) : (n.BusinessSource != null || n.BusinessOperation != null)) return "invalid_business_request";
             // Terminal nodes cannot link onward / عقدة نهائية.
-            if (n.Type is "end" or "handoff" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
+            if (n.Type is "end" or "handoff" or "business" && (!string.IsNullOrEmpty(n.Next) || !string.IsNullOrEmpty(n.Otherwise))) return "invalid_end";
         }
         // Bound memory footprint / ثمانية متغيرات كحد أقصى.
         if (nodes.Where(n => n.Type == "capture").Select(n => n.Variable).Distinct().Count() > 8) return "too_many_variables";
@@ -117,6 +122,8 @@ public static class BotFlow
             if (node.Type == "end") break;
             // Stop automation and discard prior replies in this turn / تحويل بشري.
             if (node.Type == "handoff") return new(path, new(), null, true);
+            // Transfer only approved operation metadata; no customer reference, balances or payment data.
+            if (node.Type == "business") return new(path, new(), null, true, null, node.BusinessSource, node.BusinessOperation);
             // Save bounded current input as a variable / حفظ الإجابة.
             if (node.Type == "capture") { var value = input.Trim(); variables[node.Variable!] = value.Length <= 500 ? value : value[..500]; }
             // Return prompt and next cursor; caller persists state / انتظار الإجابة.

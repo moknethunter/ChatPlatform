@@ -60,8 +60,24 @@ jobs:
                   VALUES ('ci-legacy-account', 'tenant-alhawbani-001', '999999999998', 1, '2026-01-01');
               """)
           PY
+          # Disposable external ERP fixture; no vendor or real customer data.
+          export ConnectionStrings__CiErp="Data Source=$CHATPLATFORM_DATA_DIR/erp-fixture.db"
+          python3 - "$CHATPLATFORM_DATA_DIR/erp-fixture.db" <<'PY'
+          import sqlite3, sys
+          with sqlite3.connect(sys.argv[1]) as db:
+              db.execute("CREATE TABLE Invoices(Id TEXT PRIMARY KEY, AmountMinor INTEGER NOT NULL)")
+              db.execute("INSERT INTO Invoices VALUES ('ci-invoice',12500)")
+          PY
           eval "$(python3 tests/security_smoke.py --environment)"
-          dotnet run --project ChatPlatform.csproj -c Release --no-build --no-launch-profile > "$RUNNER_TEMP/chatplatform-smoke.log" 2>&1 &
+          # env accepts hyphenated configuration keys that Bash export rejects.
+          env \
+            ExternalDatabases__Tenants__ci-tenant-a__erp__Provider=sqlite \
+            ExternalDatabases__Tenants__ci-tenant-a__erp__ConnectionName=CiErp \
+            ExternalDatabases__Tenants__ci-tenant-a__erp__Reads__invoice="SELECT json_object('reference',Id,'amountMinor',AmountMinor,'currency','YER','status','open') FROM Invoices WHERE Id=@input" \
+            BusinessIntegrations__Tenants__ci-tenant-a__accounting__Provider=database \
+            BusinessIntegrations__Tenants__ci-tenant-a__accounting__DatabaseAlias=erp \
+            BusinessIntegrations__Tenants__ci-tenant-a__accounting__Operations__invoice=invoice \
+            dotnet run --project ChatPlatform.csproj -c Release --no-build --no-launch-profile > "$RUNNER_TEMP/chatplatform-smoke.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true; cat "$RUNNER_TEMP/chatplatform-smoke.log"' EXIT
           ready=false

@@ -353,6 +353,8 @@ public static class DbInitializer
                     ActivationId TEXT NULL,
                     NextNode TEXT NULL,
                     VariablesJson TEXT NOT NULL DEFAULT '{}',
+                    BusinessSource TEXT NULL,
+                    BusinessOperation TEXT NULL,
                     LastInputAtUtc TEXT NULL,
                     ExpiresAtUtc TEXT NULL,
                     UpdatedAtUtc TEXT NOT NULL,
@@ -564,6 +566,9 @@ public static class DbInitializer
                 transaction);
 
             EnsureColumnExists(connection, transaction, "ConversationAutomation", "VariablesJson", "TEXT NOT NULL DEFAULT '{}'");
+            EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessSource", "TEXT NULL");
+            EnsureColumnExists(connection, transaction, "ConversationAutomation", "BusinessOperation", "TEXT NULL");
+            Execute(connection, transaction, "CREATE INDEX IF NOT EXISTS IX_ConversationAutomation_Business ON ConversationAutomation(TenantId, UpdatedAtUtc) WHERE BusinessSource IS NOT NULL;");
 
             // Preserve existing templates while adding fields required by the EF model.
             EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "MetaTemplateId", "TEXT NULL");

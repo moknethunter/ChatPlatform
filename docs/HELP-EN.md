@@ -44,3 +44,8 @@ The primary platform database remains unchanged. Operators configure independent
 
 ## 9. Verified status
 Isolated CI run 46058912602 (run 247, reference 15d23313) passed build, Docker, mocked Graph, tenant isolation and the one-million synthetic tenant/admin directory benchmark. It does not certify a million active organizations, real Meta accounts, mobile UX, sustained load, fair scheduling or commercial disaster recovery. See the developer guide for reproducible commands and release gates.
+
+## Accounting and payment integrations
+Tenant Admins can open /integrations.html to list configured sources, query a balance, invoice or payment status, and probe external databases. Read-only, no charges or accounting writes. Operator provisioning and vendor-specific sandbox validation are required. See [business integrations](BUSINESS-INTEGRATIONS.md). Bot actions remain unavailable.
+
+The visual designer now supports a terminal business-request node. Choose an approved source/operation, simulate and publish. Signed inbound traffic creates a tenant-scoped human-service request, without external I/O or automatic financial disclosure. An admin verifies the customer and explicitly reads the correct reference. Returning to bot mode closes the request. No payment execution or settlement.

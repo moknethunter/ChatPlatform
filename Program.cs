@@ -140,6 +140,13 @@ builder.Services.AddControllers();
 builder.Services.AddSingleton<IDatabaseAdapter, ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter>();
 builder.Services.AddSingleton<IDatabaseAdapter, ChatPlatform.Infrastructure.Adapters.Databases.PostgreSqlDatabaseAdapter>();
 builder.Services.AddSingleton<ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry>();
+// Independent external business adapters; primary database remains unchanged.
+builder.Services.AddSingleton<IBusinessReadAdapter, ChatPlatform.Infrastructure.Adapters.Business.DatabaseBusinessReadAdapter>();
+builder.Services.AddSingleton<IBusinessReadAdapter, ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter>();
+builder.Services.AddSingleton<ChatPlatform.Infrastructure.Adapters.Business.BusinessReadRegistry>();
+builder.Services.AddHttpClient("business-read",c=>c.Timeout=TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler { AllowAutoRedirect=false, UseCookies=false })
+    .RemoveAllLoggers();
 builder.Services.AddPlatformSecurity();
 builder.Services.AddScoped<ChatPlatform.Infrastructure.AI.OwnModelClient>();
 builder.Services.AddHttpClient("own-model",c=>c.Timeout=TimeSpan.FromSeconds(30))

@@ -10,6 +10,8 @@ Multi-tenant WhatsApp Business automation platform built on ASP.NET Core 8, Enti
 - [Source-comment coverage](docs/SOURCE-COMMENT-COVERAGE.md)
 - [Historical operational commands and phase notes](HELP.md) — use current guides for feature status.
 
+- [Accounting, payment and external database integration](docs/BUSINESS-INTEGRATIONS.md)
+
 ## Architecture
 The existing modular application uses server-derived tenant identity, role authorization, a durable WhatsApp inbox/outbox and receipt workers. Visual bots are validated and versioned; inbound automation is staged transactionally with the inbound message. A process-local event bus supports supplemental adapters. External database providers implement IDatabaseAdapter and are registered independently; the primary platform database stays unchanged. Optional owner-model preview is disabled by default and has no mandatory paid provider.
 
