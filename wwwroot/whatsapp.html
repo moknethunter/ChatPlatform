@@ -184,6 +184,16 @@
             <!-- Form Section -->
             <section class="card" id="accountFormCard" hidden>
                 <h2>ربط حساب WhatsApp جديد</h2>
+                <div class="guide-box">
+                    <strong>الربط عبر Meta (تجريبي، عند إتاحته)</strong>
+                    <p>ابدأ محاولة ربط آمنة، ثم افتح نافذة Meta الرسمية. لا تستخدم هذه الوظيفة قبل اعتماد إعدادات الربط التجاري.</p>
+                    <div class="actions">
+                        <button class="btn btn-secondary" id="prepareSignup" type="button">تهيئة الربط</button>
+                        <button class="btn btn-success" id="launchSignup" type="button" disabled>ربط حساب عبر Meta</button>
+                        <button class="btn btn-secondary" id="cancelSignup" type="button" disabled>إلغاء</button>
+                    </div>
+                    <div id="signupStatus" class="message" role="status" aria-live="polite"></div>
+                </div>
                 
                 <div class="guide-box">
                     <strong>💡 دليل الإدخال من ميتا:</strong><br>
@@ -284,6 +294,7 @@
 </div>
 
 <script src="/api.js"></script>
+<script src="/embedded-signup.js"></script>
 <script>
 "use strict";
 
@@ -589,7 +600,14 @@ async function init() {
 
 $("refreshButton").addEventListener("click", init);
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+    ChatPlatformEmbeddedSignup.attach({
+        api: ChatPlatformAPI, prepare: $("prepareSignup"), launch: $("launchSignup"),
+        cancel: $("cancelSignup"), status: $("signupStatus"),
+        refresh: async () => { await loadAccounts(); await loadDiagnostics(); }
+    });
+    init();
+});
 </script>
 </body>
 </html>
