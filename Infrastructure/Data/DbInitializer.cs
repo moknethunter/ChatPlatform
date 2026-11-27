@@ -352,6 +352,7 @@ public static class DbInitializer
                     Mode TEXT NOT NULL,
                     ActivationId TEXT NULL,
                     NextNode TEXT NULL,
+                    VariablesJson TEXT NOT NULL DEFAULT '{}',
                     LastInputAtUtc TEXT NULL,
                     ExpiresAtUtc TEXT NULL,
                     UpdatedAtUtc TEXT NOT NULL,
@@ -549,6 +550,8 @@ public static class DbInitializer
             ApplyWhatsAppTenantCompatibilityMigration(
                 connection,
                 transaction);
+
+            EnsureColumnExists(connection, transaction, "ConversationAutomation", "VariablesJson", "TEXT NOT NULL DEFAULT '{}'");
 
             // Preserve existing templates while adding fields required by the EF model.
             EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "MetaTemplateId", "TEXT NULL");
