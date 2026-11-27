@@ -20,6 +20,8 @@ jobs:
         run: docker compose -f docker-compose.yml config --quiet
       - name: Static UI integrity (Node syntax and local links)
         run: python3 tests/check_web_assets.py
+      - name: Million-tenant directory index benchmark (synthetic, isolated)
+        run: python3 tests/tenant_directory_scale.py 1000000
       - name: Restore
         run: dotnet restore ChatPlatform.csproj
       - name: Audit dependency vulnerabilities (report)
