@@ -516,6 +516,8 @@
             createWhatsAppAccount(data, opts = {}) { return request("/api/whatsapp/accounts", { method: "POST", body: data, signal: opts.signal }); },
             validateMetaCredentials(data, opts = {}) { return request("/api/whatsapp/validate-credentials", { method: "POST", body: data, signal: opts.signal }); },
             verifyWhatsAppAccount(id, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/verify", { method: "POST", signal: opts.signal }); },
+            startEmbeddedSignup(opts = {}) { return request("/api/whatsapp/embedded-signup/start", { method: "POST", signal: opts.signal, retries: 0 }); },
+            completeEmbeddedSignup(data, opts = {}) { return request("/api/whatsapp/embedded-signup/complete", { method: "POST", body: data, signal: opts.signal, timeout: 120000, retries: 0 }); },
             checkWhatsAppReadiness(id, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/readiness", { method: "POST", signal: opts.signal }); },
             updateWhatsAppToken(id, data, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/token", { method: "PUT", body: data, signal: opts.signal }); },
 
