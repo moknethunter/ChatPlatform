@@ -59,7 +59,7 @@ public sealed class PlatformAdminController(PlatformDbContext db,IConfiguration 
             q = by switch
             {
                 "name" => q.Where(t=>t.Name==search),
-                "username" => q.Where(t=>db.ManagedTenantAdmins.Any(a=>a.Username==search && a.TenantId==t.Id)),
+                "username" => q.Where(t=>db.ManagedTenantAdmins.Where(a=>a.Username==search).Select(a=>a.TenantId).Contains(t.Id)),
                 _ => q.Where(t=>t.Id==search)
             };
         }
