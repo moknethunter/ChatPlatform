@@ -127,6 +127,16 @@ call("/api/bots",cookie=agent,expected=403)
 flow={"start":"s","nodes":[{"id":"s","type":"start","next":"c","x":0,"y":0},{"id":"c","type":"contains","text":"hello","next":"r","otherwise":"e","x":180,"y":0},{"id":"r","type":"reply","text":"CI reply","next":"e","x":360,"y":0},{"id":"e","type":"end","x":540,"y":0}]}
 assert call("/api/bots/simulate","POST",{"flow":flow,"input":"HELLO"},cookie=a)[0]["replies"]==["CI reply"]
 assert call("/api/bots/simulate","POST",{"flow":flow,"input":"no match"},cookie=a)[0]["replies"]==[]
+exact=json.loads(json.dumps(flow));exact["nodes"][1]["matchMode"]="equals"
+assert call("/api/bots/simulate","POST",{"flow":exact,"input":" HELLO "},cookie=a)[0]["path"]==["s","c","r","e"]
+assert call("/api/bots/simulate","POST",{"flow":exact,"input":"hello there"},cookie=a)[0]["path"]==["s","c","e"]
+prefix=json.loads(json.dumps(flow));prefix["nodes"][1]["matchMode"]="starts_with"
+assert call("/api/bots/simulate","POST",{"flow":prefix,"input":" HELLO there"},cookie=a)[0]["replies"]==["CI reply"]
+assert call("/api/bots/simulate","POST",{"flow":prefix,"input":"say hello"},cookie=a)[0]["replies"]==[]
+badmode=json.loads(json.dumps(flow));badmode["nodes"][1]["matchMode"]="regex"
+call("/api/bots/simulate","POST",{"flow":badmode,"input":"hello"},cookie=a,expected=400)
+badmode=json.loads(json.dumps(flow));badmode["nodes"][2]["matchMode"]="equals"
+call("/api/bots/simulate","POST",{"flow":badmode,"input":"hello"},cookie=a,expected=400)
 cyclic=json.loads(json.dumps(flow));cyclic["nodes"][2]["next"]="c"
 call("/api/bots/simulate","POST",{"flow":cyclic,"input":"hello"},cookie=a,expected=400)
 unreachable=json.loads(json.dumps(flow));unreachable["nodes"].append({"id":"unused","type":"end","x":0,"y":0})
