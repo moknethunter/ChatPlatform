@@ -33,6 +33,26 @@ try
         WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
         throw new Exception("Media type or download host security regression.");
     Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
+    var attempts = new EmbeddedSignupAttemptStore();
+    var instant = DateTimeOffset.UtcNow;
+    var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(first, "tenant-b", "session-a", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-b", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "999", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "123", "999", instant) ||
+        !attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant))
+        throw new Exception("Signup attempt isolation or replay regression.");
+    var expiredAttempt = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(expiredAttempt, "tenant-a", "session-a", "123", "456", instant.AddMinutes(5)))
+        throw new Exception("Expired signup accepted.");
+    var superseded = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    var current = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(superseded, "tenant-a", "session-a", "123", "456", instant) ||
+        !attempts.Consume(current, "tenant-a", "session-a", "123", "456", instant))
+        throw new Exception("Superseded signup accepted.");
+    Console.WriteLine("PASS: signup attempts bound to tenant/session/config, expire and cannot replay.");
+
     // Verify approval matches the exact stored template; local status alone cannot authorize campaigns.
     var marketingTemplate=new WhatsAppTemplateEntity{Name="offer",Language="en",Category="MARKETING",Body="Offer",IsActive=true};
     using var approved=JsonDocument.Parse("""{"data":[{"name":"offer","language":"en","category":"MARKETING","status":"APPROVED","components":[{"type":"BODY","text":"Offer"}]}]}""");
@@ -159,6 +179,55 @@ try
             !JsonSerializer.SerializeToElement(verified.Value).GetProperty("valid").GetBoolean() ||
             JsonSerializer.Serialize(verified.Value).Contains("verified-token", StringComparison.Ordinal))
             throw new Exception("Stored-token verification failed or disclosed the token");
+        var cfg = new Microsoft.Extensions.Configuration.ConfigurationManager();
+        cfg["Meta:AppId"] = "123";
+        if (await controller.StartEmbeddedSignup(cfg, attempts, ct) is not ConflictObjectResult ||
+            await controller.CompleteEmbeddedSignup(new WhatsAppController.EmbeddedSignupRequest("fake","fake","789","123456"),cfg,attempts,ct) is not ConflictObjectResult)
+            throw new Exception("Embedded signup not disabled by default.");
+
+        var ready = await controller.AccountReadiness(account.Id, cfg, ct) as OkObjectResult;
+        if (ready == null) throw new Exception("Readiness unavailable");
+        var readyJson = JsonSerializer.SerializeToElement(ready.Value);
+        if (!readyJson.GetProperty("membershipVerified").GetBoolean() ||
+            !readyJson.GetProperty("appSubscribed").GetBoolean() ||
+            readyJson.GetProperty("deliveryVerified").ValueKind != JsonValueKind.Null)
+            throw new Exception("Incorrect subscription or delivery readiness");
+        cfg["Meta:EmbeddedSignupEnabled"] = "true";
+        cfg["Meta:EmbeddedSignupConfigId"] = "456";
+        cfg["Meta:AppSecret"] = "ci-fake-secret";
+        void SignupIdentity(string tenantId, string sessionId) => controller.ControllerContext.HttpContext.User =
+            new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", tenantId), new Claim(ClaimTypes.Role, "Admin"),
+                new Claim("platform_session", sessionId) }, "smoke"));
+        SignupIdentity(tenant, "session-one");
+        var started = await controller.StartEmbeddedSignup(cfg, attempts, ct) as OkObjectResult;
+        if (started == null) throw new Exception("Unable to start test signup.");
+        var state = JsonSerializer.SerializeToElement(started.Value).GetProperty("state").GetString()!;
+        var completion = new WhatsAppController.EmbeddedSignupRequest(state, "ci-code", "789", "654321");
+        SignupIdentity(tenant, "session-two");
+        if (await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) is not BadRequestObjectResult)
+            throw new Exception("Signup accepted across sessions.");
+        SignupIdentity(tenant, "session-one");
+        var completed = await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) as OkObjectResult;
+        if (completed == null) throw new Exception("Mocked signup failed.");
+        var createdId = JsonSerializer.SerializeToElement(completed.Value).GetProperty("id").GetString()!;
+        var created = await db.WhatsAppTenants.AsNoTracking().SingleAsync(x => x.Id == createdId, ct);
+        if (created.TenantId != tenant || created.PhoneNumberId != "654321" || created.WabaId != "789" ||
+            new WhatsAppTokenProtection(dp).Unprotect(created.BusinessTokenEncrypted) != "verified-token" ||
+            JsonSerializer.Serialize(completed.Value).Contains("verified-token", StringComparison.Ordinal) ||
+            await controller.CompleteEmbeddedSignup(completion, cfg, attempts, ct) is not BadRequestObjectResult)
+            throw new Exception("Signup persistence, secrecy or replay regression.");
+        await controller.DeleteAccount(createdId, ct);
+        db.ChangeTracker.Clear();
+        Identity(tenant);
+        Console.WriteLine("PASS: mocked code exchange, verified account creation, session isolation, encrypted token and replay rejection.");
+        cfg["Meta:AppId"] = "456";
+        var absent = (OkObjectResult)await controller.AccountReadiness(account.Id, cfg, ct);
+        if (JsonSerializer.SerializeToElement(absent.Value).GetProperty("appSubscribed").GetBoolean())
+            throw new Exception("Unknown app reported subscribed");
+        Identity("foreign");
+        if (await controller.AccountReadiness(account.Id, cfg, ct) is not NotFoundResult)
+            throw new Exception("Cross-tenant readiness accepted");
+        Identity(tenant);
         await db.Database.ExecuteSqlRawAsync("UPDATE WhatsAppTenants SET BusinessTokenEncrypted = 'invalid!' WHERE Id = 'repair-account'", ct);
         if (await controller.VerifySavedAccount(account.Id, ct) is not ConflictObjectResult)
             throw new Exception("Unreadable saved token was not handled");
@@ -366,7 +435,7 @@ sealed class FakeAccountFactory : IHttpClientFactory
 {
     public HttpClient CreateClient(string name)
     {
-        if (name != "whatsapp") throw new InvalidOperationException("Unexpected client");
+        if (name is not ("whatsapp" or "whatsapp-oauth")) throw new InvalidOperationException("Unexpected client");
         return new HttpClient(new FakeAccountHandler()) { BaseAddress = new Uri("https://graph.invalid/") };
     }
 }
@@ -374,15 +443,25 @@ sealed class FakeAccountHandler : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
-        if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid" ||
-            request.Headers.Authorization?.Parameter != "verified-token")
+        if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid")
             throw new InvalidOperationException("Unexpected account verification request");
         var uri = request.RequestUri!;
+        if (uri.AbsolutePath == "/oauth/access_token")
+        {
+            if (uri.Query != "?client_id=123&client_secret=ci-fake-secret&code=ci-code")
+                throw new InvalidOperationException("Unexpected synthetic OAuth request.");
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) {
+                Content = new StringContent("{\"access_token\":\"verified-token\"}") });
+        }
+        if (request.Headers.Authorization?.Parameter != "verified-token")
+            throw new InvalidOperationException("Unexpected account credentials");
         string body;
-        if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
+        if (uri.AbsolutePath == "/789/subscribed_apps" && uri.Query == "")
+            body = "{\"data\":[{\"whatsapp_business_api_data\":{\"id\":\"123\"}}]}";
+        else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
             body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"page+2\"}}}";
         else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100&after=page%2B2")
-            body = "{\"data\":[{\"id\":\"123456\"}]}";
+            body = "{\"data\":[{\"id\":\"123456\"},{\"id\":\"654321\"}]}";
         else if (uri.AbsolutePath == "/790/phone_numbers" &&
             (uri.Query == "?fields=id&limit=100" || uri.Query == "?fields=id&limit=100&after=repeat"))
             body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"repeat\"}}}";

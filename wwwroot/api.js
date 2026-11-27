@@ -339,7 +339,7 @@
                 const q = new URLSearchParams();
                 if (opts.page) q.set("page", String(opts.page));
                 if (opts.limit) q.set("limit", String(opts.limit));
-                for (const key of ["search","status","assigned","automation"]) if (opts[key]) q.set(key, opts[key]);
+                for (const key of ["search","status","assigned","automation","phoneNumberId","unread"]) if (opts[key]) q.set(key, opts[key]);
                 const qs = q.toString();
                 return request(API.conversations + (qs ? "?" + qs : ""), { signal: opts.signal });
             },
@@ -516,6 +516,9 @@
             createWhatsAppAccount(data, opts = {}) { return request("/api/whatsapp/accounts", { method: "POST", body: data, signal: opts.signal }); },
             validateMetaCredentials(data, opts = {}) { return request("/api/whatsapp/validate-credentials", { method: "POST", body: data, signal: opts.signal }); },
             verifyWhatsAppAccount(id, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/verify", { method: "POST", signal: opts.signal }); },
+            startEmbeddedSignup(opts = {}) { return request("/api/whatsapp/embedded-signup/start", { method: "POST", signal: opts.signal, retries: 0 }); },
+            completeEmbeddedSignup(data, opts = {}) { return request("/api/whatsapp/embedded-signup/complete", { method: "POST", body: data, signal: opts.signal, timeout: 120000, retries: 0 }); },
+            checkWhatsAppReadiness(id, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/readiness", { method: "POST", signal: opts.signal }); },
             updateWhatsAppToken(id, data, opts = {}) { return request("/api/whatsapp/accounts/" + encodeURIComponent(validateId(id)) + "/token", { method: "PUT", body: data, signal: opts.signal }); },
 
             getConnectors(opts = {}) { return request(API.connectors, { signal: opts.signal }); },

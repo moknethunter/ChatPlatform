@@ -32,4 +32,5 @@ for file in sorted(root.glob("*.html")):
             result=subprocess.run(["node","--check",tmp.name],capture_output=True,text=True)
             assert result.returncode==0,(file,i,result.stderr)
 for file in root.glob("*.js"):subprocess.run(["node","--check",str(file)],check=True)
+subprocess.run(["node", "tests/embedded_signup_ui.cjs"], check=True)
 print("PASS: page script syntax, unique IDs and static asset links")

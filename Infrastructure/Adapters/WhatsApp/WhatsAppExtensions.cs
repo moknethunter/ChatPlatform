@@ -52,6 +52,13 @@ public static class WhatsAppExtensions
         services.AddScoped<ChatPlatform.Infrastructure.Marketing.TemplateApproval>();
         services.AddScoped<IWhatsAppTenantResolver, WhatsAppTenantResolver>();
         services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
+        services.AddSingleton<EmbeddedSignupAttemptStore>();
+        services.AddHttpClient("whatsapp-oauth", client =>
+        {
+            client.BaseAddress = new Uri($"https://graph.facebook.com/{graphApiVersion}/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+          .RemoveAllLoggers();
         services.AddScoped<WhatsAppOnboardingService>();
 
         services.AddSingleton<IIntegrationAdapter, WhatsAppAdapter>();
