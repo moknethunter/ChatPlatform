@@ -356,6 +356,11 @@
             marketingOptions() { return request("/api/marketing/options"); },
             marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
             marketingConsent(data) { return request("/api/marketing/consent",{method:"PUT",body:data}); },
+            marketingPreviewSegment(opts = {}) {
+                const q = new URLSearchParams();
+                for (const key of ["phoneNumberId","stage","tag"]) if (opts[key]) q.set(key, opts[key]);
+                return request("/api/marketing/segments/preview?" + q, { signal: opts.signal });
+            },
             marketingLists() { return request("/api/marketing/lists"); },
             marketingSaveList(id,data) { return request("/api/marketing/lists"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
             marketingCampaigns() { return request("/api/marketing/campaigns"); },
