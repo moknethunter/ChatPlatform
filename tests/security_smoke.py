@@ -467,13 +467,37 @@ assert call("/api/business-integrations/requests",cookie=b)[0]==[]
 call("/api/business-integrations",expected=401)
 call("/api/business-integrations",cookie=agent,expected=403)
 call("/api/business-integrations",cookie=owner,expected=403)
-assert call("/api/business-integrations",cookie=a)[0]==[]
+assert call("/api/business-integrations",cookie=a)[0]==[{"id":"accounting","provider":"database","operations":["invoice"]}]
+assert call("/api/business-integrations",cookie=b)[0]==[]
+call("/api/business-integrations/accounting/read","POST",{"operation":"invoice","reference":"ci-invoice"},cookie=b,expected=404)
+valid_business=json.loads(json.dumps(business_flow));valid_business["nodes"][1]["businessSource"]="accounting"
+call("/api/bots/"+business_draft["id"],"PUT",{"name":"CI business","flow":valid_business,"version":1},cookie=a)
+# A foreign draft may be saved structurally, but cannot publish the other tenant's source.
+foreign_business=call("/api/bots","POST",{"name":"Foreign business","flow":valid_business,"version":0},cookie=b,expected=201)[0]
+call("/api/bots/"+foreign_business["id"]+"/publish","POST",{"version":1},cookie=b,expected=400)
+bp="/api/bots/"+business_draft["id"]
+business_pub=call(bp+"/publish","POST",{"version":2},cookie=a)[0]
+assert automate("wamid.ci.business.1","private-reference")==("business_requested",2,None,None)
+requests=call("/api/business-integrations/requests",cookie=a)[0]
+assert len(requests)==1 and requests[0]["businessSource"]=="accounting" and requests[0]["businessOperation"]=="invoice"
+assert "private-reference" not in json.dumps(requests)
+assert call("/api/business-integrations/requests",cookie=b)[0]==[]
+assert call("/api/business-integrations/accounting/read","POST",{"operation":"invoice","reference":"ci-invoice"},cookie=a)[0]=={"reference":"ci-invoice","amountMinor":12500,"currency":"YER","status":"open"}
+call("/api/business-integrations/accounting/read","POST",{"operation":"payment-status","reference":"ci-invoice"},cookie=a,expected=404)
+call("/api/business-integrations/accounting/read","POST",{"operation":"invoice","reference":"unknown"},cookie=a,expected=404)
+call(bp+"/publish/"+business_pub["activationId"],"DELETE",cookie=a,expected=204)
+call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
+assert call("/api/business-integrations/requests",cookie=a)[0]==[]
+print("PASS: signed business bot request, no financial auto-send, tenant-only admin invoice read and explicit close")
 call("/api/business-integrations/unknown/read","POST",{"operation":"payment-status","reference":"pay-123"},cookie=a,expected=404)
 call("/api/business-integrations/unknown/read","POST",{"operation":"charge","reference":"pay-123"},cookie=a,expected=400)
 call("/api/business-integrations/unknown/read","POST",{"operation":"invoice","reference":"pay-123"},cookie=a,expected=403,csrf=False)
 call("/api/database-connections",expected=401)
 call("/api/database-connections",cookie=agent,expected=403)
-assert call("/api/database-connections",cookie=a)[0]==[]
+assert call("/api/database-connections",cookie=a)[0]==[{"id":"erp","provider":"sqlite"}]
+assert call("/api/database-connections",cookie=b)[0]==[]
+call("/api/database-connections/erp/probe","POST",{},cookie=a)
+call("/api/database-connections/erp/probe","POST",{},cookie=b,expected=404)
 call("/api/database-connections/unknown/probe","POST",{},cookie=a,expected=404)
 call("/api/marketing/lists",expected=401)
 call("/api/marketing/lists",cookie=agent,expected=403)
