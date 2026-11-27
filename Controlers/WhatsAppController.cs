@@ -151,6 +151,67 @@ public sealed class WhatsAppController : ControllerBase
             : "تعذر التحقق لدى Meta. راجع الرمز وصلاحياته ومعرّفات الحساب." });
     }
 
+    // Read-only onboarding readiness: distinguish a confirmed subscription from
+    // an unknown result. Never send messages, subscribe, or mutate account data here.
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [HttpPost("accounts/{id}/readiness")]
+    public async Task<IActionResult> AccountReadiness(string id, [FromServices] IConfiguration configuration, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        var account = await _db.WhatsAppTenants.AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenant, ct);
+        if (account == null) return NotFound();
+        if (!account.IsActive || !ValidMetaId(account.WabaId) || string.IsNullOrWhiteSpace(account.BusinessTokenEncrypted))
+            return Conflict(new { error = "account_incomplete" });
+        string token;
+        try { token = _protector.Unprotect(account.BusinessTokenEncrypted); }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        { return Conflict(new { error = "token_unreadable" }); }
+
+        var appId = configuration["Meta:AppId"] ?? configuration["META_APP_ID"];
+        var membership = await VerifyAccount(account.PhoneNumberId, account.WabaId, token, ct);
+        bool? subscribed = null;
+        if (membership && ValidMetaId(appId))
+        {
+            using var client = _httpFactory.CreateClient("whatsapp");
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{account.WabaId}/subscribed_apps");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var response = await client.SendAsync(request, ct);
+                if (response.IsSuccessStatusCode)
+                {
+                    using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                    var root = json.RootElement;
+                    if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("data", out var data) &&
+                        data.ValueKind == JsonValueKind.Array)
+                    {
+                        var complete = true;
+                        foreach (var item in data.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.Object ||
+                                !item.TryGetProperty("whatsapp_business_api_data", out var details) ||
+                                details.ValueKind != JsonValueKind.Object ||
+                                !details.TryGetProperty("id", out var app) || app.ValueKind != JsonValueKind.String ||
+                                !ValidMetaId(app.GetString()))
+                            { complete = false; continue; }
+                            if (app.GetString() == appId) { subscribed = true; break; }
+                        }
+                        // A paginated or malformed response cannot establish absence.
+                        if (subscribed == null && complete &&
+                            (!root.TryGetProperty("paging", out var paging) ||
+                             (paging.ValueKind == JsonValueKind.Object && !paging.TryGetProperty("next", out _))))
+                            subscribed = false;
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or FormatException or TaskCanceledException)
+            { _logger.LogWarning("Meta subscription check failed: {Kind}", ex.GetType().Name); }
+        }
+        return Ok(new { membershipVerified = membership, appIdConfigured = ValidMetaId(appId),
+            appSubscribed = subscribed, deliveryVerified = (bool?)null });
+    }
+
     [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPost("accounts")]
     public async Task<IActionResult> CreateAccount([FromBody] CreateTenantRequest dto, CancellationToken ct)
