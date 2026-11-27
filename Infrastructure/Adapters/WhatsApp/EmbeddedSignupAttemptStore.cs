@@ -5,8 +5,10 @@ namespace ChatPlatform.Infrastructure.Adapters.WhatsApp;
 /// <summary>Single-process, bounded, single-use correlation for the SDK signup attempt.
 /// Restart or routing to a different process fails closed; it is not a substitute
 /// for validating Meta's authorization code and account ownership.</summary>
-public sealed class EmbeddedSignupAttemptStore
+public sealed class EmbeddedSignupAttemptStore : IEmbeddedSignupAttemptStore
 {
+    public Task<string?> StartAsync(string tenant, string session, string appId, string configId, DateTimeOffset now, CancellationToken ct) { ct.ThrowIfCancellationRequested(); return Task.FromResult(Start(tenant, session, appId, configId, now)); }
+    public Task<bool> ConsumeAsync(string? state, string tenant, string session, string appId, string configId, DateTimeOffset now, CancellationToken ct) { ct.ThrowIfCancellationRequested(); return Task.FromResult(Consume(state, tenant, session, appId, configId, now)); }
     private sealed record Attempt(string Tenant, string Session, string AppId, string ConfigId, DateTimeOffset Expires);
     private readonly Dictionary<string, Attempt> _attempts = new(StringComparer.Ordinal);
     private readonly object _gate = new();
