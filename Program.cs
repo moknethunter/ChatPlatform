@@ -144,6 +144,7 @@ builder.Services.AddSingleton<ChatPlatform.Infrastructure.Data.Connections.Exter
 builder.Services.AddSingleton<IBusinessReadAdapter, ChatPlatform.Infrastructure.Adapters.Business.DatabaseBusinessReadAdapter>();
 builder.Services.AddSingleton<IBusinessReadAdapter, ChatPlatform.Infrastructure.Adapters.Business.HttpsBusinessReadAdapter>();
 builder.Services.AddSingleton<ChatPlatform.Infrastructure.Adapters.Business.BusinessReadRegistry>();
+builder.Services.AddSingleton<ChatPlatform.Infrastructure.Adapters.Business.PaymentReconciliation>();
 builder.Services.AddHttpClient("business-read",c=>c.Timeout=TimeSpan.FromSeconds(10))
     .ConfigurePrimaryHttpMessageHandler(()=>new HttpClientHandler { AllowAutoRedirect=false, UseCookies=false })
     .RemoveAllLoggers();
