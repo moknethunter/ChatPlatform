@@ -137,6 +137,7 @@ builder.Services.AddSingleton<IIntegrationAdapter, WhatsAppAutoReplyAdapter>();
 // 6. Controllers and HTTP Clients
 // ============================================================
 builder.Services.AddControllers();
+builder.Services.AddSingleton<ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry>();
 builder.Services.AddPlatformSecurity();
 builder.Services.AddScoped<ChatPlatform.Infrastructure.AI.OwnModelClient>();
 builder.Services.AddHttpClient("own-model",c=>c.Timeout=TimeSpan.FromSeconds(30))
