@@ -170,13 +170,18 @@ public sealed class WhatsAppController : ControllerBase
 
         var appId = configuration["Meta:AppId"] ?? configuration["META_APP_ID"];
         var membership = await VerifyAccount(account.PhoneNumberId, account.WabaId, token, ct);
+        var subscribed = membership && ValidMetaId(appId) ? await CheckAppSubscription(account.WabaId, token, appId!, ct) : null;
+        return Ok(new { membershipVerified = membership, appIdConfigured = ValidMetaId(appId),
+            appSubscribed = subscribed, deliveryVerified = (bool?)null });
+    }
+
+    private async Task<bool?> CheckAppSubscription(string wabaId, string token, string appId, CancellationToken ct)
+    {
         bool? subscribed = null;
-        if (membership && ValidMetaId(appId))
-        {
             using var client = _httpFactory.CreateClient("whatsapp");
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{account.WabaId}/subscribed_apps");
+                using var request = new HttpRequestMessage(HttpMethod.Get, $"{wabaId}/subscribed_apps");
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 using var response = await client.SendAsync(request, ct);
                 if (response.IsSuccessStatusCode)
@@ -207,10 +212,89 @@ public sealed class WhatsAppController : ControllerBase
             }
             catch (Exception ex) when (ex is HttpRequestException or JsonException or FormatException or TaskCanceledException)
             { _logger.LogWarning("Meta subscription check failed: {Kind}", ex.GetType().Name); }
-        }
-        return Ok(new { membershipVerified = membership, appIdConfigured = ValidMetaId(appId),
-            appSubscribed = subscribed, deliveryVerified = (bool?)null });
+        return subscribed;
     }
+
+    private static bool SignupConfigured(IConfiguration cfg) =>
+        cfg.GetValue<bool>("Meta:EmbeddedSignupEnabled") &&
+        ValidMetaId(cfg["Meta:AppId"] ?? cfg["META_APP_ID"]) &&
+        ValidMetaId(cfg["Meta:EmbeddedSignupConfigId"]) &&
+        ValidToken(cfg["Meta:AppSecret"] ?? cfg["META_APP_SECRET"]);
+
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("oauth-policy")]
+    [HttpPost("embedded-signup/start")]
+    public async Task<IActionResult> StartEmbeddedSignup([FromServices] IConfiguration cfg,
+        [FromServices] EmbeddedSignupAttemptStore attempts, CancellationToken ct)
+    {
+        if (!SignupConfigured(cfg)) return Conflict(new { error = "embedded_signup_not_enabled" });
+        var tenant = User.TenantId();
+        var session = User.FindFirst("platform_session")?.Value;
+        if (string.IsNullOrWhiteSpace(session)) return Forbid();
+        if (await Entitlements.CapacityAsync(_db, tenant, "accounts", 1, DateTime.UtcNow, ct) is string denied)
+            return Conflict(new { error = denied });
+        var appId = (cfg["Meta:AppId"] ?? cfg["META_APP_ID"])!;
+        var configId = cfg["Meta:EmbeddedSignupConfigId"]!;
+        var state = attempts.Start(tenant, session, appId, configId, DateTimeOffset.UtcNow);
+        if (state == null) return StatusCode(503, new { error = "signup_busy" });
+        Response.Headers["Cache-Control"] = "no-store";
+        return Ok(new { appId, configId, state, expiresInSeconds = 300 });
+    }
+
+    // Candidate SDK completion. Never registers phones, subscribes the app or overwrites
+    // accounts. The app must already be subscribed and ownership must be proven by Graph.
+    [Authorize(Policy = PlatformSecurity.AdminPolicy)]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("oauth-policy")]
+    [HttpPost("embedded-signup/complete")]
+    public async Task<IActionResult> CompleteEmbeddedSignup([FromBody] EmbeddedSignupRequest req,
+        [FromServices] IConfiguration cfg, [FromServices] EmbeddedSignupAttemptStore attempts, CancellationToken ct)
+    {
+        if (!SignupConfigured(cfg)) return Conflict(new { error = "embedded_signup_not_enabled" });
+        var tenant = User.TenantId();
+        var session = User.FindFirst("platform_session")?.Value;
+        if (string.IsNullOrWhiteSpace(session)) return Forbid();
+        if (!ValidMetaId(req.PhoneNumberId) || !ValidMetaId(req.WabaId) || !ValidToken(req.Code))
+            return BadRequest(new { error = "invalid_signup_data" });
+        var appId = (cfg["Meta:AppId"] ?? cfg["META_APP_ID"])!;
+        var configId = cfg["Meta:EmbeddedSignupConfigId"]!;
+        if (!attempts.Consume(req.State, tenant, session, appId, configId, DateTimeOffset.UtcNow))
+            return BadRequest(new { error = "signup_attempt_invalid" });
+        Response.Headers["Cache-Control"] = "no-store";
+        if (await _db.WhatsAppTenants.AnyAsync(x => x.PhoneNumberId == req.PhoneNumberId, ct))
+            return Conflict(new { error = "account_already_registered" });
+        if (await Entitlements.CapacityAsync(_db, tenant, "accounts", 1, DateTime.UtcNow, ct) is string denied)
+            return Conflict(new { error = denied });
+
+        string? token;
+        try
+        {
+            using var client = _httpFactory.CreateClient("whatsapp-oauth");
+            // Meta SDK returns an exchangeable code; no caller-controlled redirect URI.
+            // The OAuth client disables HTTP logging and redirects because query parameters are secrets.
+            var secret = (cfg["Meta:AppSecret"] ?? cfg["META_APP_SECRET"])!;
+            var path = "oauth/access_token?client_id=" + Uri.EscapeDataString(appId)
+                + "&client_secret=" + Uri.EscapeDataString(secret) + "&code=" + Uri.EscapeDataString(req.Code);
+            using var response = await client.GetAsync(path, ct);
+            if (!response.IsSuccessStatusCode) return BadRequest(new { error = "oauth_exchange_failed" });
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            token = doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("access_token", out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or FormatException or TaskCanceledException)
+        {
+            _logger.LogWarning("Meta signup exchange failed: {Kind}", ex.GetType().Name);
+            return BadRequest(new { error = "oauth_exchange_failed" });
+        }
+        if (!ValidToken(token) || !await VerifyAccount(req.PhoneNumberId, req.WabaId, token!, ct))
+            return BadRequest(new { error = "account_verification_failed" });
+        if (await CheckAppSubscription(req.WabaId, token!, appId, ct) != true)
+            return Conflict(new { error = "app_subscription_not_confirmed" });
+        // Reuse the same durable quota, duplicate, tenant and encryption checks as manual linking.
+        return await CreateAccount(new CreateTenantRequest(tenant, req.PhoneNumberId, req.WabaId, token!), ct);
+    }
+
+    public sealed record EmbeddedSignupRequest(string State, string Code, string WabaId, string PhoneNumberId);
 
     [Authorize(Policy = PlatformSecurity.AdminPolicy)]
     [HttpPost("accounts")]
@@ -225,6 +309,7 @@ public sealed class WhatsAppController : ControllerBase
         if (!await VerifyAccount(dto.PhoneNumberId, dto.WabaId, dto.AccessToken, ct))
             return BadRequest(new { error = "account_verification_failed" });
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
+        if (!await _db.Tenants.AnyAsync(x => x.Id == tenant && x.IsActive, ct)) return Forbid();
         if(await Entitlements.CapacityAsync(_db,tenant,"accounts",1,DateTime.UtcNow,ct) is string denied)return Conflict(new{error=denied});
         var account = new WhatsAppTenantEntity { TenantId = tenant, PhoneNumberId = dto.PhoneNumberId,
             WabaId = dto.WabaId, BusinessTokenEncrypted = _protector.Protect(dto.AccessToken), IsActive = true };
