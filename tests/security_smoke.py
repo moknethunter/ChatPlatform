@@ -47,9 +47,13 @@ call("/api/live/inbox",expected=401)
 call("/api/bots",expected=401)
 call("/api/media/00000000-0000-0000-0000-000000000001",expected=401)
 call("/api/whatsapp/accounts",expected=401)
+call("/api/whatsapp/accounts/ci-account-a/readiness","POST",expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":"wrong"},expected=401)
 call("/api/auth/login","POST",{"username":"ci-a","password":PASSWORD},expected=403,csrf=False)
 legacy, a, b, agent, owner = (login(name) for name,_,_ in USERS)
+call("/api/whatsapp/accounts/ci-account-a/readiness","POST",cookie=agent,expected=403)
+call("/api/whatsapp/accounts/ci-account-a/readiness","POST",cookie=b,expected=404)
+call("/api/whatsapp/accounts/ci-account-a/readiness","POST",cookie=a,expected=409)
 accounts,_=call("/api/whatsapp/accounts",cookie=legacy)
 assert accounts[0]["phoneNumberId"]=="999999999998" and accounts[0]["hasToken"]
 with sqlite3.connect(DB) as db:
