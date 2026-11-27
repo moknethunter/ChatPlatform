@@ -25,12 +25,20 @@ public class ConversationsController : ControllerBase
     public async Task<IActionResult> List(
         [FromQuery] string? tenantId,
         [FromQuery] string? search, [FromQuery] string? status, [FromQuery] string? assigned,
-        [FromQuery] string? automation, [FromQuery] int page = 1, [FromQuery] int limit = 50, CancellationToken ct = default)
+        [FromQuery] string? automation, [FromQuery] string? phoneNumberId, [FromQuery] bool? unread, [FromQuery] int page = 1, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
         var identityTenant = User.TenantId();
         if (!string.IsNullOrEmpty(tenantId) && tenantId != identityTenant) return Forbid();
         var q = _db.WhatsAppConversations.AsNoTracking().Where(c => c.TenantId == identityTenant);
 
+        if (!string.IsNullOrEmpty(phoneNumberId))
+        {
+            if (phoneNumberId.Length > 32 || phoneNumberId.Any(ch => ch is < '0' or > '9'))
+                return BadRequest(new { error = "invalid_phone_filter" });
+            // Restrict even historical/inactive account conversations to the authenticated tenant.
+            q = q.Where(c => c.PhoneNumberId == phoneNumberId);
+        }
+        if (unread == true) q = q.Where(c => c.UnreadCount > 0);
         if(automation=="human")q=q.Where(c=>_db.ConversationAutomation.Any(s=>s.TenantId==identityTenant && s.ConversationId==c.Id && s.Mode=="human"));
         else if(!string.IsNullOrEmpty(automation))return BadRequest(new {error="invalid_automation_filter"});
         if (!string.IsNullOrWhiteSpace(status))
@@ -73,7 +81,7 @@ public class ConversationsController : ControllerBase
                 updatedAtUtc = c.UpdatedAtUtc,
                 lastMessage = _db.WhatsAppMessages
                     .Where(m => m.ConversationId == c.Id && m.TenantId == identityTenant)
-                    .OrderByDescending(m => m.TimestampUtc)
+                    .OrderByDescending(m => m.TimestampUtc).ThenByDescending(m => m.Id)
                     .Select(m => new
                     {
                         text = m.TextPreview,
@@ -178,7 +186,7 @@ public class ConversationsController : ControllerBase
         var msgs = await _db.WhatsAppMessages
             .AsNoTracking()
             .Where(m => m.ConversationId == id && m.TenantId == tenant)
-            .OrderByDescending(m => m.TimestampUtc)
+            .OrderByDescending(m => m.TimestampUtc).ThenByDescending(m => m.Id)
             .Take(safeTake)
             .Select(m => new
             {
