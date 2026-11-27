@@ -47,3 +47,5 @@ Isolated CI run 46058912602 (run 247, reference 15d23313) passed build, Docker, 
 
 ## Accounting and payment integrations
 Tenant Admins can open /integrations.html to list configured sources, query a balance, invoice or payment status, and probe external databases. Read-only, no charges or accounting writes. Operator provisioning and vendor-specific sandbox validation are required. See [business integrations](BUSINESS-INTEGRATIONS.md). Bot actions remain unavailable.
+
+The visual designer now supports a terminal business-request node. Choose an approved source/operation, simulate and publish. Signed inbound traffic creates a tenant-scoped human-service request, without external I/O or automatic financial disclosure. An admin verifies the customer and explicitly reads the correct reference. Returning to bot mode closes the request. No payment execution or settlement.
