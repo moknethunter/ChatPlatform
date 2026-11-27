@@ -608,6 +608,8 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS
                     IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
                     ON WhatsAppWebhookInbox(Status, NextAttemptAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Lease
+                    ON WhatsAppWebhookInbox(Status, LeaseUntilUtc);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS
                     IX_WhatsAppStatusInbox_EventKey
@@ -650,6 +652,8 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS
                     IX_WhatsAppOutbox_Status_NextAttemptAtUtc
                     ON WhatsAppOutbox(Status, NextAttemptAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Lease
+                    ON WhatsAppOutbox(Status, LeaseUntilUtc);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS
                     IX_WhatsAppOutbox_MetaMessageId
