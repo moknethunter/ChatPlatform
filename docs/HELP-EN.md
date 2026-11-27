@@ -52,3 +52,6 @@ The visual designer now supports a terminal business-request node. Choose an app
 
 ### Invoice/payment comparison
 Choose an operator-approved source pair and enter invoice/payment references. The comparison requires provider-attested linkage, amount, currency and status. A match is for human review only, not settlement or an accounting write.
+
+### Customer account binding after independent verification
+From a bot request in the integrations workspace, choose the verified account binding action. A tenant administrator must independently verify identity and entitlement in person or through an authenticated customer portal, enter the exact reference and attest. Bindings are scoped to conversation/source/operation, encrypted, valid 24 hours and revocable. Bound reads are admin-only. This is staff attestation, not automated customer authentication or automatic financial disclosure.

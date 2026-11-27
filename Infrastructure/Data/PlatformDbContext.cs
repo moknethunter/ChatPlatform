@@ -28,6 +28,7 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<CampaignRecipientEntity> CampaignRecipients => Set<CampaignRecipientEntity>();
     public DbSet<KnowledgeArticleEntity> KnowledgeArticles => Set<KnowledgeArticleEntity>();
     public DbSet<BotReleaseEntity> BotReleases => Set<BotReleaseEntity>();
+    public DbSet<CustomerBusinessBindingEntity> CustomerBusinessBindings => Set<CustomerBusinessBindingEntity>();
     public DbSet<ConversationAutomationEntity> ConversationAutomation => Set<ConversationAutomationEntity>();
     public DbSet<AutomationRunEntity> AutomationRuns => Set<AutomationRunEntity>();
     public DbSet<WhatsAppWebhookInboxEntity> WhatsAppWebhookInbox => Set<WhatsAppWebhookInboxEntity>();
@@ -49,6 +50,7 @@ public class PlatformDbContext : DbContext, IDataProtectionKeyContext
         mb.Entity<CustomerListEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>x.TenantId);});
         mb.Entity<MarketingCampaignEntity>(e=>{e.HasKey(x=>x.Id);e.HasIndex(x=>x.TenantId);});
         mb.Entity<CampaignRecipientEntity>(e=>{e.HasKey(x=>new{x.TenantId,x.CampaignId,x.Phone});e.HasIndex(x=>x.OutboxId).IsUnique();});
+        mb.Entity<CustomerBusinessBindingEntity>(e=>e.HasKey(x=>new{x.TenantId,x.ConversationId,x.Source,x.Operation}));
         mb.Entity<ConversationAutomationEntity>(e => e.HasKey(x => new { x.TenantId, x.ConversationId }));
         mb.Entity<KnowledgeArticleEntity>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.TenantId); });
         mb.Entity<InboxRevisionEntity>(e => e.HasKey(x => x.TenantId));
