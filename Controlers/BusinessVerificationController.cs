@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using ChatPlatform.Infrastructure.Adapters.Business;
 using ChatPlatform.Infrastructure.Data;
 using ChatPlatform.Infrastructure.Data.Entities;
@@ -16,7 +17,7 @@ namespace ChatPlatform.Controllers;
 public sealed class BusinessVerificationController(PlatformDbContext db,BusinessReadRegistry registry,
     IDataProtectionProvider protection,ILogger<BusinessVerificationController> log):ControllerBase
 {
-    public sealed record VerifyRequest(string? Reference,bool IndependentlyVerified);
+    public sealed record VerifyRequest(string? Reference,bool IndependentlyVerified,string? Source,string? Operation,DateTime? RequestUpdatedAtUtc);
     public sealed record ConsumeRequest(Guid GrantId);
 
     // Scope both the conversation and the active receiving account to the authenticated tenant.
@@ -25,6 +26,10 @@ public sealed class BusinessVerificationController(PlatformDbContext db,Business
             s.Mode=="human" && s.BusinessSource!=null && s.BusinessOperation!=null &&
             db.WhatsAppConversations.Any(c=>c.Id==id && c.TenantId==tenant &&
                 db.WhatsAppTenants.Any(a=>a.TenantId==tenant && a.PhoneNumberId==c.PhoneNumberId && a.IsActive)));
+
+    // Bind grants to the authenticated session without persisting its bearer identifier.
+    private string? SessionHash() => User.FindFirst("platform_session")?.Value is string session
+        ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(session))) : null;
 
     private IDataProtector Protector(string tenant,Guid conversation,Guid grant) =>
         protection.CreateProtector("ChatPlatform.BusinessVerification.v1",tenant,conversation.ToString("N"),grant.ToString("N"));
@@ -39,18 +44,21 @@ public sealed class BusinessVerificationController(PlatformDbContext db,Business
             return BadRequest(new{error="independent_verification_required"});
         var tenant=User.TenantId();
         var actor=User.Identity!.Name!;
+        var session=SessionHash();if(session==null)return Forbid();
         var now=DateTime.UtcNow;
         await using var tx=await db.Database.BeginTransactionAsync(ct);
         var pending=await Pending(tenant,conversationId).AsNoTracking().SingleOrDefaultAsync(ct);
         if(pending==null || !registry.Allows(tenant,pending.BusinessSource!,pending.BusinessOperation!))
             return NotFound(new{error="request_unavailable"});
+        if(request.Source!=pending.BusinessSource || request.Operation!=pending.BusinessOperation || request.RequestUpdatedAtUtc?.ToUniversalTime().Ticks!=pending.UpdatedAtUtc.Ticks)
+            return Conflict(new{error="request_changed"});
         // Never store the plaintext account/invoice/payment reference. Replace the previous grant.
         var grantId=Guid.NewGuid();
         var ciphertext=Protector(tenant,conversationId,grantId).Protect(request.Reference!);
         var expiry=now.AddMinutes(5);
         await db.BusinessVerificationGrants.Where(x=>x.TenantId==tenant && x.ConversationId==conversationId).ExecuteDeleteAsync(ct);
         db.BusinessVerificationGrants.Add(new(){TenantId=tenant,ConversationId=conversationId,GrantId=grantId,
-            AdminUsername=actor,Source=pending.BusinessSource!,Operation=pending.BusinessOperation!,
+            AdminUsername=actor,SessionHash=session,Source=pending.BusinessSource!,Operation=pending.BusinessOperation!,
             ProtectedReference=ciphertext,RequestUpdatedAtUtc=pending.UpdatedAtUtc,ExpiresAtUtc=expiry});
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
@@ -65,9 +73,10 @@ public sealed class BusinessVerificationController(PlatformDbContext db,Business
         Response.Headers["Cache-Control"]="no-store";
         var tenant=User.TenantId();
         var actor=User.Identity!.Name!;
+        var session=SessionHash();if(session==null)return Forbid();
         var now=DateTime.UtcNow;
         var grants=db.BusinessVerificationGrants.Where(x=>x.TenantId==tenant && x.ConversationId==conversationId &&
-            x.GrantId==request.GrantId && x.AdminUsername==actor && x.ExpiresAtUtc>now);
+            x.GrantId==request.GrantId && x.AdminUsername==actor && x.SessionHash==session && x.ExpiresAtUtc>now);
         var grant=await grants.AsNoTracking().SingleOrDefaultAsync(ct);
         if(grant==null)return NotFound(new{error="verification_unavailable"});
         var pending=Pending(tenant,conversationId).Where(s=>s.UpdatedAtUtc==grant.RequestUpdatedAtUtc &&
