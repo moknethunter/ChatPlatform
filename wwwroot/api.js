@@ -384,6 +384,7 @@
                 return request("/api/contacts?" + q, { signal: opts.signal });
             },
             getContact(phone) { return request("/api/contacts/" + encodeURIComponent(phone)); },
+            getContactActivity(phone, opts = {}) { return request("/api/contacts/" + encodeURIComponent(phone) + "/activity", { signal: opts.signal }); },
             createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
             updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
             updateConversation(id, action, body = {}) {
