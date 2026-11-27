@@ -8,6 +8,7 @@ public sealed class BusinessVerificationGrantEntity
     public Guid ConversationId { get; set; }
     public Guid GrantId { get; set; }
     public string AdminUsername { get; set; } = "";
+    public string SessionHash { get; set; } = "";
     public string Source { get; set; } = "";
     public string Operation { get; set; } = "";
     public string ProtectedReference { get; set; } = "";
