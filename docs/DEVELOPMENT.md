@@ -93,3 +93,6 @@ Reference CI 46058912602 ran the actual million-record synthetic directory bench
 
 ## 10. Code comments and contribution standard / توثيق الكود
 Comment each meaningful declaration, statement or logical step where it clarifies purpose, inputs, invariants, failures, tenant/security scope, transactions, timing and external side effects. Do not insert comments inside SQL/JSON strings, expressions, generated files or HTML/JS templates where they change behavior. Document syntax-only braces/continuations as part of their parent statement. Use XML summaries on public contracts, explain why not merely restate syntax, and add tests for every behavior change. Bilingual help must be maintained together. See SOURCE-COMMENT-COVERAGE.md for the current inline-comment scope; do not treat the whole repository as fully annotated.
+
+## Business integration adapter extension
+See [BUSINESS-INTEGRATIONS.md](BUSINESS-INTEGRATIONS.md) for IBusinessReadAdapter, the typed money/status contract, operator provisioning, the external SQL adapter and HTTPS gateway. Keep calls outside core write transactions; no arbitrary SQL, endpoints, financial writes, or bot disclosure without explicit identity/permission design. Test real vendor semantics in sandbox before launch.
