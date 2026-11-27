@@ -1,0 +1,25 @@
+# ChatPlatform — scalable modular monolith
+
+## Decision
+Retain ASP.NET Core, the current tenant model, API contracts, adapters, bot engine, durable inbox/outbox and existing UI. Do not rewrite or split into independently deployed microservices by default. Evolve module boundaries in place, and separate API and worker processes from the same release image only when shared storage and concurrency tests permit it.
+
+## Current baseline and limitations
+The Fly configuration uses a local SQLite file and a mounted volume with one shared CPU and 512 MB memory. This is a development/small-installation baseline, not proof of capacity for thousands of tenants. Never run several independent SQLite volumes behind a load balancer as though they were one database. The local event bus and process-local rate limits are not distributed guarantees. Inbox revision streaming queries the database regularly. The bot and campaign limits are intentionally bounded. Meta has independent account, permission, throughput, consent and billing constraints.
+
+## Proposed acceptance workload (not measured capacity)
+- 5,000 provisioned institutions; 1,000 active in a representative day; 500 simultaneous authenticated sessions; 2 WhatsApp accounts per active tenant.
+- Initial synthetic test: 50 inbound events/s and 50 outbound jobs/s aggregate for one hour, then a five-minute 3x burst; use mocked Graph, no real recipients. Also test a sustained 24-hour mixed workload, highly skewed tenant traffic, revoked credentials, and account throttling.
+- Candidate SLOs under that workload: p95 ordinary API latency < 500 ms, p95 durable webhook acknowledgment < 1 s, p95 ready inbox processing < 5 s (excluding upstream delay), no lost accepted events, no cross-tenant data, no automatic duplicate dispatch on ambiguous upstream results. Record CPU, memory, DB locks, queue lag, error rates, and measured limits. Adjust sizing to evidence, not institution count alone.
+- Restore a verified backup to staging, compare record counts/checksums and encrypted-token readability, and exercise migration rollback/recovery and rolling version compatibility. Set agreed recovery objectives before commercial launch.
+
+## Incremental stages
+1. Shared state: durable single-use signup correlation through a storage interface (implemented candidate in PR #18). Store only hashes, tenant, app/config and expiry. Keep existing SQLite default. Current SQLite CI uses independent contexts; cross-host operation is NOT yet qualified.
+2. Database boundary: add PostgreSQL provider and explicit provider configuration, provider-specific migrations (including SQLite triggers/SQL equivalence), tenant composite indexes and constraints, pagination, migration rehearsal and restore. Retain SQLite for local testing. Do not switch production database until approved.
+3. Workload separation: same modular application and image, independent API and messaging worker roles; database leases/fencing, per-account ordering, fair scheduling, ambiguous-send policy, backpressure and distributed rate limits. Verify simultaneous workers, termination/restart, replay, and noisy-neighbor isolation. Use a durable shared event mechanism instead of relying on process-local event notifications.
+4. Live updates: bounded connections, shared tenant revision notifications with recovery after reconnect, eliminate per-connection polling amplification, protect session revocation and cross-origin access.
+5. Bot and channel extensions: explicit typed node handler and connector contracts, versioned immutable definitions, validated input/output, per-tenant configuration, scoped secrets and bounded execution. Own-model adapter stays optional; no required paid AI provider. External actions are deny-by-default, audited and idempotent.
+6. Operations: health/readiness by role, queue depth/age, sanitized structured logs, tracing, per-tenant quotas and capacity dashboards, retention cleanup, encrypted sensitive state and tested backup/restore.
+7. Capacity gate: run the synthetic workload and recovery/security scenarios on isolated staging; publish exact image revision, machine sizing and measured results. Increase replicas and resources only with shared storage and validated behavior.
+
+## Non-negotiable
+Tenant scope comes from authenticated identity or verified channel ownership. No user-supplied tenant override. Maintain existing Meta sandbox configuration and manual linking; no automatic commercial activation. No production deployment, live DB migration, or merge without operator authorization. Passing smoke tests is not a load-test result.
