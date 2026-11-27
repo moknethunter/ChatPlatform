@@ -438,6 +438,10 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
 print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
 # Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/database-connections",expected=401)
+call("/api/database-connections",cookie=agent,expected=403)
+assert call("/api/database-connections",cookie=a)[0]==[]
+call("/api/database-connections/unknown/probe","POST",{},cookie=a,expected=404)
 call("/api/marketing/lists",expected=401)
 call("/api/marketing/lists",cookie=agent,expected=403)
 consent={"phoneNumberId":"999999999999","phone":"15550000001","granted":True,"evidence":"CI-only synthetic consent receipt"}
