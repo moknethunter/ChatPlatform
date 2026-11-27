@@ -80,6 +80,8 @@ try
     // Both business adapters share the exact same tenant-scoped typed read contract.
     externalConfig["ExternalDatabases:Tenants:smoke-tenant:one:Reads:balance"] =
         "SELECT json_object('reference',Id,'amountMinor',12345,'currency','YER','status','available') FROM Items WHERE Id=@input";
+    externalConfig["ExternalDatabases:Tenants:smoke-tenant:one:Reads:invoice"] =
+        "SELECT json_object('reference',Id,'amountMinor',100,'currency','YER','status','open') FROM Items WHERE Id=@input";
     var businessDb = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig,
         new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new TestDatabaseAdapter() });
     var businessConfig = new Microsoft.Extensions.Configuration.ConfigurationManager();
@@ -88,6 +90,7 @@ try
     businessConfig[accountPrefix+"Provider"]="database";
     businessConfig[accountPrefix+"DatabaseAlias"]="one";
     businessConfig[accountPrefix+"Operations:customer-balance"]="balance";
+    businessConfig[accountPrefix+"Operations:invoice"]="invoice";
     businessConfig[paymentPrefix+"Provider"]="https-gateway";
     businessConfig[paymentPrefix+"Endpoint"]="https://payments.example.invalid/read";
     businessConfig[paymentPrefix+"Token"]="ci-business-token";
@@ -122,6 +125,31 @@ try
         throw new Exception("Unsafe gateway address accepted.");
     Console.WriteLine("PASS: business database and mocked payment lookup, tenant isolation, operation scope, response bounds and reference verification.");
 
+    // A trusted invoice link and exact money are mandatory even for manual review.
+    var inv=new BusinessReadResult("inv-1",100,"YER","open");
+    var pay=new BusinessReadResult("pay-1",100,"YER","succeeded","inv-1");
+    Func<BusinessReadResult?,BusinessReadResult?,ChatPlatform.Infrastructure.Adapters.Business.ReconciliationResult> compare=ChatPlatform.Infrastructure.Adapters.Business.PaymentReconciliation.Compare;
+    if(compare(inv,pay).Outcome!="matched_for_review" ||
+       compare(inv,pay with {InvoiceReference=null}).Outcome!="invoice_link_unverified" ||
+       compare(inv,pay with {InvoiceReference="inv-2"}).Outcome!="invoice_link_unverified" ||
+       compare(inv,pay with {Currency="USD"}).Outcome!="currency_mismatch" ||
+       compare(inv,pay with {Status="refunded"}).Outcome!="payment_not_succeeded" ||
+       compare(inv with {Status="void"},pay).Outcome!="invoice_requires_review" ||
+       compare(inv,pay with {AmountMinor=99}).Outcome!="amount_mismatch" ||
+       compare(null,pay).Outcome!="record_unavailable")
+        throw new Exception("Payment reconciliation safety regression.");
+    businessConfig["PaymentReconciliation:Tenants:smoke-tenant:pair:InvoiceSource"]="accounting";
+    businessConfig["PaymentReconciliation:Tenants:smoke-tenant:pair:PaymentSource"]="payments";
+    var reconciler=new ChatPlatform.Infrastructure.Adapters.Business.PaymentReconciliation(businessConfig,business);
+    fakeBusiness.Body="""{"reference":"pay-123","amountMinor":100,"currency":"YER","status":"succeeded","invoiceReference":"test"}""";
+    var matched=await reconciler.CompareAsync(tenant,"pair","test","pay-123",ct);
+    if(matched.Outcome!="matched_for_review"||reconciler.List(tenant).Count!=1||reconciler.List("foreign").Count!=0)
+        throw new Exception("Configured reconciliation failed.");
+    var callsBefore=fakeBusiness.Calls;
+    try{await reconciler.CompareAsync("foreign","pair","test","pay-123",ct);throw new Exception("Foreign reconciliation accepted.");}
+    catch(KeyNotFoundException){}
+    if(fakeBusiness.Calls!=callsBefore)throw new Exception("Foreign comparison contacted gateway.");
+    Console.WriteLine("PASS: payment comparison requires exact invoice linkage, status, currency and amount; no writes.");
     var attempts = new EmbeddedSignupAttemptStore();
     var instant = DateTimeOffset.UtcNow;
     var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;

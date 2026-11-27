@@ -460,6 +460,11 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
 print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
 # Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/payment-reconciliation",expected=401)
+call("/api/payment-reconciliation",cookie=agent,expected=403)
+assert call("/api/payment-reconciliation",cookie=a)[0]==[]
+call("/api/payment-reconciliation/unknown/compare","POST",{"invoiceReference":"inv-1","paymentReference":"pay-1"},cookie=a,expected=404)
+call("/api/payment-reconciliation/unknown/compare","POST",{"invoiceReference":"bad ref","paymentReference":"pay-1"},cookie=a,expected=400)
 call("/api/business-integrations/requests",expected=401)
 call("/api/business-integrations/requests",cookie=agent,expected=403)
 assert call("/api/business-integrations/requests",cookie=a)[0]==[]
