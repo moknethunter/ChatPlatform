@@ -522,6 +522,17 @@ public static class DbInitializer
                 );
                 CREATE INDEX IF NOT EXISTS IX_PlatformAdminAudit_CreatedAtUtc ON PlatformAdminAudit(CreatedAtUtc);
                 CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Tenant_Quota ON WhatsAppOutbox(TenantId, CreatedAtUtc, ScheduledForUtc);
+                CREATE TABLE IF NOT EXISTS EmbeddedSignupAttempts (
+                    TenantId TEXT NOT NULL,
+                    SessionHash TEXT NOT NULL,
+                    StateHash TEXT NOT NULL,
+                    AppId TEXT NOT NULL,
+                    ConfigId TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, SessionHash)
+                );
+                CREATE INDEX IF NOT EXISTS IX_EmbeddedSignupAttempts_ExpiresAtUtc ON EmbeddedSignupAttempts(ExpiresAtUtc);
+
                 CREATE TABLE IF NOT EXISTS PlatformSessions (
                     Id TEXT NOT NULL PRIMARY KEY,
                     Username TEXT NOT NULL,
