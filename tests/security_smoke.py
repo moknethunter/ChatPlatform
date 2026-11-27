@@ -164,6 +164,14 @@ assert call("/api/bots/simulate","POST",{"flow":memory_flow,"inputs":["hi","Bob"
 bad_memory=json.loads(json.dumps(memory_flow));bad_memory["nodes"][2]["variable"]="bad name"
 call("/api/bots/simulate","POST",{"flow":bad_memory,"input":"hi"},cookie=a,expected=400)
 call("/api/bots/simulate","POST",{"flow":flow,"input":"hello"},cookie=agent,expected=403)
+business_flow={"start":"s","nodes":[{"id":"s","type":"start","next":"b","x":0,"y":0},{"id":"b","type":"business","businessSource":"not-configured","businessOperation":"invoice","x":180,"y":0}]}
+business_sim=call("/api/bots/simulate","POST",{"flow":business_flow,"input":"customer-reference"},cookie=a)[0]
+assert business_sim["handoff"] and business_sim["businessSource"]=="not-configured" and business_sim["businessOperation"]=="invoice" and business_sim["replies"]==[]
+assert "customer-reference" not in json.dumps(business_sim)
+bad_business=json.loads(json.dumps(business_flow));bad_business["nodes"][1]["businessOperation"]="charge"
+call("/api/bots/simulate","POST",{"flow":bad_business,"input":"hi"},cookie=a,expected=400)
+business_draft=call("/api/bots","POST",{"name":"CI business","flow":business_flow,"version":0},cookie=a,expected=201)[0]
+call("/api/bots/"+business_draft["id"]+"/publish","POST",{"version":1},cookie=a,expected=400)
 draft,_=call("/api/bots","POST",{"name":"CI draft","flow":flow,"version":0,"tenantId":"ci-tenant-b"},cookie=a,expected=201)
 botpath="/api/bots/"+draft["id"]
 assert not call("/api/bots",cookie=b)[0]
@@ -452,6 +460,10 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
 print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
 # Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/business-integrations/requests",expected=401)
+call("/api/business-integrations/requests",cookie=agent,expected=403)
+assert call("/api/business-integrations/requests",cookie=a)[0]==[]
+assert call("/api/business-integrations/requests",cookie=b)[0]==[]
 call("/api/business-integrations",expected=401)
 call("/api/business-integrations",cookie=agent,expected=403)
 call("/api/business-integrations",cookie=owner,expected=403)
