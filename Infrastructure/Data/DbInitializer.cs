@@ -346,6 +346,19 @@ public static class DbInitializer
                     UpdatedAtUtc TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS IX_KnowledgeArticles_TenantId ON KnowledgeArticles(TenantId);
+                CREATE TABLE IF NOT EXISTS BusinessVerificationGrants (
+                    TenantId TEXT NOT NULL,
+                    ConversationId TEXT NOT NULL,
+                    GrantId TEXT NOT NULL,
+                    AdminUsername TEXT NOT NULL,
+                    Source TEXT NOT NULL,
+                    Operation TEXT NOT NULL,
+                    ProtectedReference TEXT NOT NULL,
+                    RequestUpdatedAtUtc TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, ConversationId)
+                );
+                CREATE INDEX IF NOT EXISTS IX_BusinessVerificationGrants_ExpiresAtUtc ON BusinessVerificationGrants(ExpiresAtUtc);
                 CREATE TABLE IF NOT EXISTS ConversationAutomation (
                     ConversationId TEXT NOT NULL,
                     TenantId TEXT NOT NULL,
