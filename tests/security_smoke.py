@@ -80,6 +80,20 @@ new_tenant,_=call("/api/platform-admin/tenants","POST",{"name":"CI new","usernam
 assert "passwordHash" not in new_tenant and "password" not in new_tenant
 call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=a,expected=403)
 assert any(t["id"]==new_tenant["id"] for t in call("/api/platform-admin/tenants",cookie=owner)[0])
+browse="/api/platform-admin/tenants/browse"
+call(browse,expected=401)
+call(browse,cookie=a,expected=403)
+call(browse+"?limit=101",cookie=owner,expected=400)
+call(browse+"?by=invalid",cookie=owner,expected=400)
+first_page=call(browse+"?limit=1",cookie=owner)[0]
+assert len(first_page["items"])==1 and first_page["nextCursor"]==first_page["items"][0]["id"]
+second_page=call(browse+"?limit=1&after="+first_page["nextCursor"],cookie=owner)[0]
+assert len(second_page["items"])==1 and second_page["items"][0]["id"]>first_page["items"][0]["id"]
+for query in ["by=id&search="+new_tenant["id"],"by=username&search=ci-new-admin","by=name&search=CI%20new"]:
+    found=call(browse+"?"+query,cookie=owner)[0]
+    assert [t["id"] for t in found["items"]]==[new_tenant["id"]] and found["nextCursor"] is None
+    assert "passwordHash" not in json.dumps(found)
+assert call(browse+"?by=id&search=missing",cookie=owner)[0]["items"]==[]
 assert any(x["action"]=="tenant_created" for x in call("/api/platform-admin/audit",cookie=owner)[0])
 print("PASS: isolated platform owner, immutable plan and tenant provisioning")
 call("/api/dashboard",expected=401)
