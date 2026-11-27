@@ -127,6 +127,10 @@ public static class PlatformSecurity
             options.AddPolicy("media", context => RateLimitPartition.GetFixedWindowLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new FixedWindowRateLimiterOptions {
                     PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            // Bound external financial lookups per tenant, without queueing.
+            options.AddPolicy("business-read", context => RateLimitPartition.GetFixedWindowLimiter(
+                context.User.TenantId(), _ => new FixedWindowRateLimiterOptions {
+                    PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             options.AddPolicy("own-model", context => RateLimitPartition.GetConcurrencyLimiter(
                 context.User.Identity?.Name ?? "anonymous", _ => new ConcurrencyLimiterOptions { PermitLimit = 1, QueueLimit = 0 }));
             options.AddPolicy("inbox-live", context => RateLimitPartition.GetConcurrencyLimiter(
