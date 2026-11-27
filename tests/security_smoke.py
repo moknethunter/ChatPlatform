@@ -486,6 +486,29 @@ assert automate("wamid.ci.business.1","private-reference")==("business_requested
 requests=call("/api/business-integrations/requests",cookie=a)[0]
 assert len(requests)==1 and requests[0]["businessSource"]=="accounting" and requests[0]["businessOperation"]=="invoice"
 assert "private-reference" not in json.dumps(requests)
+verification="/api/business-verification/"+requests[0]["conversationId"]
+grant_body={"reference":"ci-invoice","independentlyVerified":True}
+call(verification+"/grant","POST",grant_body,expected=401)
+call(verification+"/grant","POST",grant_body,cookie=agent,expected=403)
+call(verification+"/grant","POST",grant_body,cookie=b,expected=404)
+call(verification+"/grant","POST",dict(grant_body,independentlyVerified=False),cookie=a,expected=400)
+call(verification+"/grant","POST",grant_body,cookie=a,expected=403,csrf=False)
+grant=call(verification+"/grant","POST",grant_body,cookie=a)[0]
+with sqlite3.connect(DB) as db:
+    stored=db.execute("SELECT ProtectedReference FROM BusinessVerificationGrants WHERE TenantId='ci-tenant-a'").fetchone()
+    assert stored and "ci-invoice" not in stored[0]
+consume={"grantId":grant["grantId"]}
+call(verification+"/read","POST",consume,cookie=b,expected=404)
+assert call(verification+"/read","POST",consume,cookie=a)[0]=={"reference":"ci-invoice","amountMinor":12500,"currency":"YER","status":"open"}
+call(verification+"/read","POST",consume,cookie=a,expected=404)
+expired=call(verification+"/grant","POST",grant_body,cookie=a)[0]
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE BusinessVerificationGrants SET ExpiresAtUtc='2000-01-01' WHERE TenantId='ci-tenant-a'")
+call(verification+"/read","POST",{"grantId":expired["grantId"]},cookie=a,expected=404)
+revoked=call(verification+"/grant","POST",grant_body,cookie=a)[0]
+call(verification+"/grant","DELETE",cookie=a,expected=204)
+call(verification+"/read","POST",{"grantId":revoked["grantId"]},cookie=a,expected=404)
+closing_grant=call(verification+"/grant","POST",grant_body,cookie=a)[0]
 assert call("/api/business-integrations/requests",cookie=b)[0]==[]
 assert call("/api/business-integrations/accounting/read","POST",{"operation":"invoice","reference":"ci-invoice"},cookie=a)[0]=={"reference":"ci-invoice","amountMinor":12500,"currency":"YER","status":"open"}
 call("/api/business-integrations/accounting/read","POST",{"operation":"payment-status","reference":"ci-invoice"},cookie=a,expected=404)
@@ -493,6 +516,8 @@ call("/api/business-integrations/accounting/read","POST",{"operation":"invoice",
 call(bp+"/publish/"+business_pub["activationId"],"DELETE",cookie=a,expected=204)
 call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert call("/api/business-integrations/requests",cookie=a)[0]==[]
+call(verification+"/read","POST",{"grantId":closing_grant["grantId"]},cookie=a,expected=404)
+print("PASS: staff-attested one-time read, encryption, expiry, revoke, tenant isolation and closure")
 print("PASS: signed business bot request, no financial auto-send, tenant-only admin invoice read and explicit close")
 call("/api/business-integrations/unknown/read","POST",{"operation":"payment-status","reference":"pay-123"},cookie=a,expected=404)
 call("/api/business-integrations/unknown/read","POST",{"operation":"charge","reference":"pay-123"},cookie=a,expected=400)
