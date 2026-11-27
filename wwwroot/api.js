@@ -496,6 +496,10 @@
             createAgent(data) { return request("/api/team", { method: "POST", body: data }); },
             setAgentActive(username, isActive) { return request("/api/team/" + encodeURIComponent(username) + "/active", { method: "PUT", body: { isActive } }); },
             resetAgentPassword(username, password) { return request("/api/team/" + encodeURIComponent(username) + "/password", { method: "PUT", body: { password } }); },
+            businessIntegrations() { return request("/api/business-integrations"); },
+            businessRead(id,data) { return request("/api/business-integrations/"+encodeURIComponent(id)+"/read",{method:"POST",body:data,retries:0}); },
+            databaseConnections() { return request("/api/database-connections"); },
+            probeDatabase(id) { return request("/api/database-connections/"+encodeURIComponent(id)+"/probe",{method:"POST",retries:0}); },
             getIdentity(opts = {}) { return request("/api/auth/me", { signal: opts.signal }); },
             logout() { return request("/api/auth/logout", { method: "POST" }); },
             async getTenants(opts = {}) {
@@ -656,7 +660,7 @@
                 identityText.title=identity.tenantId;
                 const links=document.createElement("nav");links.className="cp-nav";links.setAttribute("aria-label","القائمة الرئيسية");
                 const menu=identity.role==="SuperAdmin"?[["/platform-admin.html","إدارة المنصة"]]:[["/index.html","نظرة عامة"],["/inbox.html","المحادثات"],["/contacts.html","العملاء"]];
-                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/subscription.html","الباقة والحصص"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
+                if(identity.role==="Admin") menu.push(["/bots.html","البوتات"],["/knowledge.html","قاعدة المعرفة"],["/marketing.html","الحملات"],["/reports.html","التقارير"],["/subscription.html","الباقة والحصص"],["/team.html","الفريق"],["/whatsapp.html","واتساب"],["/integrations.html","التكاملات"],["/templates.html","القوالب"],["/autoteplay.html","الرد الآلي"],["/settings.html","الإعدادات"],["/test-whatsapp.html","اختبار واتساب"]);
                 for(const [href,text] of menu){const link=document.createElement("a");link.href=href;link.textContent=text;
                     if(location.pathname===href||(location.pathname==="/"&&href==="/index.html"))link.setAttribute("aria-current","page");
                     links.append(link);}
