@@ -380,12 +380,12 @@ multi={"start":"s","nodes":[{"id":"s","type":"start","next":"w","x":0,"y":0},
  {"id":"w","type":"wait","text":"Choose support or price","next":"capture","x":180,"y":0},
  {"id":"capture","type":"capture","variable":"choice","next":"c","x":270,"y":0},
  {"id":"c","type":"contains","text":"support","variable":"choice","next":"h","otherwise":"r","x":360,"y":0},
- {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"reply","text":"Price is 10","next":"e","x":540,"y":180},
+ {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"wait","text":"Confirm price?","next":"final","x":540,"y":180},{"id":"final","type":"reply","text":"Price is 10 · {{choice}}","next":"e","x":720,"y":180},
  {"id":"e","type":"end","x":720,"y":180}]}
 multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","support"]},cookie=a)
-assert multi_sim["turns"][0]["nextNode"]=="c" and multi_sim["turns"][1]["handoff"]
-multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price"]},cookie=a)
-assert multi_sim["turns"][1]["replies"]==["Price is 10"]
+assert multi_sim["turns"][0]["nextNode"]=="capture" and multi_sim["turns"][1]["handoff"]
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price","yes"]},cookie=a)
+assert multi_sim["turns"][1]["replies"]==["Confirm price?"] and multi_sim["turns"][2]["replies"]==["Price is 10 · price"]
 created_multi,_=call("/api/bots","POST",{"name":"Multi","flow":multi,"version":0},cookie=a,expected=201)
 mp="/api/bots/"+created_multi["id"]
 published,_=call(mp+"/publish","POST",{"version":1},cookie=a)
@@ -402,7 +402,11 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=managed_cookie,expected=204)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
 assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
-assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
+assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Confirm price?")
+with sqlite3.connect(DB) as db:
+    saved=db.execute("SELECT VariablesJson FROM ConversationAutomation WHERE TenantId=? AND lower(ConversationId)=?",("ci-tenant-a",cid.lower())).fetchone()
+    assert json.loads(saved[0])=={"choice":"price"}
+assert automate("wamid.ci.multi.confirm","yes")==("queued",1,None,"Price is 10 · price")
 assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
 with sqlite3.connect(DB) as db:
     assert all(x[0]=="{}" for x in db.execute("SELECT VariablesJson FROM ConversationAutomation WHERE TenantId='ci-tenant-a'"))
