@@ -225,7 +225,7 @@ public sealed class WhatsAppController : ControllerBase
     [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("oauth-policy")]
     [HttpPost("embedded-signup/start")]
     public async Task<IActionResult> StartEmbeddedSignup([FromServices] IConfiguration cfg,
-        [FromServices] EmbeddedSignupAttemptStore attempts, CancellationToken ct)
+        [FromServices] IEmbeddedSignupAttemptStore attempts, CancellationToken ct)
     {
         if (!SignupConfigured(cfg)) return Conflict(new { error = "embedded_signup_not_enabled" });
         var tenant = User.TenantId();
@@ -235,7 +235,7 @@ public sealed class WhatsAppController : ControllerBase
             return Conflict(new { error = denied });
         var appId = (cfg["Meta:AppId"] ?? cfg["META_APP_ID"])!;
         var configId = cfg["Meta:EmbeddedSignupConfigId"]!;
-        var state = attempts.Start(tenant, session, appId, configId, DateTimeOffset.UtcNow);
+        var state = await attempts.StartAsync(tenant, session, appId, configId, DateTimeOffset.UtcNow, ct);
         if (state == null) return StatusCode(503, new { error = "signup_busy" });
         Response.Headers["Cache-Control"] = "no-store";
         return Ok(new { appId, configId, state, graphApiVersion = cfg["WhatsApp:GraphApiVersion"] ?? new WhatsAppOptions().GraphApiVersion, expiresInSeconds = 300 });
@@ -247,7 +247,7 @@ public sealed class WhatsAppController : ControllerBase
     [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("oauth-policy")]
     [HttpPost("embedded-signup/complete")]
     public async Task<IActionResult> CompleteEmbeddedSignup([FromBody] EmbeddedSignupRequest req,
-        [FromServices] IConfiguration cfg, [FromServices] EmbeddedSignupAttemptStore attempts, CancellationToken ct)
+        [FromServices] IConfiguration cfg, [FromServices] IEmbeddedSignupAttemptStore attempts, CancellationToken ct)
     {
         if (!SignupConfigured(cfg)) return Conflict(new { error = "embedded_signup_not_enabled" });
         var tenant = User.TenantId();
@@ -257,7 +257,7 @@ public sealed class WhatsAppController : ControllerBase
             return BadRequest(new { error = "invalid_signup_data" });
         var appId = (cfg["Meta:AppId"] ?? cfg["META_APP_ID"])!;
         var configId = cfg["Meta:EmbeddedSignupConfigId"]!;
-        if (!attempts.Consume(req.State, tenant, session, appId, configId, DateTimeOffset.UtcNow))
+        if (!await attempts.ConsumeAsync(req.State, tenant, session, appId, configId, DateTimeOffset.UtcNow, ct))
             return BadRequest(new { error = "signup_attempt_invalid" });
         Response.Headers["Cache-Control"] = "no-store";
         if (await _db.WhatsAppTenants.AnyAsync(x => x.PhoneNumberId == req.PhoneNumberId, ct))

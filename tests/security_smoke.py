@@ -80,6 +80,20 @@ new_tenant,_=call("/api/platform-admin/tenants","POST",{"name":"CI new","usernam
 assert "passwordHash" not in new_tenant and "password" not in new_tenant
 call("/api/platform-admin/tenants/"+new_tenant["id"]+"/active","PUT",{"isActive":False},cookie=a,expected=403)
 assert any(t["id"]==new_tenant["id"] for t in call("/api/platform-admin/tenants",cookie=owner)[0])
+browse="/api/platform-admin/tenants/browse"
+call(browse,expected=401)
+call(browse,cookie=a,expected=403)
+call(browse+"?limit=101",cookie=owner,expected=400)
+call(browse+"?by=invalid",cookie=owner,expected=400)
+first_page=call(browse+"?limit=1",cookie=owner)[0]
+assert len(first_page["items"])==1 and first_page["nextCursor"]==first_page["items"][0]["id"]
+second_page=call(browse+"?limit=1&after="+first_page["nextCursor"],cookie=owner)[0]
+assert len(second_page["items"])==1 and second_page["items"][0]["id"]>first_page["items"][0]["id"]
+for query in ["by=id&search="+new_tenant["id"],"by=username&search=ci-new-admin","by=name&search=CI%20new"]:
+    found=call(browse+"?"+query,cookie=owner)[0]
+    assert [t["id"] for t in found["items"]]==[new_tenant["id"]] and found["nextCursor"] is None
+    assert "passwordHash" not in json.dumps(found)
+assert call(browse+"?by=id&search=missing",cookie=owner)[0]["items"]==[]
 assert any(x["action"]=="tenant_created" for x in call("/api/platform-admin/audit",cookie=owner)[0])
 print("PASS: isolated platform owner, immutable plan and tenant provisioning")
 call("/api/dashboard",expected=401)
@@ -127,12 +141,28 @@ call("/api/bots",cookie=agent,expected=403)
 flow={"start":"s","nodes":[{"id":"s","type":"start","next":"c","x":0,"y":0},{"id":"c","type":"contains","text":"hello","next":"r","otherwise":"e","x":180,"y":0},{"id":"r","type":"reply","text":"CI reply","next":"e","x":360,"y":0},{"id":"e","type":"end","x":540,"y":0}]}
 assert call("/api/bots/simulate","POST",{"flow":flow,"input":"HELLO"},cookie=a)[0]["replies"]==["CI reply"]
 assert call("/api/bots/simulate","POST",{"flow":flow,"input":"no match"},cookie=a)[0]["replies"]==[]
+exact=json.loads(json.dumps(flow));exact["nodes"][1]["matchMode"]="equals"
+assert call("/api/bots/simulate","POST",{"flow":exact,"input":" HELLO "},cookie=a)[0]["path"]==["s","c","r","e"]
+assert call("/api/bots/simulate","POST",{"flow":exact,"input":"hello there"},cookie=a)[0]["path"]==["s","c","e"]
+prefix=json.loads(json.dumps(flow));prefix["nodes"][1]["matchMode"]="starts_with"
+assert call("/api/bots/simulate","POST",{"flow":prefix,"input":" HELLO there"},cookie=a)[0]["replies"]==["CI reply"]
+assert call("/api/bots/simulate","POST",{"flow":prefix,"input":"say hello"},cookie=a)[0]["replies"]==[]
+badmode=json.loads(json.dumps(flow));badmode["nodes"][1]["matchMode"]="regex"
+call("/api/bots/simulate","POST",{"flow":badmode,"input":"hello"},cookie=a,expected=400)
+badmode=json.loads(json.dumps(flow));badmode["nodes"][2]["matchMode"]="equals"
+call("/api/bots/simulate","POST",{"flow":badmode,"input":"hello"},cookie=a,expected=400)
 cyclic=json.loads(json.dumps(flow));cyclic["nodes"][2]["next"]="c"
 call("/api/bots/simulate","POST",{"flow":cyclic,"input":"hello"},cookie=a,expected=400)
 unreachable=json.loads(json.dumps(flow));unreachable["nodes"].append({"id":"unused","type":"end","x":0,"y":0})
 call("/api/bots/simulate","POST",{"flow":unreachable,"input":"hello"},cookie=a,expected=400)
 invalid=json.loads(json.dumps(flow));invalid["nodes"][1]["otherwise"]="missing"
 call("/api/bots/simulate","POST",{"flow":invalid,"input":"hello"},cookie=a,expected=400)
+memory_flow={"start":"s","nodes":[{"id":"s","type":"start","next":"w1","x":0,"y":0},{"id":"w1","type":"wait","text":"Name?","next":"capture","x":0,"y":0},{"id":"capture","type":"capture","variable":"name","next":"w2","x":0,"y":0},{"id":"w2","type":"wait","text":"Next?","next":"r","x":0,"y":0},{"id":"r","type":"reply","text":"Hello {{name}}","next":"e","x":0,"y":0},{"id":"e","type":"end","x":0,"y":0}]}
+memory_result=call("/api/bots/simulate","POST",{"flow":memory_flow,"inputs":["hi","Alice","yes"]},cookie=a)[0]
+assert memory_result["turns"][2]["replies"]==["Hello Alice"]
+assert call("/api/bots/simulate","POST",{"flow":memory_flow,"inputs":["hi","Bob","yes"]},cookie=b)[0]["turns"][2]["replies"]==["Hello Bob"]
+bad_memory=json.loads(json.dumps(memory_flow));bad_memory["nodes"][2]["variable"]="bad name"
+call("/api/bots/simulate","POST",{"flow":bad_memory,"input":"hi"},cookie=a,expected=400)
 call("/api/bots/simulate","POST",{"flow":flow,"input":"hello"},cookie=agent,expected=403)
 draft,_=call("/api/bots","POST",{"name":"CI draft","flow":flow,"version":0,"tenantId":"ci-tenant-b"},cookie=a,expected=201)
 botpath="/api/bots/"+draft["id"]
@@ -280,6 +310,20 @@ call("/api/contacts","POST",contact,cookie=a,expected=409)
 other,_=call("/api/contacts","POST",dict(contact,displayName="Other tenant"),cookie=b,expected=201)
 assert other["tenantId"]=="ci-tenant-b"
 assert call("/api/contacts/15550000001",cookie=a)[0]["displayName"]=="CI Lead"
+assert call("/api/contacts?search=ci@example.invalid",cookie=a)[0]["total"]==1
+activity_path="/api/contacts/15550000001/activity"
+call(activity_path,expected=401)
+call("/api/contacts/15550000002/activity",cookie=a,expected=404)
+activity,_=call(activity_path,cookie=a)
+assert activity["conversationCount"]==1 and activity["openConversationCount"]==1
+assert activity["conversations"][0]["id"]==match["id"]
+assert any(m["textPreview"]=="CI inbound message" for m in activity["recentMessages"])
+assert all("contentJson" not in m and "tenantId" not in m for m in activity["recentMessages"])
+assert any(x["phoneNumberId"]=="999999999999" and x["granted"] is None for x in activity["consent"])
+assert call(activity_path,cookie=managed_cookie)[0]["consent"] is None
+other_activity,_=call(activity_path,cookie=b)
+assert other_activity["conversationCount"]==0 and not other_activity["recentMessages"] and not other_activity["conversations"]
+assert not any(x["phoneNumberId"]=="999999999999" for x in other_activity["consent"])
 cid=match["id"]
 root="/api/conversations/"+cid
 call(root+"/assign","PUT",{"username":"ci-managed"},cookie=managed_cookie,expected=403)
@@ -347,14 +391,15 @@ runs,_=call("/api/bots/runs",cookie=a)
 assert any(r["botVersion"]==2 and r["outcome"]=="queued" for r in runs)
 # Multi-turn state survives separate signed webhook deliveries and takes priority over legacy rules.
 multi={"start":"s","nodes":[{"id":"s","type":"start","next":"w","x":0,"y":0},
- {"id":"w","type":"wait","text":"Choose support or price","next":"c","x":180,"y":0},
- {"id":"c","type":"contains","text":"support","next":"h","otherwise":"r","x":360,"y":0},
- {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"reply","text":"Price is 10","next":"e","x":540,"y":180},
+ {"id":"w","type":"wait","text":"Choose support or price","next":"capture","x":180,"y":0},
+ {"id":"capture","type":"capture","variable":"choice","next":"c","x":270,"y":0},
+ {"id":"c","type":"contains","text":"support","variable":"choice","next":"h","otherwise":"r","x":360,"y":0},
+ {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"wait","text":"Confirm price?","next":"final","x":540,"y":180},{"id":"final","type":"reply","text":"Price is 10 · {{choice}}","next":"e","x":720,"y":180},
  {"id":"e","type":"end","x":720,"y":180}]}
 multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","support"]},cookie=a)
-assert multi_sim["turns"][0]["nextNode"]=="c" and multi_sim["turns"][1]["handoff"]
-multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price"]},cookie=a)
-assert multi_sim["turns"][1]["replies"]==["Price is 10"]
+assert multi_sim["turns"][0]["nextNode"]=="capture" and multi_sim["turns"][1]["handoff"]
+multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","price","yes"]},cookie=a)
+assert multi_sim["turns"][1]["replies"]==["Confirm price?"] and multi_sim["turns"][2]["replies"]==["Price is 10 · price"]
 created_multi,_=call("/api/bots","POST",{"name":"Multi","flow":multi,"version":0},cookie=a,expected=201)
 mp="/api/bots/"+created_multi["id"]
 published,_=call(mp+"/publish","POST",{"version":1},cookie=a)
@@ -371,8 +416,14 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=managed_cookie,expected=204)
 with sqlite3.connect(DB) as db:
     db.execute("UPDATE AutomationRuns SET CreatedAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
 assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
-assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
+assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Confirm price?")
+with sqlite3.connect(DB) as db:
+    saved=db.execute("SELECT VariablesJson FROM ConversationAutomation WHERE TenantId=? AND lower(ConversationId)=?",("ci-tenant-a",cid.lower())).fetchone()
+    assert json.loads(saved[0])=={"choice":"price"}
+assert automate("wamid.ci.multi.confirm","yes")==("queued",1,None,"Price is 10 · price")
 assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+with sqlite3.connect(DB) as db:
+    assert all(x[0]=="{}" for x in db.execute("SELECT VariablesJson FROM ConversationAutomation WHERE TenantId='ci-tenant-a'"))
 # Simulate a scheduled, not-yet-claimed automation reply. The invalid test token
 # and future scheduled date ensure the worker never sends the synthetic message.
 import uuid
@@ -401,12 +452,29 @@ call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert automate("wamid.ci.multi.7","hi")[3]=="Legacy fallback"
 print("PASS: multi-turn continuation, tenant-safe human takeover, pause and resume")
 # Campaign scheduling is enabled only in this disposable test process; scheduled date is future.
+call("/api/database-connections",expected=401)
+call("/api/database-connections",cookie=agent,expected=403)
+assert call("/api/database-connections",cookie=a)[0]==[]
+call("/api/database-connections/unknown/probe","POST",{},cookie=a,expected=404)
 call("/api/marketing/lists",expected=401)
 call("/api/marketing/lists",cookie=agent,expected=403)
 consent={"phoneNumberId":"999999999999","phone":"15550000001","granted":True,"evidence":"CI-only synthetic consent receipt"}
 call("/api/marketing/consent","PUT",dict(consent,phoneNumberId="999999999999"),cookie=b,expected=404)
 call("/api/marketing/consent","PUT",dict(consent,evidence=""),cookie=a,expected=400)
+segment="/api/marketing/segments/preview?phoneNumberId=999999999999&stage=lead&tag=vip"
+call(segment,expected=401)
+call(segment,cookie=agent,expected=403)
+call(segment,cookie=b,expected=404)
+call("/api/marketing/segments/preview?phoneNumberId=999999999999&stage=invalid",cookie=a,expected=400)
+before,_=call(segment,cookie=a)
+assert before["matched"]==1 and before["eligible"]==0 and before["excluded"]==1 and before["items"]==[]
 call("/api/marketing/consent","PUT",consent,cookie=a,expected=204)
+preview,_=call(segment,cookie=a)
+assert preview["matched"]==1 and preview["eligible"]==1 and preview["excluded"]==0 and not preview["truncated"]
+assert [x["phone"] for x in preview["items"]]==["15550000001"]
+assert call("/api/marketing/lists",cookie=a)[0]==[]
+assert call("/api/marketing/campaigns",cookie=a)[0]==[]
+assert next(x["granted"] for x in call(activity_path,cookie=a)[0]["consent"] if x["phoneNumberId"]=="999999999999") is True
 lst,_=call("/api/marketing/lists","POST",{"name":"CI list","phones":["15550000001","15550000001"],"version":0},cookie=a)
 assert len(lst["phones"])==1 and call("/api/marketing/lists",cookie=b)[0]==[]
 call("/api/marketing/lists/"+lst["id"],"PUT",{"name":"Foreign","phones":["15550000001"],"version":1},cookie=b,expected=404)
@@ -433,6 +501,8 @@ for _ in range(30):
     time.sleep(1)
 else:raise AssertionError("Opt-out did not cancel scheduled campaign")
 assert not call("/api/marketing/consents?phoneNumberId=999999999999",cookie=a)[0][0]["granted"]
+assert call(segment,cookie=a)[0]["eligible"]==0
+assert next(x["granted"] for x in call(activity_path,cookie=a)[0]["consent"] if x["phoneNumberId"]=="999999999999") is False
 with sqlite3.connect(DB) as db:
     assert db.execute("SELECT COUNT(*) FROM ConsentEvents WHERE TenantId='ci-tenant-a'").fetchone()[0]==2
 call("/api/marketing/campaigns","POST",dict(schedule,id=str(uuid.uuid4())),cookie=a,expected=409)

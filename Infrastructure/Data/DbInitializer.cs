@@ -352,6 +352,7 @@ public static class DbInitializer
                     Mode TEXT NOT NULL,
                     ActivationId TEXT NULL,
                     NextNode TEXT NULL,
+                    VariablesJson TEXT NOT NULL DEFAULT '{}',
                     LastInputAtUtc TEXT NULL,
                     ExpiresAtUtc TEXT NULL,
                     UpdatedAtUtc TEXT NOT NULL,
@@ -504,6 +505,7 @@ public static class DbInitializer
                     FOREIGN KEY(TenantId) REFERENCES Tenants(Id)
                 );
                 CREATE INDEX IF NOT EXISTS IX_ManagedTenantAdmins_TenantId ON ManagedTenantAdmins(TenantId);
+                CREATE INDEX IF NOT EXISTS IX_Tenants_Name_Id ON Tenants(Name,Id);
                 CREATE TABLE IF NOT EXISTS ServicePlans (
                     Id TEXT NOT NULL PRIMARY KEY, Name TEXT NOT NULL, MonthlyMessages INTEGER NOT NULL,
                     Agents INTEGER NOT NULL, Accounts INTEGER NOT NULL, Bots INTEGER NOT NULL, Articles INTEGER NOT NULL,
@@ -521,6 +523,17 @@ public static class DbInitializer
                 );
                 CREATE INDEX IF NOT EXISTS IX_PlatformAdminAudit_CreatedAtUtc ON PlatformAdminAudit(CreatedAtUtc);
                 CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Tenant_Quota ON WhatsAppOutbox(TenantId, CreatedAtUtc, ScheduledForUtc);
+                CREATE TABLE IF NOT EXISTS EmbeddedSignupAttempts (
+                    TenantId TEXT NOT NULL,
+                    SessionHash TEXT NOT NULL,
+                    StateHash TEXT NOT NULL,
+                    AppId TEXT NOT NULL,
+                    ConfigId TEXT NOT NULL,
+                    ExpiresAtUtc TEXT NOT NULL,
+                    PRIMARY KEY (TenantId, SessionHash)
+                );
+                CREATE INDEX IF NOT EXISTS IX_EmbeddedSignupAttempts_ExpiresAtUtc ON EmbeddedSignupAttempts(ExpiresAtUtc);
+
                 CREATE TABLE IF NOT EXISTS PlatformSessions (
                     Id TEXT NOT NULL PRIMARY KEY,
                     Username TEXT NOT NULL,
@@ -549,6 +562,8 @@ public static class DbInitializer
             ApplyWhatsAppTenantCompatibilityMigration(
                 connection,
                 transaction);
+
+            EnsureColumnExists(connection, transaction, "ConversationAutomation", "VariablesJson", "TEXT NOT NULL DEFAULT '{}'");
 
             // Preserve existing templates while adding fields required by the EF model.
             EnsureColumnExists(connection, transaction, "WhatsAppTemplates", "MetaTemplateId", "TEXT NULL");
@@ -593,6 +608,8 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS
                     IX_WhatsAppWebhookInbox_Status_NextAttemptAtUtc
                     ON WhatsAppWebhookInbox(Status, NextAttemptAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppWebhookInbox_Lease
+                    ON WhatsAppWebhookInbox(Status, LeaseUntilUtc);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS
                     IX_WhatsAppStatusInbox_EventKey
@@ -635,6 +652,8 @@ public static class DbInitializer
                 CREATE INDEX IF NOT EXISTS
                     IX_WhatsAppOutbox_Status_NextAttemptAtUtc
                     ON WhatsAppOutbox(Status, NextAttemptAtUtc);
+                CREATE INDEX IF NOT EXISTS IX_WhatsAppOutbox_Lease
+                    ON WhatsAppOutbox(Status, LeaseUntilUtc);
 
                 CREATE UNIQUE INDEX IF NOT EXISTS
                     IX_WhatsAppOutbox_MetaMessageId

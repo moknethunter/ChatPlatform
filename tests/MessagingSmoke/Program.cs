@@ -33,6 +33,50 @@ try
         WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
         throw new Exception("Media type or download host security regression.");
     Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
+    var externalOne = "Data Source=" + Path.Combine(directory.FullName,"external-one.db");
+    var externalTwo = "Data Source=" + Path.Combine(directory.FullName,"external-two.db");
+    foreach (var pair in new[] { (Connection:externalOne, Value:"first"),(Connection:externalTwo, Value:"second") })
+    {
+        await using var external = new Microsoft.Data.Sqlite.SqliteConnection(pair.Connection);
+        await external.OpenAsync(ct);
+        await using var seed = external.CreateCommand();
+        seed.CommandText="CREATE TABLE Items (Id TEXT PRIMARY KEY, Value TEXT); INSERT INTO Items VALUES ('test', @value);";
+        seed.Parameters.AddWithValue("@value",pair.Value);
+        await seed.ExecuteNonQueryAsync(ct);
+    }
+    var externalConfig = new Microsoft.Extensions.Configuration.ConfigurationManager();
+    externalConfig["ConnectionStrings:one"]=externalOne;
+    externalConfig["ConnectionStrings:two"]=externalTwo;
+    foreach (var alias in new[] {"one","two"})
+    {
+        var prefix="ExternalDatabases:Tenants:smoke-tenant:"+alias+":";
+        externalConfig[prefix+"Provider"]="sqlite";
+        externalConfig[prefix+"ConnectionName"]=alias;
+        externalConfig[prefix+"Reads:lookup"]="SELECT Value FROM Items WHERE Id=@input";
+        externalConfig[prefix+"Reads:badwrite"]="DELETE FROM Items WHERE Id=@input RETURNING Value";
+    }
+    var registry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig, new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new ChatPlatform.Infrastructure.Adapters.Databases.PostgreSqlDatabaseAdapter() });
+    var results=await Task.WhenAll(
+        Task.Run(()=>registry.ReadScalarAsync(tenant,"one","lookup","test",ct),ct),
+        Task.Run(()=>registry.ReadScalarAsync(tenant,"two","lookup","test",ct),ct));
+    if (results[0]!="first" || results[1]!="second" || registry.List(tenant).Count!=2 ||
+        registry.List("other-tenant").Count!=0 || registry.Contains("other-tenant","one") ||
+        await registry.ReadScalarAsync(tenant,"one","lookup","test' OR 1=1 --",ct)!=null)
+        throw new Exception("External database routing or parameter isolation regression.");
+    try { await registry.ProbeAsync("other-tenant","one",ct); throw new Exception("Cross-tenant connection allowed."); }
+    catch (KeyNotFoundException) { }
+    try { await registry.ReadScalarAsync(tenant,"one","badwrite","test",ct); throw new Exception("External database write allowed."); }
+    catch (Microsoft.Data.Sqlite.SqliteException) { }
+    if (await registry.ReadScalarAsync(tenant,"one","lookup","test",ct)!="first")
+        throw new Exception("Read-only connection changed data.");
+    externalConfig["ExternalDatabases:Tenants:smoke-tenant:two:Provider"]="test-adapter";
+    var extensionRegistry = new ChatPlatform.Infrastructure.Data.Connections.ExternalDatabaseRegistry(externalConfig,
+        new IDatabaseAdapter[] { new ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter(), new TestDatabaseAdapter() });
+    if (await extensionRegistry.ReadScalarAsync(tenant,"two","lookup","test",ct)!="second" ||
+        extensionRegistry.List(tenant).Single(x=>x.Id=="two").Provider!="test-adapter")
+        throw new Exception("Independent database adapter registration failed.");
+    Console.WriteLine("PASS: independent external databases, tenant routing, parameterized reads and write rejection.");
+
     var attempts = new EmbeddedSignupAttemptStore();
     var instant = DateTimeOffset.UtcNow;
     var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
@@ -103,6 +147,38 @@ try
     Console.WriteLine("PASS: migration twice on legacy EF schema preserves dates, ownership and current credentials.");
     // Exercise the same schema creation/compatibility logic as production.
     DbInitializer.EnsureCreated(connection);
+    // Two independent contexts stand in for distinct application processes using the same DB.
+    var sharedOptions = new DbContextOptionsBuilder<PlatformDbContext>().UseSqlite(connection).Options;
+    await using (var firstDb = new PlatformDbContext(sharedOptions))
+    await using (var secondDb = new PlatformDbContext(sharedOptions))
+    {
+        var writer = new DatabaseSignupAttemptStore(firstDb);
+        var reader = new DatabaseSignupAttemptStore(secondDb);
+        var moment = DateTimeOffset.UtcNow;
+        var shared = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (shared == null ||
+            await reader.ConsumeAsync(shared,"tenant-b","session-a","123","456",moment,ct) ||
+            await reader.ConsumeAsync(shared,"tenant-a","session-b","123","456",moment,ct) ||
+            await reader.ConsumeAsync(shared,"tenant-a","session-a","999","456",moment,ct) ||
+            !await reader.ConsumeAsync(shared,"tenant-a","session-a","123","456",moment,ct) ||
+            await writer.ConsumeAsync(shared,"tenant-a","session-a","123","456",moment,ct))
+            throw new Exception("Shared signup isolation or single-use regression.");
+        var prior = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        var latest = await reader.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (await writer.ConsumeAsync(prior,"tenant-a","session-a","123","456",moment,ct) ||
+            !await writer.ConsumeAsync(latest,"tenant-a","session-a","123","456",moment,ct))
+            throw new Exception("Shared signup supersession regression.");
+        var expiring = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (await reader.ConsumeAsync(expiring,"tenant-a","session-a","123","456",moment.AddMinutes(5),ct))
+            throw new Exception("Expired shared signup accepted.");
+        var racing = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        var outcomes = await Task.WhenAll(
+            Task.Run(() => writer.ConsumeAsync(racing,"tenant-a","session-a","123","456",moment,ct),ct),
+            Task.Run(() => reader.ConsumeAsync(racing,"tenant-a","session-a","123","456",moment,ct),ct));
+        if (outcomes.Count(x=>x)!=1) throw new Exception("Shared signup consumed more or less than once.");
+        Console.WriteLine("PASS: durable signup state across independent contexts, atomic single-use, isolation and expiry.");
+    }
+
     var requests = new ConcurrentQueue<string>();
     var services = new ServiceCollection();
     services.AddLogging();
@@ -469,4 +545,13 @@ sealed class FakeAccountHandler : HttpMessageHandler
             throw new InvalidOperationException("Unexpected account verification path or cursor");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
     }
+}
+
+sealed class TestDatabaseAdapter : IDatabaseAdapter
+{
+    private readonly ChatPlatform.Infrastructure.Adapters.Databases.SqliteDatabaseAdapter _inner = new();
+    public string Provider => "test-adapter";
+    public System.Data.Common.DbConnection CreateReadOnlyConnection(string connectionString) => _inner.CreateReadOnlyConnection(connectionString);
+    public ValueTask<System.Data.Common.DbTransaction> BeginReadOnlyTransactionAsync(System.Data.Common.DbConnection connection, CancellationToken ct)
+        => _inner.BeginReadOnlyTransactionAsync(connection,ct);
 }

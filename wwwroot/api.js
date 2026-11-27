@@ -346,6 +346,7 @@
             subscription() { return request("/api/subscription"); },
             platformPlans() { return request("/api/platform-admin/plans"); },
             platformCreatePlan(data) { return request("/api/platform-admin/plans",{method:"POST",body:data,retries:0}); },
+            platformBrowseTenants(opts={}) { const q=new URLSearchParams(); for(const key of ["after","search","by","limit"]) if(opts[key]) q.set(key,opts[key]); return request("/api/platform-admin/tenants/browse?"+q); },
             platformTenants(page=1) { return request("/api/platform-admin/tenants?page="+encodeURIComponent(page)); },
             platformCreateTenant(data) { return request("/api/platform-admin/tenants",{method:"POST",body:data,retries:0}); },
             platformAssign(id,data) { return request("/api/platform-admin/tenants/"+encodeURIComponent(id)+"/subscription",{method:"PUT",body:data,retries:0}); },
@@ -356,6 +357,11 @@
             marketingOptions() { return request("/api/marketing/options"); },
             marketingConsents(phoneId) { return request("/api/marketing/consents?phoneNumberId="+encodeURIComponent(phoneId)); },
             marketingConsent(data) { return request("/api/marketing/consent",{method:"PUT",body:data}); },
+            marketingPreviewSegment(opts = {}) {
+                const q = new URLSearchParams();
+                for (const key of ["phoneNumberId","stage","tag"]) if (opts[key]) q.set(key, opts[key]);
+                return request("/api/marketing/segments/preview?" + q, { signal: opts.signal });
+            },
             marketingLists() { return request("/api/marketing/lists"); },
             marketingSaveList(id,data) { return request("/api/marketing/lists"+(id?"/"+encodeURIComponent(id):""),{method:id?"PUT":"POST",body:data}); },
             marketingCampaigns() { return request("/api/marketing/campaigns"); },
@@ -384,6 +390,7 @@
                 return request("/api/contacts?" + q, { signal: opts.signal });
             },
             getContact(phone) { return request("/api/contacts/" + encodeURIComponent(phone)); },
+            getContactActivity(phone, opts = {}) { return request("/api/contacts/" + encodeURIComponent(phone) + "/activity", { signal: opts.signal }); },
             createContact(data) { return request("/api/contacts", { method: "POST", body: data }); },
             updateContact(phone,data) { return request("/api/contacts/" + encodeURIComponent(phone), { method: "PUT", body: data }); },
             updateConversation(id, action, body = {}) {

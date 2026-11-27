@@ -82,7 +82,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
                 .Where(x => (x.Status == StatusPending || x.Status == null || (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
                             && x.NextAttemptAtUtc <= now
                             && x.Attempts < x.MaxAttempts)
-                .OrderBy(x => x.ReceivedAtUtc)
+                .OrderBy(x => x.ReceivedAtUtc).ThenBy(x => x.Id)
                 .Select(x => (Guid?)x.Id)
                 .FirstOrDefaultAsync(ct);
 
@@ -92,6 +92,7 @@ public sealed class WhatsAppInboxWorker : BackgroundService
             var claimed = await db.WhatsAppWebhookInbox
                 .Where(x => x.Id == candidateId.Value 
                             && (x.Status == StatusPending || x.Status == null || (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                            && x.NextAttemptAtUtc <= now
                             && x.Attempts < x.MaxAttempts)
                 .ExecuteUpdateAsync(update => update
                     .SetProperty(x => x.Status, StatusProcessing)

@@ -52,7 +52,7 @@ public static class WhatsAppExtensions
         services.AddScoped<ChatPlatform.Infrastructure.Marketing.TemplateApproval>();
         services.AddScoped<IWhatsAppTenantResolver, WhatsAppTenantResolver>();
         services.AddScoped<IWhatsAppCloudClient, WhatsAppCloudClient>();
-        services.AddSingleton<EmbeddedSignupAttemptStore>();
+        services.AddScoped<IEmbeddedSignupAttemptStore, DatabaseSignupAttemptStore>();
         services.AddHttpClient("whatsapp-oauth", client =>
         {
             client.BaseAddress = new Uri($"https://graph.facebook.com/{graphApiVersion}/");

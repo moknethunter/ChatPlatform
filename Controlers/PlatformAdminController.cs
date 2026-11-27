@@ -42,15 +42,50 @@ public sealed class PlatformAdminController(PlatformDbContext db,IConfiguration 
             administrators=db.ManagedTenantAdmins.Where(a=>a.TenantId==t.Id).Select(a=>a.Username).ToList()
         }).ToListAsync(ct));
     }
+    // Indexed keyset navigation, independent of the number of preceding rows.
+    // Preserve the old page-number endpoint for existing API clients.
+    [HttpGet("tenants/browse")]
+    public async Task<IActionResult> BrowseTenants(string? after, string? search, string? by, int limit=100, CancellationToken ct=default)
+    {
+        if ((after?.Length ?? 0)>128 || (search?.Length ?? 0)>100 || limit is <1 or >100 ||
+            (by!=null && by is not ("id" or "name" or "username")))
+            return BadRequest(new { error="invalid_browse" });
+        var q = string.IsNullOrEmpty(after)
+            ? db.Tenants.AsNoTracking()
+            : db.Tenants.FromSqlInterpolated($"SELECT * FROM Tenants WHERE Id > {after}").AsNoTracking();
+        search=search?.Trim();
+        if (!string.IsNullOrEmpty(search))
+        {
+            q = by switch
+            {
+                "name" => q.Where(t=>t.Name==search),
+                "username" => q.Where(t=>db.ManagedTenantAdmins.Where(a=>a.Username==search).Select(a=>a.TenantId).Contains(t.Id)),
+                _ => q.Where(t=>t.Id==search)
+            };
+        }
+        var items=await q.OrderBy(t=>t.Id).Take(limit+1).Select(t=>new{
+            t.Id,t.Name,t.IsActive,t.CreatedAtUtc,
+            subscription=db.TenantSubscriptions.Where(s=>s.TenantId==t.Id).Select(s=>new{s.PlanId,s.Enabled,s.EndsAtUtc,s.Version}).FirstOrDefault(),
+            administrators=db.ManagedTenantAdmins.Where(a=>a.TenantId==t.Id).OrderBy(a=>a.Username).Select(a=>a.Username).ToList()
+        }).ToListAsync(ct);
+        var hasMore=items.Count>limit;
+        if(hasMore)items.RemoveAt(items.Count-1);
+        Response.Headers["Cache-Control"]="no-store";
+        return Ok(new{items,nextCursor=hasMore?items[^1].Id:null});
+    }
+
     [HttpPost("tenants")]
     public async Task<IActionResult> CreateTenant(NewTenantRequest r,CancellationToken ct)
     {
         if(string.IsNullOrWhiteSpace(r.Name)||r.Name.Length>100||!ValidUser(r.Username)||!ValidPassword(r.Password)||!ValidEnd(r.EndsAt))return BadRequest(new{error="invalid_tenant"});
+        // Password derivation is CPU-heavy; keep it outside the database write transaction.
+        if(PlatformSecurity.IsReservedUsername(config,r.Username!))return Conflict(new{error="username_unavailable"});
+        var passwordHash=PlatformSecurity.HashAgentPassword(r.Password!);
         await using var tx=await db.Database.BeginTransactionAsync(ct);
         if(PlatformSecurity.IsReservedUsername(config,r.Username!)||await db.ManagedAgents.AnyAsync(a=>a.Username==r.Username,ct)||await db.ManagedTenantAdmins.AnyAsync(a=>a.Username==r.Username,ct))return Conflict(new{error="username_unavailable"});
         if(!await db.ServicePlans.AnyAsync(p=>p.Id==r.PlanId,ct))return NotFound();
         var t=new TenantEntity{Name=r.Name.Trim()};
-        db.Tenants.Add(t);db.ManagedTenantAdmins.Add(new ManagedTenantAdminEntity{TenantId=t.Id,Username=r.Username!,PasswordHash=PlatformSecurity.HashAgentPassword(r.Password!)});
+        db.Tenants.Add(t);db.ManagedTenantAdmins.Add(new ManagedTenantAdminEntity{TenantId=t.Id,Username=r.Username!,PasswordHash=passwordHash});
         db.TenantSubscriptions.Add(new TenantSubscriptionEntity{TenantId=t.Id,PlanId=r.PlanId,EndsAtUtc=r.EndsAt.UtcDateTime});
         Audit("tenant_created",t.Id,t.Name);await db.SaveChangesAsync(ct);await tx.CommitAsync(ct);
         return StatusCode(201,new{t.Id,t.Name,username=r.Username});

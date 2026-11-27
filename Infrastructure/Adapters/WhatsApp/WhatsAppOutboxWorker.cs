@@ -76,7 +76,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
                          (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
                         && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
                         && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
-            .OrderBy(x => x.CreatedAtUtc)
+            .OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Id)
             .Select(x => new { x.Id, x.Status })
             .FirstOrDefaultAsync(ct);
 
@@ -87,6 +87,7 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
             .Where(x => x.Id == candidate.Id && x.Status == candidate.Status
                         && ((x.Status == StatusPending && x.NextAttemptAtUtc <= now) ||
                             (x.Status == StatusProcessing && x.LeaseUntilUtc < now))
+                        && (x.ScheduledForUtc == null || x.ScheduledForUtc <= now)
                         && (x.Attempts < x.MaxAttempts || (x.Status == StatusProcessing && (x.IdempotencyKey.StartsWith("automation:") || x.IdempotencyKey.StartsWith("campaign:")))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.Status, StatusProcessing)
@@ -238,9 +239,9 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
     {
         var now = DateTime.UtcNow;
 
-        // التحديث المباشر الآمن لـ EF Core
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var affected = await db.WhatsAppOutbox
-            .Where(x => x.Id == item.Id && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
+            .Where(x => x.Id == item.Id && x.TenantId == item.TenantId && x.Status == StatusProcessing && x.LeaseOwner == _leaseOwner)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(x => x.Status, StatusSent)
                 .SetProperty(x => x.SentAtUtc, now)
@@ -258,12 +259,13 @@ public sealed class WhatsAppOutboxWorker : BackgroundService
         if (item.MessageId.HasValue)
         {
             await db.WhatsAppMessages
-                .Where(m => m.Id == item.MessageId.Value)
+                .Where(m => m.Id == item.MessageId.Value && m.TenantId == item.TenantId)
                 .ExecuteUpdateAsync(u => u
                     .SetProperty(m => m.Status, StatusSent)
                     .SetProperty(m => m.Wamid, metaId), ct);
         }
 
+        await tx.CommitAsync(ct);
         _logger.LogInformation("Outbox {Id} sent. MetaMessageId={MetaId}", item.Id, metaId);
     }
 

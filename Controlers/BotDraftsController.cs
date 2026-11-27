@@ -73,10 +73,10 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
         if (error != null || (req.Input?.Length ?? 0) > 4000) return BadRequest(new { error = error ?? "input_too_long" });
         if(req.Inputs==null)return Ok(Evaluate(req.Flow!,req.Input??""));
         if(req.Inputs.Length is <1 or >12 || req.Inputs.Any(x=>x==null||x.Length>4000))return BadRequest(new{error="invalid_turns"});
-        var turns=new List<Evaluation>();string? next=null;
+        var turns=new List<Evaluation>();string? next=null;Dictionary<string,string>? variables=null;
         foreach(var input in req.Inputs)
         {
-            var result=Evaluate(req.Flow!,input,next);turns.Add(result);next=result.NextNode;
+            var result=Evaluate(req.Flow!,input,next,variables);turns.Add(result);next=result.NextNode;variables=result.Variables;
             if(result.Handoff||next==null)break;
         }
         return Ok(new{turns,nextNode=next});
