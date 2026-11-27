@@ -33,6 +33,26 @@ try
         WhatsAppMediaService.Detect(new byte[] {137,80,78,71,13,10,26,10})?.Type != "image")
         throw new Exception("Media type or download host security regression.");
     Console.WriteLine("PASS: media signature checks and strict CDN URL allowlist.");
+    var attempts = new EmbeddedSignupAttemptStore();
+    var instant = DateTimeOffset.UtcNow;
+    var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(first, "tenant-b", "session-a", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-b", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "999", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "123", "999", instant) ||
+        !attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant) ||
+        attempts.Consume(first, "tenant-a", "session-a", "123", "456", instant))
+        throw new Exception("Signup attempt isolation or replay regression.");
+    var expired = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(expired, "tenant-a", "session-a", "123", "456", instant.AddMinutes(5)))
+        throw new Exception("Expired signup accepted.");
+    var superseded = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    var current = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
+    if (attempts.Consume(superseded, "tenant-a", "session-a", "123", "456", instant) ||
+        !attempts.Consume(current, "tenant-a", "session-a", "123", "456", instant))
+        throw new Exception("Superseded signup accepted.");
+    Console.WriteLine("PASS: signup attempts bound to tenant/session/config, expire and cannot replay.");
+
     // Verify approval matches the exact stored template; local status alone cannot authorize campaigns.
     var marketingTemplate=new WhatsAppTemplateEntity{Name="offer",Language="en",Category="MARKETING",Body="Offer",IsActive=true};
     using var approved=JsonDocument.Parse("""{"data":[{"name":"offer","language":"en","category":"MARKETING","status":"APPROVED","components":[{"type":"BODY","text":"Offer"}]}]}""");
@@ -161,6 +181,10 @@ try
             throw new Exception("Stored-token verification failed or disclosed the token");
         var cfg = new Microsoft.Extensions.Configuration.ConfigurationManager();
         cfg["Meta:AppId"] = "123";
+        if (await controller.StartEmbeddedSignup(cfg, attempts, ct) is not ConflictObjectResult ||
+            await controller.CompleteEmbeddedSignup(new WhatsAppController.EmbeddedSignupRequest("fake","fake","789","123456"),cfg,attempts,ct) is not ConflictObjectResult)
+            throw new Exception("Embedded signup not disabled by default.");
+
         var ready = await controller.AccountReadiness(account.Id, cfg, ct) as OkObjectResult;
         if (ready == null) throw new Exception("Readiness unavailable");
         var readyJson = JsonSerializer.SerializeToElement(ready.Value);
