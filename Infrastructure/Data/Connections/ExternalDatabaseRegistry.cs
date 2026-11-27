@@ -74,8 +74,7 @@ public sealed class ExternalDatabaseRegistry
         }
         var pg = new NpgsqlConnectionStringBuilder(source.ConnectionString)
         {
-            SslMode = SslMode.VerifyFull, Pooling = true, MinPoolSize = 0,
-            MaxPoolSize = 4, Timeout = 5, CommandTimeout = 5
+            SslMode = SslMode.VerifyFull, Pooling = false, Timeout = 5, CommandTimeout = 5
         };
         return new NpgsqlConnection(pg.ConnectionString);
     }
@@ -91,7 +90,10 @@ public sealed class ExternalDatabaseRegistry
             var token = deadline.Token;
             await using var connection = CreateConnection(source);
             await connection.OpenAsync(token);
-            await using var transaction = await connection.BeginTransactionAsync(token);
+            // SQLite read-only handles must not request an immediate write lock.
+            await using DbTransaction transaction = connection is SqliteConnection sqlite
+                ? sqlite.BeginTransaction(deferred: true)
+                : await connection.BeginTransactionAsync(token);
             if (source.Provider == "postgresql")
             {
                 await using var guard = connection.CreateCommand();
