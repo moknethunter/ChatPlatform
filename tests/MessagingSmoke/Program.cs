@@ -103,6 +103,38 @@ try
     Console.WriteLine("PASS: migration twice on legacy EF schema preserves dates, ownership and current credentials.");
     // Exercise the same schema creation/compatibility logic as production.
     DbInitializer.EnsureCreated(connection);
+    // Two independent contexts stand in for distinct application processes using the same DB.
+    var sharedOptions = new DbContextOptionsBuilder<PlatformDbContext>().UseSqlite(connection).Options;
+    await using (var firstDb = new PlatformDbContext(sharedOptions))
+    await using (var secondDb = new PlatformDbContext(sharedOptions))
+    {
+        var writer = new DatabaseSignupAttemptStore(firstDb);
+        var reader = new DatabaseSignupAttemptStore(secondDb);
+        var moment = DateTimeOffset.UtcNow;
+        var shared = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (shared == null ||
+            await reader.ConsumeAsync(shared,"tenant-b","session-a","123","456",moment,ct) ||
+            await reader.ConsumeAsync(shared,"tenant-a","session-b","123","456",moment,ct) ||
+            await reader.ConsumeAsync(shared,"tenant-a","session-a","999","456",moment,ct) ||
+            !await reader.ConsumeAsync(shared,"tenant-a","session-a","123","456",moment,ct) ||
+            await writer.ConsumeAsync(shared,"tenant-a","session-a","123","456",moment,ct))
+            throw new Exception("Shared signup isolation or single-use regression.");
+        var prior = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        var latest = await reader.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (await writer.ConsumeAsync(prior,"tenant-a","session-a","123","456",moment,ct) ||
+            !await writer.ConsumeAsync(latest,"tenant-a","session-a","123","456",moment,ct))
+            throw new Exception("Shared signup supersession regression.");
+        var expiring = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        if (await reader.ConsumeAsync(expiring,"tenant-a","session-a","123","456",moment.AddMinutes(5),ct))
+            throw new Exception("Expired shared signup accepted.");
+        var racing = await writer.StartAsync("tenant-a","session-a","123","456",moment,ct);
+        var outcomes = await Task.WhenAll(
+            Task.Run(() => writer.ConsumeAsync(racing,"tenant-a","session-a","123","456",moment,ct),ct),
+            Task.Run(() => reader.ConsumeAsync(racing,"tenant-a","session-a","123","456",moment,ct),ct));
+        if (outcomes.Count(x=>x)!=1) throw new Exception("Shared signup consumed more or less than once.");
+        Console.WriteLine("PASS: durable signup state across independent contexts, atomic single-use, isolation and expiry.");
+    }
+
     var requests = new ConcurrentQueue<string>();
     var services = new ServiceCollection();
     services.AddLogging();
