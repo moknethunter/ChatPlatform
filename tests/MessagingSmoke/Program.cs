@@ -122,6 +122,20 @@ try
         throw new Exception("Unsafe gateway address accepted.");
     Console.WriteLine("PASS: business database and mocked payment lookup, tenant isolation, operation scope, response bounds and reference verification.");
 
+    // A trusted invoice link and exact money are mandatory even for manual review.
+    var inv=new BusinessReadResult("inv-1",100,"YER","open");
+    var pay=new BusinessReadResult("pay-1",100,"YER","succeeded","inv-1");
+    var compare=ChatPlatform.Infrastructure.Adapters.Business.PaymentReconciliation.Compare;
+    if(compare(inv,pay).Outcome!="matched_for_review" ||
+       compare(inv,pay with {InvoiceReference=null}).Outcome!="invoice_link_unverified" ||
+       compare(inv,pay with {InvoiceReference="inv-2"}).Outcome!="invoice_link_unverified" ||
+       compare(inv,pay with {Currency="USD"}).Outcome!="currency_mismatch" ||
+       compare(inv,pay with {Status="refunded"}).Outcome!="payment_not_succeeded" ||
+       compare(inv with {Status="void"},pay).Outcome!="invoice_requires_review" ||
+       compare(inv,pay with {AmountMinor=99}).Outcome!="amount_mismatch" ||
+       compare(null,pay).Outcome!="record_unavailable")
+        throw new Exception("Payment reconciliation safety regression.");
+    Console.WriteLine("PASS: payment comparison requires exact invoice linkage, status, currency and amount; no writes.");
     var attempts = new EmbeddedSignupAttemptStore();
     var instant = DateTimeOffset.UtcNow;
     var first = attempts.Start("tenant-a", "session-a", "123", "456", instant)!;
