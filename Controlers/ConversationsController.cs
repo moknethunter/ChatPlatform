@@ -110,6 +110,8 @@ public class ConversationsController : ControllerBase
         var s=await _db.ConversationAutomation.SingleOrDefaultAsync(x=>x.TenantId==tenant&&x.ConversationId==id,ct);
         if(s==null){s=new ConversationAutomationEntity{TenantId=tenant,ConversationId=id};_db.ConversationAutomation.Add(s);}
         s.Mode=req.Mode;s.NextNode=null;s.ActivationId=null;s.ExpiresAtUtc=null;s.VariablesJson="{}";
+        // Explicit return to bot closes the pending business request; repeated human takeover retains it.
+        if(req.Mode=="bot"){s.BusinessSource=null;s.BusinessOperation=null;}
         s.LastInputAtUtc=conversation.LastInboundAtUtc;s.UpdatedAtUtc=DateTime.UtcNow;s.UpdatedBy=User.Identity!.Name??"unknown";
         if(req.Mode=="human")await HumanHandoff.CancelPendingAsync(_db,conversation,s.UpdatedAtUtc,ct);
         await _db.SaveChangesAsync(ct);await tx.CommitAsync(ct);
