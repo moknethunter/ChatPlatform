@@ -352,6 +352,7 @@ async function loadAccounts() {
                 const buttons = [[isActive ? "تحديث التوكن" : "إعادة ربط الحساب", () => openTokenModal(item), "btn-secondary"]];
                 if (isActive) {
                     buttons.push(["التحقق لدى Meta", event => testConnection(item.id, event.currentTarget, status), "btn-secondary"]);
+                    buttons.push(["فحص اشتراك Webhook", event => checkReadiness(item.id, event.currentTarget, status), "btn-secondary"]);
                     buttons.push(["إيقاف الحساب", () => deleteAccount(item.id), "btn-danger"]);
                 }
                 for (const [label, action, cls] of buttons) {
@@ -377,7 +378,7 @@ async function loadDiagnostics() {
         const data = await ChatPlatformAPI.getWhatsAppDiagnostics();
         
         // Update Status Cards
-        updateDot("metaStatusDot", data.metaConnected ? "green" : "red");
+        updateDot("metaStatusDot", data.metaConnected == null ? "yellow" : data.metaConnected ? "green" : "red");
         $("metaStatusText").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "متصل" : "غير متصل";
         
         updateDot("webhookStatusDot", data.webhookVerified ? "green" : "yellow");
@@ -385,10 +386,10 @@ async function loadDiagnostics() {
         
         // Update Diagnostics List
         $("diagMetaApi").textContent = data.metaConnected == null ? "غير مفحوص" : data.metaConnected ? "Connected" : "Disconnected";
-        $("diagMetaApi").style.color = data.metaConnected ? "var(--success)" : "var(--danger)";
+        $("diagMetaApi").style.color = data.metaConnected == null ? "var(--muted)" : data.metaConnected ? "var(--success)" : "var(--danger)";
         
         $("diagToken").textContent = data.tokenValid == null ? "غير مفحوص" : data.tokenValid ? "Valid" : "Invalid";
-        $("diagToken").style.color = data.tokenValid ? "var(--success)" : "var(--danger)";
+        $("diagToken").style.color = data.tokenValid == null ? "var(--muted)" : data.tokenValid ? "var(--success)" : "var(--danger)";
         
         $("diagWebhookVerify").textContent = data.webhookVerified == null ? "غير مفحوص" : data.webhookVerified ? "Passed" : "Failed";
         $("diagWebhookSig").textContent = data.webhookSignatureEnabled ? "Enabled" : "Disabled";
@@ -505,6 +506,20 @@ async function testConnection(id, button, status) {
     } finally {
         button.disabled = false;
     }
+}
+
+async function checkReadiness(id, button, status) {
+    button.disabled = true;
+    showMessage(status, "جارٍ فحص اشتراك التطبيق لدى Meta…", "info");
+    try {
+        const result = await ChatPlatformAPI.checkWhatsAppReadiness(id);
+        const membership = result.membershipVerified ? "تم تأكيد ارتباط الرقم بحساب الأعمال" : "تعذر تأكيد ارتباط الرقم";
+        const subscription = !result.appIdConfigured ? "معرّف تطبيق Meta غير مضبوط على الخادم" :
+            result.appSubscribed === true ? "التطبيق مشترك" : result.appSubscribed === false ? "التطبيق غير موجود في قائمة الاشتراكات" : "حالة الاشتراك غير مؤكدة";
+        showMessage(status, membership + "؛ " + subscription + "؛ تسليم الرسائل يحتاج اختبارًا فعليًا.", result.appSubscribed === true ? "success" : "info");
+    } catch (error) {
+        showMessage(status, error.message || "تعذر فحص الاشتراك.", "error");
+    } finally { button.disabled = false; }
 }
 
 let reconnectAccount = false;
