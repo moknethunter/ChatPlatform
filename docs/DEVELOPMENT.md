@@ -96,3 +96,5 @@ Comment each meaningful declaration, statement or logical step where it clarifie
 
 ## Business integration adapter extension
 See [BUSINESS-INTEGRATIONS.md](BUSINESS-INTEGRATIONS.md) for IBusinessReadAdapter, the typed money/status contract, operator provisioning, the external SQL adapter and HTTPS gateway. Keep calls outside core write transactions; no arbitrary SQL, endpoints, financial writes, or bot disclosure without explicit identity/permission design. Test real vendor semantics in sandbox before launch.
+
+Business request node: BotFlow stays pure, runtime records source/operation with human handoff, no external I/O during inbox transaction; BotDraftsController validates configured source on publish. ConversationAutomation stores nullable metadata; admin request list is tenant-scoped. Explicit return to bot clears it. The isolated HTTP workflow configures a disposable external ERP fixture for signed-webhook and read tests. Customer verification and external write/settlement remain separate release gates.
