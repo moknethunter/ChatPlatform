@@ -494,6 +494,37 @@ call(bp+"/publish/"+business_pub["activationId"],"DELETE",cookie=a,expected=204)
 call(root+"/automation","PUT",{"mode":"bot"},cookie=a,expected=204)
 assert call("/api/business-integrations/requests",cookie=a)[0]==[]
 print("PASS: signed business bot request, no financial auto-send, tenant-only admin invoice read and explicit close")
+identity="/api/customer-business-identity/"+cid
+scope={"source":"accounting","operation":"invoice"}
+grant=dict(scope,reference="ci-invoice",verificationMethod="authenticated-customer-portal",confirmed=True)
+call(identity,expected=401)
+call(identity,cookie=agent,expected=403)
+call(identity,cookie=b,expected=404)
+assert call(identity,cookie=a)[0]==[]
+call(identity+"/read","POST",scope,cookie=a,expected=404)
+call(identity,"PUT",dict(grant,verificationMethod="whatsapp"),cookie=a,expected=400)
+call(identity,"PUT",dict(grant,confirmed=False),cookie=a,expected=400)
+call(identity,"PUT",grant,cookie=b,expected=404)
+call(identity,"PUT",grant,cookie=a,expected=403,csrf=False)
+call(identity,"PUT",grant,cookie=a)
+bindings=call(identity,cookie=a)[0]
+assert len(bindings)==1 and bindings[0]["active"] and "ci-invoice" not in json.dumps(bindings)
+with sqlite3.connect(DB) as db:
+    encrypted=db.execute("SELECT ProtectedReference FROM CustomerBusinessBindings WHERE TenantId='ci-tenant-a'").fetchone()[0]
+    assert encrypted and "ci-invoice" not in encrypted
+assert call(identity+"/read","POST",dict(scope,reference="other-invoice"),cookie=a)[0]["reference"]=="ci-invoice"
+call(identity+"/read","POST",scope,cookie=b,expected=404)
+with sqlite3.connect(DB) as db:
+    db.execute("UPDATE CustomerBusinessBindings SET ExpiresAtUtc='2020-01-01' WHERE TenantId='ci-tenant-a'")
+call(identity+"/read","POST",scope,cookie=a,expected=404)
+call(identity,"PUT",grant,cookie=a)
+call(identity+"/revoke","POST",scope,cookie=b,expected=404)
+call(identity+"/revoke","POST",scope,cookie=a,expected=204)
+call(identity+"/read","POST",scope,cookie=a,expected=404)
+assert not call(identity,cookie=a)[0][0]["active"]
+with sqlite3.connect(DB) as db:
+    assert db.execute("SELECT ProtectedReference FROM CustomerBusinessBindings WHERE TenantId='ci-tenant-a'").fetchone()[0]==""
+print("PASS: admin-attested binding, encrypted reference, tenant isolation, expiry and revocation")
 call("/api/business-integrations/unknown/read","POST",{"operation":"payment-status","reference":"pay-123"},cookie=a,expected=404)
 call("/api/business-integrations/unknown/read","POST",{"operation":"charge","reference":"pay-123"},cookie=a,expected=400)
 call("/api/business-integrations/unknown/read","POST",{"operation":"invoice","reference":"pay-123"},cookie=a,expected=403,csrf=False)
