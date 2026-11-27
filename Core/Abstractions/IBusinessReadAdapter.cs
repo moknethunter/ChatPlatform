@@ -6,7 +6,8 @@ namespace ChatPlatform.Core.Abstractions;
 public enum BusinessReadKind { CustomerBalance, Invoice, PaymentStatus }
 
 // Amounts are integer minor units; currency is explicit / المبلغ بوحدات العملة الصغرى.
-public sealed record BusinessReadResult(string Reference, long AmountMinor, string Currency, string Status);
+public sealed record BusinessReadResult([property: JsonRequired] string Reference, [property: JsonRequired] long AmountMinor,
+    [property: JsonRequired] string Currency, [property: JsonRequired] string Status);
 
 // The configuration is internal and is never serialized to browser clients / إعدادات داخلية سرية.
 public sealed record BusinessReadSource(string Tenant, string Id, string Provider, string? Endpoint,
