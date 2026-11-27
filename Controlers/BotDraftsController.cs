@@ -94,7 +94,7 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
     }
 
     [HttpPost("{id:guid}/publish")]
-    public async Task<IActionResult> Publish(Guid id, PublishRequest req, CancellationToken ct)
+    public async Task<IActionResult> Publish(Guid id, PublishRequest req, [FromServices] ChatPlatform.Infrastructure.Adapters.Business.BusinessReadRegistry business, CancellationToken ct)
     {
         var tenant = User.TenantId();
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -105,8 +105,10 @@ public sealed class BotDraftsController(PlatformDbContext db) : ControllerBase
         var definition = JsonSerializer.Deserialize<Definition>(draft.DefinitionJson, Json);
         var error = Validate(definition);
         if (error != null) return BadRequest(new { error });
+        // Publish only sources and operations configured for this tenant; simulation stays offline.
+        if(definition!.Nodes!.Any(n=>n.Type=="business" && !business.Allows(tenant,n.BusinessSource!,n.BusinessOperation!))) return BadRequest(new{error="business_operation_unavailable"});
         var replies = definition!.Nodes!.Where(n => n.Type is "reply" or "wait").ToArray();
-        if ((replies.Length == 0 && !definition.Nodes!.Any(n=>n.Type=="handoff")) || replies.Length > 12 || replies.Sum(n => n.Text!.Length) + 2 * Math.Max(0,replies.Length - 1) > 4000)
+        if ((replies.Length == 0 && !definition.Nodes!.Any(n=>n.Type is "handoff" or "business")) || replies.Length > 12 || replies.Sum(n => n.Text!.Length) + 2 * Math.Max(0,replies.Length - 1) > 4000)
             return BadRequest(new { error = "publish_reply_limit" });
         var row = await db.BotReleases.SingleOrDefaultAsync(x => x.TenantId == tenant, ct);
         if (row == null) { row = new BotReleaseEntity { TenantId = tenant }; db.BotReleases.Add(row); }
