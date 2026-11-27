@@ -11,15 +11,13 @@ public sealed class WhatsAppOptions
 
     // ✅ تمت الإضافة: اسم بديل لنفس الإصدار - عشان Program.cs كان ينادي ApiVersion
     // وهو نفسه GraphApiVersion، أي تغيير في واحد يتغير في الثاني تلقائياً
-    [ConfigurationKeyName("WHATSAPP_API_VERSION")]
     public string ApiVersion
     {
         get => GraphApiVersion;
         set => GraphApiVersion = string.IsNullOrWhiteSpace(value) ? "v26.0" : value;
     }
 
-    // يربط الخاصية بالمتغير: WHATSAPP_PHONE_NUMBER_ID
-    [ConfigurationKeyName("WHATSAPP_PHONE_NUMBER_ID")]
+    // Program.cs normalizes the legacy environment aliases to canonical configuration keys.
     public string PhoneNumberId { get; set; } = "";
 
     // يربط الخاصية بالمتغير: WHATSAPP_BUSINESS_ACCOUNT_ID
@@ -38,16 +36,13 @@ public sealed class WhatsAppOptions
     [ConfigurationKeyName("Test_number")]
     public string TestNumber { get; set; } = "";
 
-    // يربط الخاصية بالمتغير: WHATSAPP_TOKEN
-    [ConfigurationKeyName("WHATSAPP_TOKEN")]
+    // Canonical key: WhatsApp:AccessToken.
     public string AccessToken { get; set; } = "";
 
-    // يربط الخاصية بالمتغير: WHATSAPP_VERIFY_TOKEN
-    [ConfigurationKeyName("WHATSAPP_VERIFY_TOKEN")]
+    // Canonical key: WhatsApp:VerifyToken.
     public string VerifyToken { get; set; } = "";
 
-    // يربط الخاصية بالمتغير: WHATSAPP_APP_SECRET
-    [ConfigurationKeyName("WHATSAPP_APP_SECRET")]
+    // Canonical key: WhatsApp:AppSecret.
     public string AppSecret { get; set; } = "";
 
     // هذا المتغير سيُقرأ من appsettings.json أو من متغير البيئة WHATSAPP_AUTOREPLY

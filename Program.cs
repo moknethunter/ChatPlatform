@@ -42,25 +42,31 @@ var whatsAppSection = builder.Configuration.GetSection("WhatsApp");
 var whatsAppToken =
 Environment.GetEnvironmentVariable("WHATSAPP_TOKEN")
 ?? Environment.GetEnvironmentVariable("WhatsApp__AccessToken")
+?? whatsAppSection["WHATSAPP_TOKEN"]
 ?? whatsAppSection["AccessToken"]
 ?? string.Empty;
 var whatsAppPhoneId =
 Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID")
 ?? Environment.GetEnvironmentVariable("WhatsApp__PhoneNumberId")
+?? whatsAppSection["WHATSAPP_PHONE_NUMBER_ID"]
 ?? whatsAppSection["PhoneNumberId"]
 ?? string.Empty;
 var whatsAppVerifyToken =
 Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")
 ?? Environment.GetEnvironmentVariable("WhatsApp__VerifyToken")
+?? whatsAppSection["WHATSAPP_VERIFY_TOKEN"]
 ?? whatsAppSection["VerifyToken"]
 ?? string.Empty;
 var whatsAppAppSecret =
 Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
 ?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret")
+?? whatsAppSection["WHATSAPP_APP_SECRET"]
 ?? whatsAppSection["AppSecret"]
 ?? string.Empty;
 var whatsAppApiVersion =
 Environment.GetEnvironmentVariable("WHATSAPP_API_VERSION")
+?? Environment.GetEnvironmentVariable("WHATSAPP_GRAPH_API_VERSION")
+?? whatsAppSection["WHATSAPP_API_VERSION"]
 ?? whatsAppSection["GraphApiVersion"]
 ?? whatsAppSection["ApiVersion"]
 ?? "v26.0";

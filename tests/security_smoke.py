@@ -175,6 +175,18 @@ call("/api/whatsapp/validate-credentials","POST",{"phoneNumberId":"https://inval
 call("/hub/chat/negotiate?negotiateVersion=1","POST",{},cookie=a,expected=403)
 call("/dev/seed/list",expected=404)
 call("/dev/seed/init-tenants","POST",expected=404)
+# Configuration diagnostics must reflect the same canonical secrets used by the webhook.
+call("/api/whatsapp/webhook-status",expected=401)
+for cookie in (a,b):
+    status,_=call("/api/whatsapp/webhook-status",cookie=cookie)
+    assert status["verifyTokenConfigured"] and status["appSecretConfigured"], status
+    assert call("/api/whatsapp/diagnostics",cookie=cookie)[0]["webhookSignatureEnabled"] is True
+# A signed malformed root is a client error, not a transient database outage.
+def signed_webhook(payload,expected=200):
+    signature="sha256="+hmac.new(b"ci-only-test-secret",json.dumps(payload).encode(),hashlib.sha256).hexdigest()
+    return call("/webhook","POST",payload,extra={"X-Hub-Signature-256":signature},expected=expected)[0]
+signed_webhook([],expected=400)
+assert signed_webhook({"entry":[None,{"changes":[None,{"value":{"metadata":{"phone_number_id":"000000000001"},"messages":[{"id":"wamid.ci.unknown","from":"15550000001","type":"text","text":{"body":"unknown account"}}]}}]}]})["saved"]==0
 assert call("/webhook?hub.mode=subscribe&hub.verify_token=ci-only-test-token&hub.challenge=12345")[0]=="12345"
 call("/webhook?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345",expected=401)
 call("/webhook","POST",{},expected=401)

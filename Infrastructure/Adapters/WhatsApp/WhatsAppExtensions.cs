@@ -40,7 +40,7 @@ public static class WhatsAppExtensions
                 new Uri($"https://graph.facebook.com/{graphApiVersion}/");
 
             client.Timeout = TimeSpan.FromSeconds(30);
-        });
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
 
         // Never forward business tokens through redirects or to a caller-supplied URL.
         services.AddHttpClient("whatsapp-media", client =>
@@ -167,6 +167,8 @@ public static class WhatsAppExtensions
                 {
                     using var document =
                         JsonDocument.Parse(body);
+                    if (document.RootElement.ValueKind != JsonValueKind.Object)
+                        return Results.BadRequest();
 
                     var savedCount =
                         await ProcessWebhookPayloadAsync(
@@ -224,7 +226,8 @@ public static class WhatsAppExtensions
 
         foreach (var entry in entries.EnumerateArray())
         {
-            if (!entry.TryGetProperty("changes", out var changes)
+            if (entry.ValueKind != JsonValueKind.Object ||
+                !entry.TryGetProperty("changes", out var changes)
                 || changes.ValueKind != JsonValueKind.Array)
             {
                 continue;
@@ -232,7 +235,8 @@ public static class WhatsAppExtensions
 
             foreach (var change in changes.EnumerateArray())
             {
-                if (!change.TryGetProperty("value", out var value)
+                if (change.ValueKind != JsonValueKind.Object ||
+                    !change.TryGetProperty("value", out var value)
                     || value.ValueKind != JsonValueKind.Object)
                 {
                     continue;

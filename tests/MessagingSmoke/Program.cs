@@ -375,11 +375,19 @@ sealed class FakeAccountHandler : HttpMessageHandler
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         if (request.Method != HttpMethod.Get || request.RequestUri?.Host != "graph.invalid" ||
-            request.Headers.Authorization?.Parameter != "verified-token" ||
-            request.RequestUri.Query != "?fields=id&limit=100")
+            request.Headers.Authorization?.Parameter != "verified-token")
             throw new InvalidOperationException("Unexpected account verification request");
-        var body = request.RequestUri.AbsolutePath == "/789/phone_numbers"
-            ? "{\"data\":[{\"id\":\"123456\"}]}" : "{\"data\":[{\"id\":\"999999\"}]}";
+        var uri = request.RequestUri!;
+        string body;
+        if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100")
+            body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"page+2\"}}}";
+        else if (uri.AbsolutePath == "/789/phone_numbers" && uri.Query == "?fields=id&limit=100&after=page%2B2")
+            body = "{\"data\":[{\"id\":\"123456\"}]}";
+        else if (uri.AbsolutePath == "/790/phone_numbers" &&
+            (uri.Query == "?fields=id&limit=100" || uri.Query == "?fields=id&limit=100&after=repeat"))
+            body = "{\"data\":[{\"id\":\"999999\"}],\"paging\":{\"next\":\"https://untrusted.invalid/never-follow\",\"cursors\":{\"after\":\"repeat\"}}}";
+        else
+            throw new InvalidOperationException("Unexpected account verification path or cursor");
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
     }
 }
