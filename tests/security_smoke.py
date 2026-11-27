@@ -143,6 +143,12 @@ unreachable=json.loads(json.dumps(flow));unreachable["nodes"].append({"id":"unus
 call("/api/bots/simulate","POST",{"flow":unreachable,"input":"hello"},cookie=a,expected=400)
 invalid=json.loads(json.dumps(flow));invalid["nodes"][1]["otherwise"]="missing"
 call("/api/bots/simulate","POST",{"flow":invalid,"input":"hello"},cookie=a,expected=400)
+memory_flow={"start":"s","nodes":[{"id":"s","type":"start","next":"w1","x":0,"y":0},{"id":"w1","type":"wait","text":"Name?","next":"capture","x":0,"y":0},{"id":"capture","type":"capture","variable":"name","next":"w2","x":0,"y":0},{"id":"w2","type":"wait","text":"Next?","next":"r","x":0,"y":0},{"id":"r","type":"reply","text":"Hello {{name}}","next":"e","x":0,"y":0},{"id":"e","type":"end","x":0,"y":0}]}
+memory_result=call("/api/bots/simulate","POST",{"flow":memory_flow,"inputs":["hi","Alice","yes"]},cookie=a)[0]
+assert memory_result["turns"][2]["replies"]==["Hello Alice"]
+assert call("/api/bots/simulate","POST",{"flow":memory_flow,"inputs":["hi","Bob","yes"]},cookie=b)[0]["turns"][2]["replies"]==["Hello Bob"]
+bad_memory=json.loads(json.dumps(memory_flow));bad_memory["nodes"][2]["variable"]="bad name"
+call("/api/bots/simulate","POST",{"flow":bad_memory,"input":"hi"},cookie=a,expected=400)
 call("/api/bots/simulate","POST",{"flow":flow,"input":"hello"},cookie=agent,expected=403)
 draft,_=call("/api/bots","POST",{"name":"CI draft","flow":flow,"version":0,"tenantId":"ci-tenant-b"},cookie=a,expected=201)
 botpath="/api/bots/"+draft["id"]
@@ -371,8 +377,9 @@ runs,_=call("/api/bots/runs",cookie=a)
 assert any(r["botVersion"]==2 and r["outcome"]=="queued" for r in runs)
 # Multi-turn state survives separate signed webhook deliveries and takes priority over legacy rules.
 multi={"start":"s","nodes":[{"id":"s","type":"start","next":"w","x":0,"y":0},
- {"id":"w","type":"wait","text":"Choose support or price","next":"c","x":180,"y":0},
- {"id":"c","type":"contains","text":"support","next":"h","otherwise":"r","x":360,"y":0},
+ {"id":"w","type":"wait","text":"Choose support or price","next":"capture","x":180,"y":0},
+ {"id":"capture","type":"capture","variable":"choice","next":"c","x":270,"y":0},
+ {"id":"c","type":"contains","text":"support","variable":"choice","next":"h","otherwise":"r","x":360,"y":0},
  {"id":"h","type":"handoff","x":540,"y":0},{"id":"r","type":"reply","text":"Price is 10","next":"e","x":540,"y":180},
  {"id":"e","type":"end","x":720,"y":180}]}
 multi_sim,_=call("/api/bots/simulate","POST",{"flow":multi,"inputs":["hi","support"]},cookie=a)
@@ -397,6 +404,8 @@ with sqlite3.connect(DB) as db:
 assert automate("wamid.ci.multi.4","hi")==("queued",1,None,"Choose support or price")
 assert automate("wamid.ci.multi.5","price")==("queued",1,None,"Price is 10")
 assert not call("/api/conversations",cookie=a)[0][0]["waitingForInput"]
+with sqlite3.connect(DB) as db:
+    assert all(x[0]=="{}" for x in db.execute("SELECT VariablesJson FROM ConversationAutomation WHERE TenantId='ci-tenant-a'"))
 # Simulate a scheduled, not-yet-claimed automation reply. The invalid test token
 # and future scheduled date ensure the worker never sends the synthetic message.
 import uuid
