@@ -69,23 +69,46 @@ public sealed class WhatsAppController : ControllerBase
     private static bool ValidMetaId(string? id) => id is { Length: >= 1 and <= 32 } && id.All(c => c is >= '0' and <= '9');
     private static bool ValidToken(string? token) => token is { Length: >= 1 and <= 4096 } && !token.Any(char.IsWhiteSpace);
 
-    // A successful phone lookup alone does not establish membership in the supplied WABA.
-    // Fail closed if the phone is not on the first returned page; never follow arbitrary paging URLs.
+    // Verify the exact phone membership in the WABA, including paginated results.
+    // Never follow Meta's paging URL: reconstruct the same relative Graph path with
+    // an escaped cursor. Bound requests and reject missing or repeated cursors.
     private async Task<bool> VerifyAccount(string phone, string waba, string token, CancellationToken ct)
     {
         if (!ValidMetaId(phone) || !ValidMetaId(waba) || !ValidToken(token)) return false;
         try
         {
             using var client = _httpFactory.CreateClient("whatsapp");
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{waba}/phone_numbers?fields=id&limit=100");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-            using var response = await client.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode) return false;
-            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
-            return json.RootElement.ValueKind == JsonValueKind.Object &&
-                json.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array
-                && data.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.Object &&
-                    x.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == phone);
+            var seenCursors = new HashSet<string>(StringComparer.Ordinal);
+            string? cursor = null;
+            const int maxPages = 10;
+            for (var page = 0; page < maxPages; page++)
+            {
+                var path = $"{waba}/phone_numbers?fields=id&limit=100";
+                if (cursor != null) path += "&after=" + Uri.EscapeDataString(cursor);
+                using var request = new HttpRequestMessage(HttpMethod.Get, path);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var response = await client.SendAsync(request, ct);
+                if (!response.IsSuccessStatusCode) return false;
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                var root = json.RootElement;
+                if (root.ValueKind != JsonValueKind.Object ||
+                    !root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                    return false;
+                if (data.EnumerateArray().Any(x => x.ValueKind == JsonValueKind.Object &&
+                    x.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetString() == phone))
+                    return true;
+                if (!root.TryGetProperty("paging", out var paging) || paging.ValueKind != JsonValueKind.Object ||
+                    !paging.TryGetProperty("next", out var next) || next.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(next.GetString()) ||
+                    !paging.TryGetProperty("cursors", out var cursors) || cursors.ValueKind != JsonValueKind.Object ||
+                    !cursors.TryGetProperty("after", out var after) || after.ValueKind != JsonValueKind.String)
+                    return false;
+                cursor = after.GetString();
+                if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > 4096 ||
+                    cursor.Any(char.IsControl) || !seenCursors.Add(cursor))
+                    return false;
+            }
+            return false;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or FormatException or TaskCanceledException)
         {
