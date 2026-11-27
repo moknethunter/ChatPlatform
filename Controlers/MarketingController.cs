@@ -33,6 +33,32 @@ public sealed class MarketingController(PlatformDbContext db,IConfiguration conf
         await Consent.SetAsync(db,tenant,req.PhoneNumberId!,req.Phone!,req.Granted.Value,req.Evidence.Trim(),User.Identity!.Name??"unknown",DateTime.UtcNow,ct);
         await db.SaveChangesAsync(ct);await tx.CommitAsync(ct);return NoContent();
     }
+    // Prepare a snapshot of a CRM segment. No consent, list or campaign is modified.
+    [HttpGet("segments/preview")]
+    public async Task<IActionResult> PreviewSegment(string phoneNumberId, string? stage, string? tag, CancellationToken ct)
+    {
+        var tenant = User.TenantId();
+        if (!WhatsAppMediaService.ValidId(phoneNumberId) ||
+            (!string.IsNullOrEmpty(stage) && stage is not ("new" or "lead" or "customer" or "inactive")) ||
+            (tag?.Length ?? 0) > 100)
+            return BadRequest(new { error = "invalid_segment" });
+        if (!await db.WhatsAppTenants.AnyAsync(a => a.TenantId == tenant && a.PhoneNumberId == phoneNumberId && a.IsActive, ct))
+            return NotFound();
+        var contacts = db.CrmContacts.AsNoTracking().Where(c => c.TenantId == tenant);
+        if (!string.IsNullOrEmpty(stage)) contacts = contacts.Where(c => c.Stage == stage);
+        tag = tag?.Trim();
+        if (!string.IsNullOrEmpty(tag)) contacts = contacts.Where(c => c.Tags.Contains(tag));
+        var total = await contacts.CountAsync(ct);
+        var eligible = contacts.Where(c => db.MarketingConsents.Any(m => m.TenantId == tenant &&
+            m.PhoneNumberId == phoneNumberId && m.Phone == c.Phone && m.Granted));
+        var eligibleCount = await eligible.CountAsync(ct);
+        var items = await eligible.OrderBy(c => c.Phone).Take(100)
+            .Select(c => new { c.Phone, c.DisplayName, c.Stage, c.Tags }).ToListAsync(ct);
+        Response.Headers["Cache-Control"] = "no-store";
+        return Ok(new { matched = total, eligible = eligibleCount, excluded = total - eligibleCount,
+            truncated = eligibleCount > items.Count, items });
+    }
+
     [HttpGet("lists")]
     public async Task<IActionResult> Lists(CancellationToken ct)
     {
