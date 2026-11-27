@@ -280,6 +280,20 @@ call("/api/contacts","POST",contact,cookie=a,expected=409)
 other,_=call("/api/contacts","POST",dict(contact,displayName="Other tenant"),cookie=b,expected=201)
 assert other["tenantId"]=="ci-tenant-b"
 assert call("/api/contacts/15550000001",cookie=a)[0]["displayName"]=="CI Lead"
+assert call("/api/contacts?search=ci@example.invalid",cookie=a)[0]["total"]==1
+activity_path="/api/contacts/15550000001/activity"
+call(activity_path,expected=401)
+call("/api/contacts/15550000002/activity",cookie=a,expected=404)
+activity,_=call(activity_path,cookie=a)
+assert activity["conversationCount"]==1 and activity["openConversationCount"]==1
+assert activity["conversations"][0]["id"]==match["id"]
+assert any(m["textPreview"]=="CI inbound message" for m in activity["recentMessages"])
+assert all("contentJson" not in m and "tenantId" not in m for m in activity["recentMessages"])
+assert any(x["phoneNumberId"]=="999999999999" and x["granted"] is None for x in activity["consent"])
+assert call(activity_path,cookie=managed_cookie)[0]["consent"] is None
+other_activity,_=call(activity_path,cookie=b)
+assert other_activity["conversationCount"]==0 and not other_activity["recentMessages"] and not other_activity["conversations"]
+assert not any(x["phoneNumberId"]=="999999999999" for x in other_activity["consent"])
 cid=match["id"]
 root="/api/conversations/"+cid
 call(root+"/assign","PUT",{"username":"ci-managed"},cookie=managed_cookie,expected=403)
